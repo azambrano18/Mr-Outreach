@@ -1,0 +1,985 @@
+// Prisma schema for the Outreach Platform web application.
+//
+// Phase 1: Organization, User, Role, Permission, UserRole, RolePermission
+// and AuditLog — the minimum needed for auth and multi-tenancy.
+// Phase 3: Mailbox (IMAP/SMTP configuration, encrypted secrets).
+// Phase 4: MailboxConnectionTest (history of simulated connection tests).
+// Template, Variable, Signature etc. land in their own later phases.
+//
+// Fase 1 — both migrations (20260714153849_init and
+// 20260722190000_operational_persistence_core) have now been applied for
+// real against the mr-outreach-test Neon branch via `prisma migrate
+// deploy`; see the root README's "Persistencia PostgreSQL" section for how
+// to point at a different branch (mr-outreach-dev/production) and for the
+// migrate/generate commands. `prisma generate` itself still needs no
+// reachable database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Only consulted by `prisma migrate`/`prisma db` commands, never by the
+  // running app's PrismaClient — lets DATABASE_URL stay a pooled (PgBouncer)
+  // connection string while migrations use a direct one. Optional: omitted
+  // entirely, `prisma generate` still needs no reachable database.
+  directUrl = env("DIRECT_URL")
+}
+
+model Organization {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  users               User[]
+  roles               Role[]
+  auditLogs           AuditLog[]
+  mailboxes           Mailbox[]
+  templates           Template[]
+  variables           Variable[]
+  signatures          Signature[]
+  sequences           Sequence[]
+  managedClients      ManagedClient[]
+  domains             Domain[]
+  integrationCommands IntegrationCommand[]
+  integrationEvents   IntegrationEvent[]
+  companies           Company[]
+  contacts            Contact[]
+  sequenceImports     SequenceImport[]
+  sequenceImportRows  SequenceImportRow[]
+  sequenceContacts    SequenceContact[]
+  scheduledEmails     ScheduledEmail[]
+
+  @@map("organizations")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model User {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  firstName          String
+  lastName           String
+  email              String
+  passwordHash       String
+  status             UserStatus @default(ACTIVE)
+  mustChangePassword Boolean    @default(false)
+  lastLoginAt        DateTime?
+  passwordChangedAt  DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  organization               Organization                @relation(fields: [organizationId], references: [id])
+  userRoles                  UserRole[]
+  mailboxAssignments         MailboxAssignment[]
+  sequences                  Sequence[]
+  clientExecutiveAssignments ClientExecutiveAssignment[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Role {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+model Permission {
+  key         String @id
+  description String
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId        String
+  permissionKey String
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionKey], references: [key])
+
+  @@id([roleId, permissionKey])
+  @@map("role_permissions")
+}
+
+enum MailboxAdminStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum MailboxConnectionStatus {
+  NOT_TESTED
+  TESTING
+  CONNECTED
+  PARTIALLY_CONNECTED
+  CONNECTION_ERROR
+  ENGINE_UNAVAILABLE
+}
+
+enum MailboxEncryption {
+  SSL_TLS
+  STARTTLS
+  NONE
+}
+
+model Mailbox {
+  id             String  @id @default(uuid())
+  organizationId String
+  // Both null while "Pendiente de clasificación" — never fabricated, see domain entity's own comment.
+  clientId       String?
+  domainId       String?
+  name           String
+  email          String
+  fromName       String
+  replyTo        String?
+
+  status           MailboxAdminStatus      @default(ACTIVE)
+  connectionStatus MailboxConnectionStatus @default(NOT_TESTED)
+  lastTestedAt     DateTime?
+  lastTestedBy     String?
+  lastTestMessage  String?
+
+  provisioningStatus     MailboxProvisioningStatus @default(NOT_PROVISIONED)
+  lastProvisionCommandId String?
+  timezone               String                    @default("America/Santiago")
+  dailyLimit             Int                       @default(40)
+  minimumIntervalSeconds Int                       @default(60)
+  maximumIntervalSeconds Int                       @default(180)
+
+  imapHost              String
+  imapPort              Int
+  imapEncryption        MailboxEncryption
+  imapUsername          String
+  imapVerifyCertificate Boolean           @default(true)
+  imapSecretCiphertext  String
+
+  smtpHost              String
+  smtpPort              Int
+  smtpEncryption        MailboxEncryption
+  smtpUsername          String
+  smtpVerifyCertificate Boolean           @default(true)
+  smtpSecretCiphertext  String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization    Organization            @relation(fields: [organizationId], references: [id])
+  client          ManagedClient?          @relation(fields: [clientId], references: [id])
+  domain          Domain?                 @relation(fields: [domainId], references: [id])
+  connectionTests MailboxConnectionTest[]
+  assignments     MailboxAssignment[]
+  signature       Signature?
+  sequences       Sequence[]
+  sequenceImports SequenceImport[]
+  scheduledEmails ScheduledEmail[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([domainId])
+  @@map("mailboxes")
+}
+
+enum MailboxProvisioningStatus {
+  NOT_PROVISIONED
+  PROVISION_REQUESTED
+  PROVISIONING
+  PROVISIONED
+  PROVISION_FAILED
+}
+
+enum MailboxAssignmentRole {
+  PRIMARY
+  SECONDARY
+}
+
+model MailboxAssignment {
+  id             String                @id @default(uuid())
+  organizationId String
+  mailboxId      String
+  userId         String
+  role           MailboxAssignmentRole
+  assignedBy     String
+  assignedAt     DateTime              @default(now())
+
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  // "Only one PRIMARY per mailbox" is enforced in MailboxesService, not
+  // here — see MailboxAssignmentRepository's class comment for why.
+  @@unique([mailboxId, userId])
+  @@index([organizationId])
+  @@index([mailboxId])
+  @@index([userId])
+  @@map("mailbox_assignments")
+}
+
+model MailboxConnectionTest {
+  id               String                  @id @default(uuid())
+  organizationId   String
+  mailboxId        String
+  status           MailboxConnectionStatus
+  imapSuccess      Boolean
+  imapErrorCode    String?
+  smtpSuccess      Boolean
+  smtpErrorCode    String?
+  message          String
+  technicalMessage String
+  executedBy       String
+  createdAt        DateTime                @default(now())
+
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id])
+
+  @@index([mailboxId])
+  @@index([organizationId])
+  @@map("mailbox_connection_tests")
+}
+
+enum TemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model Template {
+  id             String         @id @default(uuid())
+  organizationId String
+  name           String
+  subject        String
+  body           String
+  status         TemplateStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("templates")
+}
+
+enum VariableStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum VariableSource {
+  CONTACT
+  SENDER
+  CUSTOM
+}
+
+model Variable {
+  id             String         @id @default(uuid())
+  organizationId String
+  key            String
+  label          String
+  description    String?
+  source         VariableSource
+  status         VariableStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+  @@map("variables")
+}
+
+enum SignatureStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model Signature {
+  id              String          @id @default(uuid())
+  organizationId  String
+  mailboxId       String          @unique
+  status          SignatureStatus @default(ACTIVE)
+  activeVersionId String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  mailbox      Mailbox            @relation(fields: [mailboxId], references: [id])
+  versions     SignatureVersion[]
+
+  @@index([organizationId])
+  @@map("signatures")
+}
+
+model SignatureVersion {
+  id               String   @id @default(uuid())
+  signatureId      String
+  versionNumber    Int
+  htmlContent      String
+  plainTextContent String
+  createdAt        DateTime @default(now())
+  createdBy        String
+
+  signature Signature @relation(fields: [signatureId], references: [id])
+
+  @@unique([signatureId, versionNumber])
+  @@index([signatureId])
+  @@map("signature_versions")
+}
+
+enum SequenceStatus {
+  DRAFT
+  PAUSED
+  ARCHIVED
+}
+
+model Sequence {
+  id             String         @id @default(uuid())
+  organizationId String
+  executiveId    String
+  mailboxId      String?
+  name           String
+  description    String?
+  status         SequenceStatus @default(DRAFT)
+  timezone       String
+  createdBy      String
+  updatedBy      String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  executive        User              @relation(fields: [executiveId], references: [id])
+  mailbox          Mailbox?          @relation(fields: [mailboxId], references: [id])
+  steps            SequenceStep[]
+  sequenceImports  SequenceImport[]
+  sequenceContacts SequenceContact[]
+  scheduledEmails  ScheduledEmail[]
+
+  @@index([organizationId])
+  @@index([executiveId])
+  @@map("sequences")
+}
+
+enum DelayUnit {
+  MINUTES
+  HOURS
+  DAYS
+  BUSINESS_DAYS
+}
+
+enum StepSendMode {
+  NEW_THREAD
+  REPLY
+}
+
+enum SequenceStepStatus {
+  DRAFT
+  PUBLISHED
+  DISABLED
+  ARCHIVED
+}
+
+model SequenceStep {
+  id             String             @id @default(uuid())
+  organizationId String
+  sequenceId     String
+  position       Int
+  name           String
+  subject        String
+  preheader      String?
+  htmlHeader     String?
+  htmlBody       String
+  plainTextBody  String
+  delayValue     Int
+  delayUnit      DelayUnit
+  sendMode       StepSendMode
+  status         SequenceStepStatus @default(DRAFT)
+  createdBy      String
+  updatedBy      String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deletedAt      DateTime?
+
+  sequence        Sequence              @relation(fields: [sequenceId], references: [id])
+  versions        SequenceStepVersion[]
+  scheduledEmails ScheduledEmail[]
+
+  @@index([organizationId])
+  @@index([sequenceId])
+  @@map("sequence_steps")
+}
+
+model SequenceStepVersion {
+  id             String       @id @default(uuid())
+  sequenceStepId String
+  versionNumber  Int
+  subject        String
+  preheader      String?
+  htmlHeader     String?
+  htmlBody       String
+  plainTextBody  String
+  delayValue     Int
+  delayUnit      DelayUnit
+  sendMode       StepSendMode
+  createdAt      DateTime     @default(now())
+  createdBy      String
+
+  sequenceStep SequenceStep @relation(fields: [sequenceStepId], references: [id])
+
+  @@unique([sequenceStepId, versionNumber])
+  @@index([sequenceStepId])
+  @@map("sequence_step_versions")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("audit_logs")
+}
+
+enum ManagedClientStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// The customer whose outbound campaigns are operated from Mr Outreach —
+// linked to the external Neon CRM's master row via crmClientId (see
+// domain/crm-client/). Mr Outreach never writes back to maestro_clientes;
+// this table only holds Mr Outreach's own operational configuration.
+model ManagedClient {
+  id                 String              @id @default(uuid())
+  organizationId     String
+  crmClientId        Int
+  /// Fase 1.5 — snapshot local del nombre corporativo (maestro_clientes.empresa). Ya no editable a mano; lo escribe el upsert.
+  name               String
+  legalName          String?
+  internalCode       String?
+  /// Fase 1.5 — snapshot local del rubro corporativo (maestro_clientes.rubro). Ya no editable a mano; lo escribe el upsert.
+  industry           String?
+  status             ManagedClientStatus @default(ACTIVE)
+  logoUrl            String?
+  startDate          DateTime?
+  supervisorUserId   String?
+  notes              String?
+  /// Fase 1.5 — último RUT conocido del CRM (maestro_clientes.rut). Nuevo, aditivo.
+  crmRutSnapshot     String?
+  /// Fase 1.5 — último status normalizado conocido del CRM (TRIM+UPPER de maestro_clientes.status). Distinto de `status` (operativo de Mr Outreach).
+  crmStatusSnapshot  String?
+  /// Fase 1.5 — fecha/hora de la última verificación exitosa contra el CRM. Nunca se usa para autorizar operaciones nuevas cuando el CRM no responde.
+  crmStatusCheckedAt DateTime?
+  createdBy          String
+  updatedBy          String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
+
+  organization               Organization                @relation(fields: [organizationId], references: [id])
+  domains                    Domain[]
+  mailboxes                  Mailbox[]
+  clientExecutiveAssignments ClientExecutiveAssignment[]
+  companies                  Company[]
+  contacts                   Contact[]
+  sequenceImports            SequenceImport[]
+
+  @@unique([organizationId, crmClientId])
+  @@index([organizationId])
+  @@map("managed_clients")
+}
+
+enum DomainStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+model Domain {
+  id             String       @id @default(uuid())
+  organizationId String
+  clientId       String
+  domainName     String
+  status         DomainStatus @default(ACTIVE)
+  notes          String?
+  createdBy      String
+  updatedBy      String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  client       ManagedClient @relation(fields: [clientId], references: [id])
+  mailboxes    Mailbox[]
+
+  @@unique([organizationId, domainName])
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("domains")
+}
+
+enum ClientAssignmentRole {
+  PRIMARY
+  SECONDARY
+}
+
+// Visibility onto a CLIENT (can see it in "Mis clientes") — deliberately
+// separate from MailboxAssignment (operate a specific mailbox); assigning
+// a client never implies mailbox access, see README > client-hierarchy pivot.
+model ClientExecutiveAssignment {
+  id             String               @id @default(uuid())
+  organizationId String
+  clientId       String
+  userId         String
+  role           ClientAssignmentRole
+  assignedBy     String
+  assignedAt     DateTime             @default(now())
+
+  client ManagedClient @relation(fields: [clientId], references: [id])
+  user   User          @relation(fields: [userId], references: [id])
+
+  @@unique([clientId, userId])
+  @@index([organizationId])
+  @@map("client_executive_assignments")
+}
+
+// Fase 1 — durable persistence for the simulated-engine integration layer
+// (Outbox/Inbox, §44-46) and the import/company/contact/scheduling model it
+// drives. Mirrors apps/api/src/domain/integration|company|contact|
+// sequence-import|sequence-contact|scheduled-email exactly — see each
+// domain entity's own comments for the "why" behind individual fields.
+// commandType/eventType stay String (not enum), same call as
+// AuditLog.action: an open, versioned catalog that will keep growing once a
+// real engine lands, without forcing a migration per new type.
+
+enum IntegrationCommandStatus {
+  REQUESTED
+  ACCEPTED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  TIMEOUT
+}
+
+enum IntegrationAggregateType {
+  MAILBOX
+  SEQUENCE
+  SEQUENCE_IMPORT
+  SEQUENCE_CONTACT
+  SEQUENCE_COMPANY
+}
+
+model IntegrationCommand {
+  id             String                   @id @default(uuid())
+  organizationId String
+  commandId      String                   @unique
+  commandType    String
+  aggregateType  IntegrationAggregateType
+  aggregateId    String
+  schemaVersion  String
+  idempotencyKey String
+  correlationId  String
+  payload        Json
+  status         IntegrationCommandStatus @default(REQUESTED)
+  attemptCount   Int                      @default(0)
+  nextAttemptAt  DateTime?
+  lastError      String?
+  requestedBy    String
+  createdAt      DateTime                 @default(now())
+  sentAt         DateTime?
+  acceptedAt     DateTime?
+  completedAt    DateTime?
+
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  events       IntegrationEvent[]
+
+  // §43/§44 — one logical command per organization; the app-level dedupe in
+  // IntegrationService.submit() checks this before ever calling create(), so
+  // this constraint is the last-resort guard against a genuine race, not the
+  // primary mechanism.
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, aggregateType, aggregateId])
+  @@index([correlationId])
+  @@map("integration_commands")
+}
+
+enum IntegrationEventProcessingStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+enum IntegrationEventOrigin {
+  SIMULATED
+  REMOTE
+}
+
+model IntegrationEvent {
+  id              String                           @id @default(uuid())
+  organizationId  String
+  eventId         String
+  eventType       String
+  commandId       String?
+  correlationId   String
+  schemaVersion   String
+  payload         Json
+  status          IntegrationEventProcessingStatus @default(RECEIVED)
+  origin          IntegrationEventOrigin
+  receivedAt      DateTime                         @default(now())
+  processedAt     DateTime?
+  processingError String?
+
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  command      IntegrationCommand? @relation(fields: [commandId], references: [commandId])
+
+  // §45 — "event_id + origen" is the dedupe key for externally-sourced events.
+  @@unique([organizationId, eventId, origin])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([commandId])
+  @@index([correlationId])
+  @@map("integration_events")
+}
+
+model Company {
+  id               String    @id @default(uuid())
+  organizationId   String
+  clientId         String
+  rawName          String
+  normalizedName   String
+  suppressed       Boolean   @default(false)
+  suppressedAt     DateTime?
+  suppressedReason String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  client           ManagedClient     @relation(fields: [clientId], references: [id])
+  contacts         Contact[]
+  sequenceContacts SequenceContact[]
+  scheduledEmails  ScheduledEmail[]
+
+  // Uniqueness is conditional on "not soft-deleted" — Prisma has no
+  // declarative partial-unique-index syntax, so this is added as raw SQL in
+  // the migration (see migration.sql's trailing CREATE UNIQUE INDEX).
+  @@index([organizationId])
+  @@index([organizationId, clientId])
+  @@map("companies")
+}
+
+model Contact {
+  id               String    @id @default(uuid())
+  organizationId   String
+  clientId         String
+  companyId        String?
+  email            String
+  firstName        String?
+  lastName         String?
+  fullName         String?
+  jobTitle         String?
+  phone            String?
+  city             String?
+  country          String?
+  website          String?
+  linkedin         String?
+  customFields     Json      @default("{}")
+  suppressed       Boolean   @default(false)
+  suppressedAt     DateTime?
+  suppressedReason String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  organization     Organization        @relation(fields: [organizationId], references: [id])
+  client           ManagedClient       @relation(fields: [clientId], references: [id])
+  company          Company?            @relation(fields: [companyId], references: [id])
+  sequenceContacts SequenceContact[]
+  scheduledEmails  ScheduledEmail[]
+  importRows       SequenceImportRow[]
+
+  // Email uniqueness is case-insensitive AND conditional on "not
+  // soft-deleted" — same raw-SQL-in-migration treatment as Company above.
+  @@index([organizationId])
+  @@index([organizationId, clientId])
+  @@index([companyId])
+  @@map("contacts")
+}
+
+enum SequenceImportStatus {
+  UPLOADED
+  MAPPING_REQUIRED
+  VALIDATING
+  READY
+  SUBMITTED
+  ACCEPTED
+  PROCESSING
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SequenceImportScenario {
+  ALL_ACCEPTED
+  WITH_DUPLICATES
+  WITH_INVALID
+  WITH_EXCLUDED
+  PARTIALLY_COMPLETED
+  FAILED
+  TIMEOUT
+}
+
+model SequenceImport {
+  id                String                  @id @default(uuid())
+  organizationId    String
+  clientId          String
+  sequenceId        String
+  executiveId       String
+  mailboxId         String
+  status            SequenceImportStatus    @default(UPLOADED)
+  fileName          String
+  storageKey        String
+  checksum          String
+  columnMapping     Json?
+  scenario          SequenceImportScenario?
+  totalRows         Int                     @default(0)
+  validRows         Int                     @default(0)
+  invalidRows       Int                     @default(0)
+  duplicateRows     Int                     @default(0)
+  excludedRows      Int                     @default(0)
+  companiesDetected Int                     @default(0)
+  contactsAccepted  Int                     @default(0)
+  contactsRejected  Int                     @default(0)
+  rejections        Json                    @default("[]")
+  commandId         String?
+  lastError         String?
+  createdBy         String
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  organization     Organization        @relation(fields: [organizationId], references: [id])
+  client           ManagedClient       @relation(fields: [clientId], references: [id])
+  sequence         Sequence            @relation(fields: [sequenceId], references: [id])
+  mailbox          Mailbox             @relation(fields: [mailboxId], references: [id])
+  rows             SequenceImportRow[]
+  sequenceContacts SequenceContact[]
+
+  @@index([organizationId])
+  @@index([organizationId, sequenceId])
+  @@index([organizationId, status])
+  @@map("sequence_imports")
+}
+
+enum SequenceImportRowValidationStatus {
+  VALID
+  INVALID
+  DUPLICATE
+  EXCLUDED
+}
+
+// New — did not exist even in memory before Fase 1 (SequenceImportsService
+// used to keep parsed/accepted rows in its own process-local Map, see the
+// class comment it used to carry). rawData/normalizedData are JSONB so
+// arbitrary mapped columns (including custom variables) survive a restart.
+model SequenceImportRow {
+  id               String                            @id @default(uuid())
+  organizationId   String
+  importId         String
+  rowNumber        Int
+  rawData          Json
+  normalizedData   Json?
+  companyRawName   String?
+  email            String?
+  validationStatus SequenceImportRowValidationStatus
+  validationErrors Json                              @default("[]")
+  isDuplicate      Boolean                           @default(false)
+  rejectionReason  String?
+  contactId        String?
+  createdAt        DateTime                          @default(now())
+  updatedAt        DateTime                          @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id])
+  import       SequenceImport @relation(fields: [importId], references: [id])
+  contact      Contact?       @relation(fields: [contactId], references: [id])
+
+  @@unique([importId, rowNumber])
+  @@index([organizationId])
+  @@index([importId])
+  @@index([importId, validationStatus])
+  @@map("sequence_import_rows")
+}
+
+enum SequenceContactStatus {
+  PENDING
+  ACTIVE
+  SCHEDULED
+  REPLIED
+  BOUNCED
+  UNSUBSCRIBED
+  COMPLETED
+  COMPLETED_MANUALLY
+  PAUSED
+  REMOVED
+  ERROR
+}
+
+model SequenceContact {
+  id                  String                @id @default(uuid())
+  organizationId      String
+  clientId            String
+  sequenceId          String
+  sequenceVersion     Int
+  contactId           String
+  companyId           String?
+  // Fase 1 — minimal, justified port extension (see CreateSequenceContactInput):
+  // traceability back to the import that enrolled this contact, when there was one.
+  sourceImportId      String?
+  assignedMailboxId   String
+  assignedExecutiveId String
+  currentStepId       String?
+  currentStepPosition Int?
+  status              SequenceContactStatus @default(ACTIVE)
+  nextScheduledAt     DateTime?
+  startedAt           DateTime              @default(now())
+  lastSentAt          DateTime?
+  repliedAt           DateTime?
+  completedAt         DateTime?
+  stoppedAt           DateTime?
+  stopReason          String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  sequence        Sequence         @relation(fields: [sequenceId], references: [id])
+  contact         Contact          @relation(fields: [contactId], references: [id])
+  company         Company?         @relation(fields: [companyId], references: [id])
+  sourceImport    SequenceImport?  @relation(fields: [sourceImportId], references: [id])
+  scheduledEmails ScheduledEmail[]
+
+  // §26 — prevents the same contact from being accidentally enrolled twice
+  // in the same sequence (the in-memory adapter already enforces this via
+  // findByContactAndSequence before create(); this is the DB-level guarantee).
+  @@unique([sequenceId, contactId])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, sequenceId])
+  @@index([contactId])
+  @@map("sequence_contacts")
+}
+
+enum ScheduledEmailStatus {
+  PENDING
+  SCHEDULED
+  QUEUED
+  SENDING
+  SENT
+  RETRY_SCHEDULED
+  FAILED
+  CANCELLED
+}
+
+enum ScheduledEmailPriority {
+  FOLLOW_UP
+  NEW_CONTACT
+}
+
+model ScheduledEmail {
+  id                    String                 @id @default(uuid())
+  organizationId        String
+  sequenceId            String
+  sequenceVersion       Int
+  sequenceContactId     String
+  contactId             String
+  companyId             String?
+  sequenceStepId        String
+  stepVersion           Int
+  mailboxId             String
+  batchId               String
+  scheduledAt           DateTime
+  status                ScheduledEmailStatus   @default(PENDING)
+  priority              ScheduledEmailPriority
+  attemptCount          Int                    @default(0)
+  idempotencyKey        String
+  lastError             String?
+  cancelledAt           DateTime?
+  cancellationReason    String?
+  sentAt                DateTime?
+  subjectSnapshot       String?
+  htmlBodySnapshot      String?
+  plainTextBodySnapshot String?
+  signatureSnapshot     String?
+  messageIdHeader       String?
+  inReplyTo             String?
+  referencesHeader      String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id])
+  sequence        Sequence        @relation(fields: [sequenceId], references: [id])
+  sequenceContact SequenceContact @relation(fields: [sequenceContactId], references: [id])
+  contact         Contact         @relation(fields: [contactId], references: [id])
+  company         Company?        @relation(fields: [companyId], references: [id])
+  sequenceStep    SequenceStep    @relation(fields: [sequenceStepId], references: [id])
+  mailbox         Mailbox         @relation(fields: [mailboxId], references: [id])
+
+  // §25 — sequenceContactId+sequenceStepId+stepVersion uniqueness is
+  // enforced by the repository's create() (see the domain entity's own
+  // comment on why it's not a DB constraint); idempotencyKey is already
+  // derived from those three values, so this constraint gives the same
+  // protection at the DB level as a defensive last resort.
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, scheduledAt])
+  @@index([organizationId, sequenceId])
+  @@index([sequenceContactId])
+  @@index([mailboxId])
+  @@index([batchId])
+  @@map("scheduled_emails")
+}

@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    // "node" (moduleResolution) and "baseUrl" are deprecated as of TS 5.x and will stop working in
+    // TS 7.0 — silenced rather than migrated to "node16"/"nodenext", since that would require adding
+    // explicit file extensions to every relative import across this CommonJS backend, for no runtime
+    // benefit today. Revisit when upgrading past the currently-installed TS 5.9.
+    "ignoreDeprecations": "5.0",
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "declaration": false,
+    "removeComments": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
+  }
+}

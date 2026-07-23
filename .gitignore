@@ -1,0 +1,81 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# builds
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+
+# env — real per-environment files are NEVER committed; only "*.example"
+# templates are versioned. ".env.test" is a deliberate exception (see its
+# own header comment) — it holds no real secrets, only fixed fixture
+# values the test suite needs deterministically, so it stays versioned.
+.env
+.env.local
+.env.*.local
+.env.development
+.env.staging
+.env.production
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# testing / coverage
+coverage/
+.nyc_output/
+
+# Playwright (ad-hoc smoke scripts run outside the repo's scratchpad, but
+# ignore their default output dirs in case one ever runs from here)
+test-results/
+playwright-report/
+playwright/.cache/
+
+# eslint cache (Next.js's own cache/ is already covered by ".next/" above)
+.eslintcache
+
+# Runtime-written image uploads (LocalImageStorageAdapter, STORAGE_DRIVER=local).
+# Path-specific on purpose — do NOT use a bare "uploads/" here: it would also
+# match the real source folders apps/api/src/modules/uploads and
+# apps/web/app/api/uploads.
+apps/api/uploads/
+
+# prisma
+prisma/dev.db
+prisma/dev.db-journal
+
+# OS — macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# OS — Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# editors / IDEs
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# misc temp files
+*.tmp
+*.temp
+.cache/

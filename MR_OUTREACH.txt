@@ -1,0 +1,17 @@
+Administrador:  admin@local.test / dev-local-only-admin-pw
+Ejecutivo:      ejecutivo@local.test / dev-local-only-executive-pw
+
+encender: npm run dev
+
+Frontend:  http://localhost:3000
+Backend:   http://localhost:3001
+Swagger:   http://localhost:3001/docs      (no /api/docs — esa es la ruta real configurada)
+Health:    http://localhost:3001/health/live
+           http://localhost:3001/health/ready
+
+
+- Workflow / plantilla predeterminada con programación entre envios
+- sacar contactos del workflow 
+- la carga de la base parte en el nodo 1 y activa el workflow
+- panel de notificación donde se etiquete los mensajes según su respuestas.
+- tener cliente + cuentas / dominios.

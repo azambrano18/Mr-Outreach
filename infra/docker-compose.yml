@@ -1,0 +1,10 @@
+name: outreach-platform
+
+# PostgreSQL is NOT run locally: the database is remote (Hetzner-hosted),
+# reachable via DATABASE_URL over a private network/VPN/tunnel. There is no
+# Postgres service here and none should be added back as part of the
+# official flow — see README > "Base de datos remota".
+#
+# This file is reserved for containerizing the apps themselves (api, web)
+# once that is needed; no services are defined yet.
+services: {}

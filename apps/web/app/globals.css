@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Minimal reset for signature/step HTML content — Tailwind's Preflight
+   strips default browser styling for lists, bold, links, etc., which
+   would otherwise make Tiptap's editor output and the sanitized preview
+   render as unstyled plain text. */
+.prose-signature {
+  line-height: 1.5;
+}
+.prose-signature p {
+  margin: 0 0 0.5em;
+}
+.prose-signature p:last-child {
+  margin-bottom: 0;
+}
+.prose-signature strong {
+  font-weight: 700;
+}
+.prose-signature em {
+  font-style: italic;
+}
+.prose-signature u {
+  text-decoration: underline;
+}
+.prose-signature s {
+  text-decoration: line-through;
+}
+.prose-signature a {
+  color: #722fa8;
+  text-decoration: underline;
+}
+.prose-signature ul {
+  list-style: disc;
+  padding-left: 1.5em;
+  margin: 0 0 0.5em;
+}
+.prose-signature ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+  margin: 0 0 0.5em;
+}
+.prose-signature hr {
+  border: none;
+  border-top: 1px solid #cbd5e1;
+  margin: 0.75em 0;
+}
+.prose-signature img {
+  max-width: 100%;
+  height: auto;
+}
+.prose-signature table {
+  border-collapse: collapse;
+}
+.prose-signature td {
+  border: 1px solid #cbd5e1;
+  padding: 0.25em 0.5em;
+}
+.prose-signature .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: #94a3b8;
+  pointer-events: none;
+}
