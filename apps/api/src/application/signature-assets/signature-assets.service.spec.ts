@@ -1,5 +1,7 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
+import { SequenceTemplateRepository } from '../../domain/sequence-template/sequence-template.repository';
 import { SignatureAssetRepository } from '../../domain/signature-asset/signature-asset.repository';
 import { SignatureAssetStoragePort } from '../../domain/signature-asset-storage/signature-asset-storage.port';
 import { SignatureAssetsService } from './signature-assets.service';
@@ -21,9 +23,11 @@ function webpBuffer(): Buffer {
 }
 
 describe('SignatureAssetsService — Fase Firma', () => {
-  let assets: jest.Mocked<Pick<SignatureAssetRepository, 'create' | 'findByOrganization' | 'update'>>;
-  let storage: jest.Mocked<Pick<SignatureAssetStoragePort, 'uploadImage'>>;
+  let assets: jest.Mocked<Pick<SignatureAssetRepository, 'create' | 'findByOrganization' | 'update' | 'findById'>>;
+  let storage: jest.Mocked<Pick<SignatureAssetStoragePort, 'uploadImage' | 'deleteUnreferencedImage'>>;
   let audit: jest.Mocked<Pick<AuditLogRepository, 'record'>>;
+  let templates: jest.Mocked<Pick<SequenceTemplateRepository, 'findByOwner'>>;
+  let templateVersions: jest.Mocked<Pick<SequenceTemplateVersionRepository, 'findByTemplate'>>;
   let service: SignatureAssetsService;
 
   const orgId = 'org_1';
@@ -34,18 +38,24 @@ describe('SignatureAssetsService — Fase Firma', () => {
       create: jest.fn().mockImplementation(async (input) => ({ ...input, status: 'AVAILABLE', createdAt: new Date(), deletedAt: null })),
       findByOrganization: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
+      findById: jest.fn(),
     };
     storage = {
       uploadImage: jest.fn().mockImplementation(async (input) => ({
         objectKey: `signatures/${input.organizationId}/${input.ownerUserId}/${input.assetId}.${input.extension}`,
         publicUrl: `https://assets.mejoreferido.com/signatures/${input.organizationId}/${input.ownerUserId}/${input.assetId}.${input.extension}`,
       })),
+      deleteUnreferencedImage: jest.fn(),
     };
     audit = { record: jest.fn() };
+    templates = { findByOwner: jest.fn().mockResolvedValue([]) };
+    templateVersions = { findByTemplate: jest.fn().mockResolvedValue([]) };
     service = new SignatureAssetsService(
       assets as unknown as SignatureAssetRepository,
       storage as unknown as SignatureAssetStoragePort,
       audit as unknown as AuditLogRepository,
+      templates as unknown as SequenceTemplateRepository,
+      templateVersions as unknown as SequenceTemplateVersionRepository,
     );
   });
 
@@ -126,6 +136,70 @@ describe('SignatureAssetsService — Fase Firma', () => {
     );
     const metadata = audit.record.mock.calls[0][0].metadata;
     expect(JSON.stringify(metadata)).not.toMatch(/base64|R2_SECRET|accessKey/i);
+  });
+
+  describe('deleteUnreferencedImage — §10', () => {
+    const existingAsset = {
+      id: 'asset_1',
+      organizationId: orgId,
+      ownerUserId: userId,
+      objectKey: `signatures/${orgId}/${userId}/asset_1.png`,
+      publicUrl: `https://assets.mejoreferido.com/signatures/${orgId}/${userId}/asset_1.png`,
+      contentType: 'image/png',
+      originalFileName: 'logo.png',
+      sizeBytes: 100,
+      width: 50,
+      height: 50,
+      sha256: 'abc',
+      status: 'AVAILABLE',
+      createdAt: new Date(),
+      deletedAt: null,
+    };
+
+    it('404s for an asset that does not exist or belongs to another organization', async () => {
+      assets.findById.mockResolvedValue(null);
+      await expect(service.deleteUnreferencedImage(orgId, userId, 'ghost')).rejects.toBeInstanceOf(NotFoundException);
+
+      assets.findById.mockResolvedValue({ ...existingAsset, organizationId: 'other_org' } as any);
+      await expect(service.deleteUnreferencedImage(orgId, userId, 'asset_1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('is idempotent for an already-DELETED asset — never calls the storage port again', async () => {
+      assets.findById.mockResolvedValue({ ...existingAsset, status: 'DELETED' } as any);
+      await service.deleteUnreferencedImage(orgId, userId, 'asset_1');
+      expect(storage.deleteUnreferencedImage).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting an asset still referenced by a template\'s current draft signatureHtml', async () => {
+      assets.findById.mockResolvedValue(existingAsset as any);
+      templates.findByOwner.mockResolvedValue([
+        { id: 'tpl_1', signatureHtml: `<img src="${existingAsset.publicUrl}">` } as any,
+      ]);
+      await expect(service.deleteUnreferencedImage(orgId, userId, 'asset_1')).rejects.toBeInstanceOf(ConflictException);
+      expect(storage.deleteUnreferencedImage).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting an asset still referenced by an already-published version — a published version must never lose its image', async () => {
+      assets.findById.mockResolvedValue(existingAsset as any);
+      templates.findByOwner.mockResolvedValue([{ id: 'tpl_1', signatureHtml: '<p>Sin imagen</p>' } as any]);
+      templateVersions.findByTemplate.mockResolvedValue([
+        { id: 'v1', signatureHtml: `<img src="${existingAsset.publicUrl}">` } as any,
+      ]);
+      await expect(service.deleteUnreferencedImage(orgId, userId, 'asset_1')).rejects.toBeInstanceOf(ConflictException);
+      expect(storage.deleteUnreferencedImage).not.toHaveBeenCalled();
+    });
+
+    it('deletes the object and marks the row DELETED when truly unreferenced', async () => {
+      assets.findById.mockResolvedValue(existingAsset as any);
+      templates.findByOwner.mockResolvedValue([{ id: 'tpl_1', signatureHtml: '<p>Sin imagen</p>' } as any]);
+      templateVersions.findByTemplate.mockResolvedValue([{ id: 'v1', signatureHtml: '<p>Otra firma</p>' } as any]);
+
+      await service.deleteUnreferencedImage(orgId, userId, 'asset_1');
+
+      expect(storage.deleteUnreferencedImage).toHaveBeenCalledWith(existingAsset.objectKey);
+      expect(assets.update).toHaveBeenCalledWith('asset_1', expect.objectContaining({ status: 'DELETED', deletedAt: expect.any(Date) }));
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'signature_asset.delete', entityId: 'asset_1' }));
+    });
   });
 
   describe('markStaleAvailableAssetsOrphaned — §13', () => {

@@ -17,6 +17,7 @@
     "test:crm-integration": "cross-env NODE_ENV=test CRM_DRIVER=postgres ALLOW_REAL_CRM_IN_TESTS=true jest --testPathPattern=\"\\.crm-integration\\.spec\\.ts$\""
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1098.0",
     "@nestjs/common": "^10.4.4",
     "@nestjs/config": "^3.3.0",
     "@nestjs/core": "^10.4.4",

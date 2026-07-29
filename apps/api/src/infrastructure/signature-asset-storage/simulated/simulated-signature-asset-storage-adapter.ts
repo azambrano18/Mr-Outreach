@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { mkdir, unlink, writeFile, access } from 'node:fs/promises';
+import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AppConfigService } from '../../config/app-config.service';
 import {
+  SignatureAssetHeadResult,
   SignatureAssetStoragePort,
   UploadedSignatureAsset,
   UploadSignatureAssetInput,
@@ -24,7 +25,7 @@ export class SimulatedSignatureAssetStorageAdapter implements SignatureAssetStor
   constructor(private readonly config: AppConfigService) {}
 
   async uploadImage(input: UploadSignatureAssetInput): Promise<UploadedSignatureAsset> {
-    const objectKey = `signatures/${input.organizationId}/${input.ownerUserId}/${input.assetId}.${input.extension}`;
+    const objectKey = `${this.config.r2SignaturePrefix}/${input.organizationId}/${input.ownerUserId}/${input.assetId}.${input.extension}`;
     const filePath = join(this.uploadsRoot, objectKey);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, input.buffer);
@@ -32,16 +33,21 @@ export class SimulatedSignatureAssetStorageAdapter implements SignatureAssetStor
   }
 
   getPublicUrl(objectKey: string): string {
-    return `${this.config.apiPublicUrl}/uploads/${objectKey}`;
+    const base = this.config.apiPublicUrl.replace(/\/+$/, '');
+    const key = objectKey.replace(/^\/+/, '');
+    return `${base}/uploads/${key}`;
   }
 
   async deleteUnreferencedImage(objectKey: string): Promise<void> {
     await unlink(join(this.uploadsRoot, objectKey)).catch(() => undefined);
   }
 
-  async validateAssetExistence(objectKey: string): Promise<boolean> {
-    return access(join(this.uploadsRoot, objectKey))
-      .then(() => true)
-      .catch(() => false);
+  async validateAssetExistence(objectKey: string): Promise<SignatureAssetHeadResult> {
+    try {
+      const info = await stat(join(this.uploadsRoot, objectKey));
+      return { exists: true, sizeBytes: info.size, lastModified: info.mtime.toISOString() };
+    } catch {
+      return { exists: false };
+    }
   }
 }

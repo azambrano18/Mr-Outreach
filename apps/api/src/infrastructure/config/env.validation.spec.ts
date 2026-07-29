@@ -148,7 +148,20 @@ describe('envValidationSchema', () => {
     expect(error?.message).toMatch(/R2_BUCKET_NAME/);
   });
 
-  it('Fase Firma — accepts SIGNATURE_ASSET_STORAGE_MODE=r2 once every R2_* variable is set', () => {
+  it('Fase Firma — accepts SIGNATURE_ASSET_STORAGE_MODE=r2 once every R2_* variable (including a custom HTTPS public base URL) is set', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      SIGNATURE_ASSET_STORAGE_MODE: 'r2',
+      R2_ACCOUNT_ID: 'acct_123',
+      R2_ACCESS_KEY_ID: 'key_123',
+      R2_SECRET_ACCESS_KEY: 'secret_123',
+      R2_BUCKET_NAME: 'mr-outreach-assets',
+      R2_PUBLIC_BASE_URL: 'https://assets.mejoreferido.com',
+    });
+    expect(error).toBeUndefined();
+  });
+
+  it('Fase Firma — rejects SIGNATURE_ASSET_STORAGE_MODE=r2 missing R2_PUBLIC_BASE_URL (the default is not trusted blindly in production)', () => {
     const { error } = envValidationSchema.validate({
       ...BASE_MEMORY_ENV,
       SIGNATURE_ASSET_STORAGE_MODE: 'r2',
@@ -157,12 +170,47 @@ describe('envValidationSchema', () => {
       R2_SECRET_ACCESS_KEY: 'secret_123',
       R2_BUCKET_NAME: 'mr-outreach-assets',
     });
-    expect(error).toBeUndefined();
+    expect(error?.message).toMatch(/R2_PUBLIC_BASE_URL/);
   });
 
   it('Fase Firma — rejects an unknown SIGNATURE_ASSET_STORAGE_MODE value', () => {
     const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, SIGNATURE_ASSET_STORAGE_MODE: 'gcs' });
     expect(error?.message).toMatch(/SIGNATURE_ASSET_STORAGE_MODE/);
+  });
+
+  const R2_MODE_ENV = {
+    ...BASE_MEMORY_ENV,
+    SIGNATURE_ASSET_STORAGE_MODE: 'r2',
+    R2_ACCOUNT_ID: 'acct_123',
+    R2_ACCESS_KEY_ID: 'key_123',
+    R2_SECRET_ACCESS_KEY: 'secret_123',
+    R2_BUCKET_NAME: 'mr-outreach-assets',
+  };
+
+  it('Fase Firma — accepts SIGNATURE_ASSET_STORAGE_MODE=r2 with a valid custom HTTPS domain', () => {
+    const { error } = envValidationSchema.validate({ ...R2_MODE_ENV, R2_PUBLIC_BASE_URL: 'https://assets.mejoreferido.com' });
+    expect(error).toBeUndefined();
+  });
+
+  it('Fase Firma — rejects R2_PUBLIC_BASE_URL over plain HTTP in r2 mode', () => {
+    const { error } = envValidationSchema.validate({ ...R2_MODE_ENV, R2_PUBLIC_BASE_URL: 'http://assets.mejoreferido.com' });
+    expect(error?.message).toMatch(/R2_PUBLIC_BASE_URL/);
+  });
+
+  it('Fase Firma — rejects the Cloudflare-issued r2.dev fallback domain in r2 mode', () => {
+    const { error } = envValidationSchema.validate({ ...R2_MODE_ENV, R2_PUBLIC_BASE_URL: 'https://pub-abc123.r2.dev' });
+    expect(error?.message).toMatch(/R2_PUBLIC_BASE_URL/);
+  });
+
+  it('Fase Firma — rejects an unsafe R2_SIGNATURE_PREFIX (path traversal / leading slash)', () => {
+    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, R2_SIGNATURE_PREFIX: '../etc' });
+    expect(error?.message).toMatch(/R2_SIGNATURE_PREFIX/);
+  });
+
+  it('Fase Firma — accepts the default R2_SIGNATURE_PREFIX', () => {
+    const { error, value } = envValidationSchema.validate(BASE_MEMORY_ENV);
+    expect(error).toBeUndefined();
+    expect(value.R2_SIGNATURE_PREFIX).toBe('signatures');
   });
 
   it('rejects a CREDENTIALS_ENCRYPTION_KEY that does not decode to exactly 32 bytes', () => {

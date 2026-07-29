@@ -50,9 +50,19 @@ playwright/.cache/
 # apps/web/app/api/uploads.
 apps/api/uploads/
 
-# prisma
+# prisma / local databases
 prisma/dev.db
 prisma/dev.db-journal
+*.sqlite
+*.sqlite3
+*.db
+
+# private keys / certificates — never committed
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
 # OS — macOS
 .DS_Store

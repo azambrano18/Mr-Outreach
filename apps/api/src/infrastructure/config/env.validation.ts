@@ -108,8 +108,28 @@ export const envValidationSchema = Joi.object({
   // Required in every mode (not just r2): the simulated adapter's dev URLs
   // are built from API_PUBLIC_URL instead, but the sanitizer always needs a
   // real value here to know which host an <img src> is allowed to point at.
-  R2_PUBLIC_BASE_URL: Joi.string().uri().default('https://assets.mejoreferido.com'),
-  R2_SIGNATURE_PREFIX: Joi.string().allow('').default('signatures'),
+  // In `r2` mode this must be HTTPS and never the Cloudflare-issued
+  // `*.r2.dev` fallback domain — production/staging always use a custom
+  // domain (see docs/signature-assets-r2-setup.md).
+  R2_PUBLIC_BASE_URL: Joi.string()
+    .uri()
+    .default('https://assets.mejoreferido.com')
+    .when('SIGNATURE_ASSET_STORAGE_MODE', {
+      is: 'r2',
+      then: Joi.string()
+        .uri({ scheme: ['https'] })
+        .custom((value: string, helpers) => {
+          if (/\br2\.dev\b/i.test(value)) {
+            return helpers.error('any.invalid');
+          }
+          return value;
+        }, 'reject r2.dev fallback domain')
+        .required(),
+    }),
+  // Safe path segment only — no leading/trailing slash, no "..", no spaces.
+  R2_SIGNATURE_PREFIX: Joi.string()
+    .pattern(/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/)
+    .default('signatures'),
 
   // External, read-only Neon CRM database (table maestro_clientes) — a
   // wholly separate driver from PERSISTENCE_DRIVER, since it's a different

@@ -1,11 +1,19 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
+import { SequenceTemplateRepository } from '../../domain/sequence-template/sequence-template.repository';
 import { SignatureAssetRepository } from '../../domain/signature-asset/signature-asset.repository';
 import {
   SignatureAssetStoragePort,
 } from '../../domain/signature-asset-storage/signature-asset-storage.port';
-import { AUDIT_LOG_REPOSITORY, SIGNATURE_ASSET_REPOSITORY } from '../../infrastructure/persistence/tokens';
+import { SignatureAssetNotFound, SignatureAssetStillReferenced } from '../../domain/signature-asset-storage/signature-asset-storage.errors';
+import {
+  AUDIT_LOG_REPOSITORY,
+  SEQUENCE_TEMPLATE_REPOSITORY,
+  SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
+  SIGNATURE_ASSET_REPOSITORY,
+} from '../../infrastructure/persistence/tokens';
 import { getImageDimensions } from '../../infrastructure/signature-asset-storage/image-dimensions';
 import { SIGNATURE_ASSET_STORAGE_PORT } from '../../infrastructure/signature-asset-storage/tokens';
 import { sniffImageType } from '../../infrastructure/storage/image-mime-sniffer';
@@ -36,6 +44,8 @@ export class SignatureAssetsService {
     @Inject(SIGNATURE_ASSET_REPOSITORY) private readonly assets: SignatureAssetRepository,
     @Inject(SIGNATURE_ASSET_STORAGE_PORT) private readonly storage: SignatureAssetStoragePort,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly audit: AuditLogRepository,
+    @Inject(SEQUENCE_TEMPLATE_REPOSITORY) private readonly templates: SequenceTemplateRepository,
+    @Inject(SEQUENCE_TEMPLATE_VERSION_REPOSITORY) private readonly templateVersions: SequenceTemplateVersionRepository,
   ) {}
 
   async upload(
@@ -109,6 +119,51 @@ export class SignatureAssetsService {
       width: asset.width,
       height: asset.height,
     };
+  }
+
+  /**
+   * §10 — the full orchestration: load, validate ownership/tenant, check
+   * every reference (a template's current draft signatureHtml, and every
+   * one of its immutable published versions — which transitively covers
+   * every Gestión, since a Gestión only ever points at an already-frozen
+   * version), reject if referenced, only then delete the physical object
+   * and mark the local row DELETED. Idempotent for an already-DELETED row.
+   */
+  async deleteUnreferencedImage(organizationId: string, actorId: string, assetId: string): Promise<void> {
+    const asset = await this.assets.findById(assetId);
+    if (!asset || asset.organizationId !== organizationId) {
+      throw new SignatureAssetNotFound();
+    }
+    if (asset.status === 'DELETED') {
+      return;
+    }
+
+    if (await this.isReferenced(organizationId, asset.ownerUserId, asset.objectKey)) {
+      throw new SignatureAssetStillReferenced();
+    }
+
+    await this.storage.deleteUnreferencedImage(asset.objectKey);
+    await this.assets.update(asset.id, { status: 'DELETED', deletedAt: new Date() });
+
+    await this.audit.record({
+      organizationId,
+      actorId,
+      action: 'signature_asset.delete',
+      entityType: 'SignatureAsset',
+      entityId: asset.id,
+      metadata: {},
+    });
+  }
+
+  /** A signature asset can only ever be referenced by templates owned by whoever uploaded it — there is no cross-executive template editing in this codebase. */
+  private async isReferenced(organizationId: string, ownerUserId: string, objectKey: string): Promise<boolean> {
+    const ownedTemplates = await this.templates.findByOwner(organizationId, ownerUserId);
+    for (const template of ownedTemplates) {
+      if (template.signatureHtml.includes(objectKey)) return true;
+      const versions = await this.templateVersions.findByTemplate(template.id);
+      if (versions.some((version) => version.signatureHtml.includes(objectKey))) return true;
+    }
+    return false;
   }
 
   /**
