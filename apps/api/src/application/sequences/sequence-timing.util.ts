@@ -152,6 +152,21 @@ export function computeEffectiveStart(
   return zonedTimeToInstant(resolved.year, resolved.month, resolved.day, startH, startMin, timezone);
 }
 
+/** §7 — true when `isoDate` (YYYY-MM-DD) is strictly before "today" as seen in `timezone`; used to reject a past Gestión start date. */
+export function isPastCalendarDate(isoDate: string, timezone: string, now: Date = new Date()): boolean {
+  const requested = parseIsoDate(isoDate);
+  const today = zonedParts(now, timezone);
+  const requestedMs = Date.UTC(requested.year, requested.month - 1, requested.day);
+  const todayMs = Date.UTC(today.year, today.month - 1, today.day);
+  return requestedMs < todayMs;
+}
+
+/** The calendar date (YYYY-MM-DD) `instant` falls on as seen in `timezone` — used to name a Gestión from the real moment its start command is sent, never from a manually-picked date. */
+export function calendarDateInTimezone(instant: Date, timezone: string): string {
+  const p = zonedParts(instant, timezone);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
 /**
  * §12 — "el plazo debe calcularse desde el envío efectivo del step anterior": advances `instant`
  * by `businessDays` full business days (Mon-Fri, no holiday calendar in this first version),

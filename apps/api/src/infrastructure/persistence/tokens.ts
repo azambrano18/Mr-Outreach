@@ -31,6 +31,12 @@ export const SEQUENCE_IMPORT_REPOSITORY = Symbol('SEQUENCE_IMPORT_REPOSITORY');
 export const SEQUENCE_IMPORT_ROW_REPOSITORY = Symbol('SEQUENCE_IMPORT_ROW_REPOSITORY');
 export const SEQUENCE_CONTACT_REPOSITORY = Symbol('SEQUENCE_CONTACT_REPOSITORY');
 export const SCHEDULED_EMAIL_REPOSITORY = Symbol('SCHEDULED_EMAIL_REPOSITORY');
+export const SEQUENCE_TEMPLATE_REPOSITORY = Symbol('SEQUENCE_TEMPLATE_REPOSITORY');
+export const SEQUENCE_TEMPLATE_STEP_REPOSITORY = Symbol('SEQUENCE_TEMPLATE_STEP_REPOSITORY');
+export const SEQUENCE_TEMPLATE_VERSION_REPOSITORY = Symbol('SEQUENCE_TEMPLATE_VERSION_REPOSITORY');
+export const SEQUENCE_EXECUTION_REPOSITORY = Symbol('SEQUENCE_EXECUTION_REPOSITORY');
+export const PROSPECT_IMPORT_REPOSITORY = Symbol('PROSPECT_IMPORT_REPOSITORY');
+export const PROSPECT_IMPORT_ROW_REPOSITORY = Symbol('PROSPECT_IMPORT_ROW_REPOSITORY');
 /** External, read-only Neon CRM database (table maestro_clientes) — never the app's own PrismaService. */
 export const CRM_CLIENT_REPOSITORY = Symbol('CRM_CLIENT_REPOSITORY');
 
@@ -41,3 +47,6 @@ export const CRM_CLIENT_REPOSITORY = Symbol('CRM_CLIENT_REPOSITORY');
  * this; everything else depends on the repository tokens above.
  */
 export const PRISMA_SERVICE = Symbol('PRISMA_SERVICE');
+
+/** Fase 2 — Unit of Work. See domain/persistence/transaction.ts. */
+export const TRANSACTION_MANAGER = Symbol('TRANSACTION_MANAGER');

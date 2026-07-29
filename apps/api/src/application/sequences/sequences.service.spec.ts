@@ -1,8 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { ClientExecutiveAssignmentRepository } from '../../domain/client/client-executive-assignment.repository';
-import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
-import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { Mailbox } from '../../domain/mailbox/mailbox.entity';
@@ -16,7 +14,7 @@ import { Signature } from '../../domain/signature/signature.entity';
 import { SignatureRepository } from '../../domain/signature/signature.repository';
 import { User } from '../../domain/user/user.entity';
 import { UserRepository } from '../../domain/user/user.repository';
-import { ClientsService } from '../clients/clients.service';
+import { SequenceEligibilityService } from './sequence-eligibility.service';
 import { SequenceStepsService } from './sequence-steps.service';
 import { SequencesService } from './sequences.service';
 
@@ -30,10 +28,8 @@ describe('SequencesService', () => {
   let users: jest.Mocked<UserRepository>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
   let clientExecutiveAssignments: jest.Mocked<ClientExecutiveAssignmentRepository>;
-  let managedClients: jest.Mocked<ManagedClientRepository>;
-  let domains: jest.Mocked<DomainRepository>;
   let sequenceSteps: jest.Mocked<Pick<SequenceStepsService, 'create'>>;
-  let clients: jest.Mocked<Pick<ClientsService, 'assertClientCrmEligible'>>;
+  let eligibility: jest.Mocked<Pick<SequenceEligibilityService, 'verify'>>;
   let service: SequencesService;
 
   const orgId = 'org_1';
@@ -134,6 +130,7 @@ describe('SequencesService', () => {
       findAllByOrganization: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      conditionalUpdatePublishStatus: jest.fn(),
     };
     steps = {
       findById: jest.fn(),
@@ -146,8 +143,10 @@ describe('SequencesService', () => {
     mailboxes = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
+      createLinked: jest.fn(),
       update: jest.fn(),
     };
     assignments = {
@@ -155,6 +154,7 @@ describe('SequencesService', () => {
       remove: jest.fn(),
       findByMailbox: jest.fn().mockResolvedValue([]),
       findByUser: jest.fn(),
+      findAllByOrganization: jest.fn().mockResolvedValue([]),
     };
     signatures = {
       findById: jest.fn(),
@@ -178,24 +178,11 @@ describe('SequencesService', () => {
       remove: jest.fn(),
       findByClient: jest.fn(),
       findByUser: jest.fn().mockResolvedValue([]),
-    };
-    managedClients = {
-      findById: jest.fn(),
-      findAll: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      findByCrmClientId: jest.fn(),
-    };
-    domains = {
-      findById: jest.fn(),
-      findByClient: jest.fn(),
-      findByName: jest.fn(),
-      findAll: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
+      ensureDerivedVisibility: jest.fn(),
+      removeDerivedVisibilityIfPresent: jest.fn(),
     };
     sequenceSteps = { create: jest.fn() };
-    clients = { assertClientCrmEligible: jest.fn().mockResolvedValue(undefined) };
+    eligibility = { verify: jest.fn() };
 
     service = new SequencesService(
       sequences,
@@ -207,10 +194,8 @@ describe('SequencesService', () => {
       users,
       auditLogs,
       clientExecutiveAssignments,
-      managedClients,
-      domains,
       sequenceSteps as unknown as SequenceStepsService,
-      clients as unknown as ClientsService,
+      eligibility as unknown as SequenceEligibilityService,
     );
   });
 

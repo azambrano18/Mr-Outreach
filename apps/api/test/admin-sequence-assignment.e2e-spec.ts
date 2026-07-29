@@ -360,7 +360,11 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ clientId, domainId: domain.body.id, mailboxId: mailbox.body.id, managementDate: '2026-08-03' });
 
-    expect(response.status).toBe(400);
+    // Fase 2 — SequenceEligibilityService reports "cuenta no elegible" as 409
+    // (a conflict with the account's current state), not 400, per the
+    // Fase 2 spec's error-code table — a deliberate change from this
+    // check's previous ad hoc 400.
+    expect(response.status).toBe(409);
   });
 
   it('an executive without sequences.assign cannot use the admin wizard endpoint', async () => {

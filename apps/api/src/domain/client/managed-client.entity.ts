@@ -1,5 +1,8 @@
 export type ManagedClientStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 
+/** Fase 2.1 §9.1 — which system is authoritative for this client's identity. */
+export type ManagedClientSource = 'SERVER' | 'LEGACY_CRM' | 'MANUAL';
+
 /**
  * `ManagedClient` is the customer whose outbound campaigns are operated
  * from Mr Outreach (e.g. "Vertex", "GTD") — deliberately NOT the same
@@ -10,8 +13,12 @@ export type ManagedClientStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'ARCHIVE
 export interface ManagedClient {
   id: string;
   organizationId: string;
-  /** Foreign key into the external Neon CRM's master row (maestro_clientes.id) — never written back there. */
-  crmClientId: number;
+  /** Foreign key into the external Neon CRM's master row (maestro_clientes.id) — never written back there. Null for a SERVER-origin client the motor never linked to a CRM record. */
+  crmClientId: number | null;
+  /** Fase 2.1 — SERVER: created from a Railway mailbox-link redemption. LEGACY_CRM: pre-Fase-2.1 "activar cliente" flow, always has crmClientId. MANUAL: reserved. */
+  source: ManagedClientSource;
+  /** Fase 2.1 — external Railway client id, set only when source = SERVER; the dedupe/upsert key for repeated redemptions instead of crmClientId. */
+  serverClientId: string | null;
   /** Fase 1.5 — snapshot of maestro_clientes.empresa. No longer administrator-editable; only upsertFromVerifiedCrmClient writes this. */
   name: string;
   legalName: string | null;
@@ -38,7 +45,10 @@ export interface ManagedClient {
 
 export interface CreateManagedClientInput {
   organizationId: string;
-  crmClientId: number;
+  /** Omit/null for a SERVER-origin client with no CRM linkage; repositories default `source` to LEGACY_CRM when a crmClientId is given, SERVER otherwise (override with `source` if needed). */
+  crmClientId?: number | null;
+  source?: ManagedClientSource;
+  serverClientId?: string | null;
   name: string;
   legalName?: string | null;
   internalCode?: string | null;

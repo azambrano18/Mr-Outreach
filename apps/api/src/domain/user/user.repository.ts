@@ -1,7 +1,8 @@
+import { TransactionContext } from '../persistence/transaction';
 import { CreateUserInput, UpdateUserInput, User } from './user.entity';
 
 export interface UserRepository {
-  findById(id: string): Promise<User | null>;
+  findById(id: string, ctx?: TransactionContext): Promise<User | null>;
   findByEmail(organizationId: string, email: string): Promise<User | null>;
   /**
    * Used only by the login flow, which does not know the organization

@@ -2,14 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditLogEntry, RecordAuditLogInput } from '../../../domain/audit/audit-log.entity';
 import { AuditLogFilter, AuditLogRepository } from '../../../domain/audit/audit-log.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 @Injectable()
 export class PrismaAuditLogRepository implements AuditLogRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(input: RecordAuditLogInput): Promise<AuditLogEntry> {
-    const entry = await this.prisma.auditLog.create({
+  async record(input: RecordAuditLogInput, ctx?: TransactionContext): Promise<AuditLogEntry> {
+    const entry = await resolveClient(this.prisma, ctx).auditLog.create({
       data: {
         organizationId: input.organizationId,
         actorId: input.actorId,

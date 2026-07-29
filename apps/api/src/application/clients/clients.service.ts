@@ -10,6 +10,7 @@ import { ConversationRepository } from '../../domain/conversation/conversation.r
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { SequenceRepository } from '../../domain/sequence/sequence.repository';
+import { TransactionContext } from '../../domain/persistence/transaction';
 import { fullName, User } from '../../domain/user/user.entity';
 import { UserRepository } from '../../domain/user/user.repository';
 import {
@@ -123,6 +124,7 @@ export class ClientsService {
     crmClient: CrmClient,
     actorId: string,
     operationalInput: Omit<ActivateManagedClientPayload, 'crmClientId'> = {},
+    ctx?: TransactionContext,
   ): Promise<ManagedClient> {
     const crmSnapshot = {
       name: crmClient.name,
@@ -132,23 +134,26 @@ export class ClientsService {
       crmStatusCheckedAt: new Date(),
     };
 
-    const existing = await this.clients.findByCrmClientId(organizationId, crmClient.crmClientId);
+    const existing = await this.clients.findByCrmClientId(organizationId, crmClient.crmClientId, ctx);
     if (existing) {
-      return this.clients.update(existing.id, { ...crmSnapshot, updatedBy: actorId });
+      return this.clients.update(existing.id, { ...crmSnapshot, updatedBy: actorId }, ctx);
     }
 
-    return this.clients.create({
-      organizationId,
-      crmClientId: crmClient.crmClientId,
-      ...crmSnapshot,
-      legalName: operationalInput.legalName ?? null,
-      internalCode: operationalInput.internalCode ?? null,
-      logoUrl: operationalInput.logoUrl ?? null,
-      startDate: operationalInput.startDate ? new Date(operationalInput.startDate) : null,
-      supervisorUserId: operationalInput.supervisorUserId ?? null,
-      notes: operationalInput.notes ?? null,
-      createdBy: actorId,
-    });
+    return this.clients.create(
+      {
+        organizationId,
+        crmClientId: crmClient.crmClientId,
+        ...crmSnapshot,
+        legalName: operationalInput.legalName ?? null,
+        internalCode: operationalInput.internalCode ?? null,
+        logoUrl: operationalInput.logoUrl ?? null,
+        startDate: operationalInput.startDate ? new Date(operationalInput.startDate) : null,
+        supervisorUserId: operationalInput.supervisorUserId ?? null,
+        notes: operationalInput.notes ?? null,
+        createdBy: actorId,
+      },
+      ctx,
+    );
   }
 
   /**
@@ -162,6 +167,10 @@ export class ClientsService {
    */
   async assertClientCrmEligible(organizationId: string, managedClientId: string, actorId: string): Promise<void> {
     const client = await this.getOwnedClient(organizationId, managedClientId);
+    // Fase 2.1 — a SERVER-origin client with no CRM linkage has nothing to verify here; out of scope for this phase (§20).
+    if (client.crmClientId === null) {
+      return;
+    }
     const { crmClient, active } = await this.crmEligibility.verify(client.crmClientId);
 
     await this.clients.update(client.id, {
@@ -375,6 +384,8 @@ export class ClientsService {
       id: client.id,
       organizationId: client.organizationId,
       crmClientId: client.crmClientId,
+      source: client.source,
+      serverClientId: client.serverClientId,
       name: client.name,
       legalName: client.legalName,
       internalCode: client.internalCode,

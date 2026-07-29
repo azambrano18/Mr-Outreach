@@ -58,6 +58,27 @@ describe('MailboxesService', () => {
     lastTestMessage: null,
     imap: protocolConfig(),
     smtp: protocolConfig({ port: 587, encryption: 'STARTTLS' }),
+    linkSource: 'LEGACY_LOCAL',
+    linkStatus: 'LEGACY',
+    serverMailboxId: null,
+    serverDomainId: null,
+    serverClientId: null,
+    serverRedemptionId: null,
+    tokenFingerprint: null,
+    emailSnapshot: null,
+    domainSnapshot: null,
+    clientNameSnapshot: null,
+    serverStatusSnapshot: null,
+    serverCanSendSnapshot: null,
+    serverStatusCheckedAt: null,
+    linkedAt: null,
+    linkedBy: null,
+    unlinkRequestedAt: null,
+    unlinkRequestedBy: null,
+    unlinkReason: null,
+    revokedAt: null,
+    revocationId: null,
+    lastLinkCommandId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -96,8 +117,10 @@ describe('MailboxesService', () => {
     mailboxes = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
+      createLinked: jest.fn(),
       update: jest.fn(),
     };
     connectionTests = { record: jest.fn(), findByMailbox: jest.fn() };
@@ -106,6 +129,7 @@ describe('MailboxesService', () => {
       remove: jest.fn(),
       findByMailbox: jest.fn().mockResolvedValue([]),
       findByUser: jest.fn().mockResolvedValue([]),
+      findAllByOrganization: jest.fn().mockResolvedValue([]),
     };
     users = {
       findById: jest.fn(),
@@ -142,6 +166,7 @@ describe('MailboxesService', () => {
 
     clients = {
       assertClientCrmEligible: jest.fn(),
+      getOwnedClient: jest.fn(),
     } as unknown as jest.Mocked<ClientsService>;
 
     service = new MailboxesService(
@@ -152,6 +177,7 @@ describe('MailboxesService', () => {
       auditLogs,
       engineClient,
       domains,
+      { getMailboxStatus: jest.fn(), introspectLinkToken: jest.fn(), redeemLinkToken: jest.fn(), unlinkMailbox: jest.fn() } as never,
       secrets,
       clients,
     );
@@ -207,8 +233,8 @@ describe('MailboxesService', () => {
         expect.objectContaining({ action: 'mailbox.create' }),
       );
       expect(JSON.stringify(result)).not.toMatch(/password|secretCiphertext|iv\.tag\.cipher/i);
-      expect(result.imap.credentialsConfigured).toBe(true);
-      expect(result.smtp.credentialsConfigured).toBe(true);
+      expect(result.imap!.credentialsConfigured).toBe(true);
+      expect(result.smtp!.credentialsConfigured).toBe(true);
     });
   });
 
@@ -265,6 +291,51 @@ describe('MailboxesService', () => {
   });
 
   describe('getById / list', () => {
+    it('resolves clientName/domainName from the snapshot for a SERVER_TOKEN mailbox, without touching the client/domain repositories', async () => {
+      mailboxes.findById.mockResolvedValue(
+        buildMailbox({
+          clientId: 'client_1',
+          domainId: 'domain_1',
+          linkSource: 'SERVER_TOKEN',
+          clientNameSnapshot: 'Empresa Demostración',
+          domainSnapshot: 'empresademostracion.cl',
+        }),
+      );
+
+      const result = await service.getById(orgId, 'mailbox_1');
+
+      expect(result.clientName).toBe('Empresa Demostración');
+      expect(result.domainName).toBe('empresademostracion.cl');
+      expect(clients.getOwnedClient).not.toHaveBeenCalled();
+      expect(domains.findById).not.toHaveBeenCalled();
+    });
+
+    it('resolves clientName/domainName live for a LEGACY_LOCAL mailbox with no snapshot', async () => {
+      mailboxes.findById.mockResolvedValue(
+        buildMailbox({ clientId: 'client_1', domainId: 'domain_1', linkSource: 'LEGACY_LOCAL' }),
+      );
+      clients.getOwnedClient.mockResolvedValue({ id: 'client_1', name: 'Cliente Legado' } as never);
+      domains.findById.mockResolvedValue({ id: 'domain_1', domainName: 'legado.cl' } as never);
+
+      const result = await service.getById(orgId, 'mailbox_1');
+
+      expect(result.clientName).toBe('Cliente Legado');
+      expect(result.domainName).toBe('legado.cl');
+      expect(clients.getOwnedClient).toHaveBeenCalledWith(orgId, 'client_1');
+      expect(domains.findById).toHaveBeenCalledWith('domain_1');
+    });
+
+    it('leaves clientName/domainName null for an unclassified mailbox (no clientId/domainId)', async () => {
+      mailboxes.findById.mockResolvedValue(buildMailbox({ clientId: null, domainId: null }));
+
+      const result = await service.getById(orgId, 'mailbox_1');
+
+      expect(result.clientName).toBeNull();
+      expect(result.domainName).toBeNull();
+      expect(clients.getOwnedClient).not.toHaveBeenCalled();
+      expect(domains.findById).not.toHaveBeenCalled();
+    });
+
     it('never returns a mailbox from a different organization', async () => {
       mailboxes.findById.mockResolvedValue(buildMailbox({ organizationId: otherOrgId }));
 

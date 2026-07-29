@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { Domain as PrismaDomainRow } from '@prisma/client';
 import { CreateDomainInput, Domain, UpdateDomainInput } from '../../../domain/domain-entity/domain.entity';
 import { DomainRepository } from '../../../domain/domain-entity/domain.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaDomainRow): Domain {
   return {
@@ -24,8 +26,8 @@ function toDomain(row: PrismaDomainRow): Domain {
 export class PrismaDomainRepository implements DomainRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<Domain | null> {
-    const row = await this.prisma.domain.findFirst({ where: { id, deletedAt: null } });
+  async findById(id: string, ctx?: TransactionContext): Promise<Domain | null> {
+    const row = await resolveClient(this.prisma, ctx).domain.findFirst({ where: { id, deletedAt: null } });
     return row ? toDomain(row) : null;
   }
 
@@ -36,8 +38,8 @@ export class PrismaDomainRepository implements DomainRepository {
     return rows.map(toDomain);
   }
 
-  async findByName(organizationId: string, domainName: string): Promise<Domain | null> {
-    const row = await this.prisma.domain.findFirst({
+  async findByName(organizationId: string, domainName: string, ctx?: TransactionContext): Promise<Domain | null> {
+    const row = await resolveClient(this.prisma, ctx).domain.findFirst({
       where: { organizationId, domainName: { equals: domainName, mode: 'insensitive' }, deletedAt: null },
     });
     return row ? toDomain(row) : null;
@@ -48,8 +50,8 @@ export class PrismaDomainRepository implements DomainRepository {
     return rows.map(toDomain);
   }
 
-  async create(input: CreateDomainInput): Promise<Domain> {
-    const row = await this.prisma.domain.create({
+  async create(input: CreateDomainInput, ctx?: TransactionContext): Promise<Domain> {
+    const row = await resolveClient(this.prisma, ctx).domain.create({
       data: {
         organizationId: input.organizationId,
         clientId: input.clientId,
@@ -62,8 +64,8 @@ export class PrismaDomainRepository implements DomainRepository {
     return toDomain(row);
   }
 
-  async update(id: string, input: UpdateDomainInput): Promise<Domain> {
-    const row = await this.prisma.domain.update({ where: { id }, data: input });
+  async update(id: string, input: UpdateDomainInput, ctx?: TransactionContext): Promise<Domain> {
+    const row = await resolveClient(this.prisma, ctx).domain.update({ where: { id }, data: input });
     return toDomain(row);
   }
 }

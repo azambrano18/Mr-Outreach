@@ -6,13 +6,17 @@ import {
   UpdateManagedClientInput,
 } from '../../../domain/client/managed-client.entity';
 import { ManagedClientRepository } from '../../../domain/client/managed-client.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaManagedClientRow): ManagedClient {
   return {
     id: row.id,
     organizationId: row.organizationId,
     crmClientId: row.crmClientId,
+    source: row.source,
+    serverClientId: row.serverClientId,
     name: row.name,
     legalName: row.legalName,
     internalCode: row.internalCode,
@@ -37,8 +41,8 @@ function toDomain(row: PrismaManagedClientRow): ManagedClient {
 export class PrismaManagedClientRepository implements ManagedClientRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<ManagedClient | null> {
-    const row = await this.prisma.managedClient.findFirst({ where: { id, deletedAt: null } });
+  async findById(id: string, ctx?: TransactionContext): Promise<ManagedClient | null> {
+    const row = await resolveClient(this.prisma, ctx).managedClient.findFirst({ where: { id, deletedAt: null } });
     return row ? toDomain(row) : null;
   }
 
@@ -49,11 +53,13 @@ export class PrismaManagedClientRepository implements ManagedClientRepository {
     return rows.map(toDomain);
   }
 
-  async create(input: CreateManagedClientInput): Promise<ManagedClient> {
-    const row = await this.prisma.managedClient.create({
+  async create(input: CreateManagedClientInput, ctx?: TransactionContext): Promise<ManagedClient> {
+    const row = await resolveClient(this.prisma, ctx).managedClient.create({
       data: {
         organizationId: input.organizationId,
-        crmClientId: input.crmClientId,
+        crmClientId: input.crmClientId ?? null,
+        source: input.source ?? (input.crmClientId != null ? 'LEGACY_CRM' : 'SERVER'),
+        serverClientId: input.serverClientId ?? null,
         name: input.name,
         legalName: input.legalName ?? null,
         internalCode: input.internalCode ?? null,
@@ -72,14 +78,29 @@ export class PrismaManagedClientRepository implements ManagedClientRepository {
     return toDomain(row);
   }
 
-  async update(id: string, input: UpdateManagedClientInput): Promise<ManagedClient> {
-    const row = await this.prisma.managedClient.update({ where: { id }, data: input });
+  async update(id: string, input: UpdateManagedClientInput, ctx?: TransactionContext): Promise<ManagedClient> {
+    const row = await resolveClient(this.prisma, ctx).managedClient.update({ where: { id }, data: input });
     return toDomain(row);
   }
 
-  async findByCrmClientId(organizationId: string, crmClientId: number): Promise<ManagedClient | null> {
-    const row = await this.prisma.managedClient.findFirst({
+  async findByCrmClientId(
+    organizationId: string,
+    crmClientId: number,
+    ctx?: TransactionContext,
+  ): Promise<ManagedClient | null> {
+    const row = await resolveClient(this.prisma, ctx).managedClient.findFirst({
       where: { organizationId, crmClientId, deletedAt: null },
+    });
+    return row ? toDomain(row) : null;
+  }
+
+  async findByServerClientId(
+    organizationId: string,
+    serverClientId: string,
+    ctx?: TransactionContext,
+  ): Promise<ManagedClient | null> {
+    const row = await resolveClient(this.prisma, ctx).managedClient.findFirst({
+      where: { organizationId, serverClientId, deletedAt: null },
     });
     return row ? toDomain(row) : null;
   }

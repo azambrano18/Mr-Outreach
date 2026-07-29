@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { extractTemplateVariables } from '@outreach/validation';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { EngineClient } from '../../domain/engine/engine-client';
@@ -433,6 +433,11 @@ export class SequenceStepsService {
     const step = await this.getOwnedStep(organizationId, stepId);
     const sequence = await this.getOwnedSequence(organizationId, step.sequenceId);
     const mailbox = await this.requireSenderMailbox(organizationId, sequence);
+    if (!mailbox.smtp) {
+      throw new ConflictException(
+        'Esta cuenta está vinculada por token del servidor motor; el envío de prueba mediante SMTP local no está disponible para este tipo de cuenta.',
+      );
+    }
     const ctx = await this.buildRenderContext(organizationId, sequence, mailbox);
 
     const signatureVersion = await this.getActiveSignatureVersion(mailbox.id);

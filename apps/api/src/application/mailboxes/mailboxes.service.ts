@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { EngineClient, TestMailboxResult } from '../../domain/engine/engine-client';
@@ -12,6 +12,7 @@ import {
   UpdateMailboxInput,
 } from '../../domain/mailbox/mailbox.entity';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
+import { MAILBOX_MOTOR_PORT, MailboxMotorPort } from '../../domain/mailbox-motor/mailbox-motor-port';
 import { fullName, User } from '../../domain/user/user.entity';
 import { UserRepository } from '../../domain/user/user.repository';
 import { ENGINE_CLIENT } from '../../infrastructure/engine/tokens';
@@ -29,6 +30,7 @@ import {
   AssignedMailboxSummary,
   AssigneeSummary,
   CreateMailboxPayload,
+  MailboxAdminOverviewItem,
   MailboxConnectionTestSummary,
   MailboxInboxSummary,
   MailboxSummary,
@@ -54,9 +56,63 @@ export class MailboxesService {
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     @Inject(ENGINE_CLIENT) private readonly engineClient: EngineClient,
     @Inject(DOMAIN_REPOSITORY) private readonly domains: DomainRepository,
+    @Inject(MAILBOX_MOTOR_PORT) private readonly motor: MailboxMotorPort,
     private readonly secrets: SecretEncryptionService,
     private readonly clients: ClientsService,
   ) {}
+
+  /**
+   * Fase 2.1, §7/§12 — live refresh of a SERVER_TOKEN mailbox's status.
+   * Read-only from Mr Outreach's perspective except for updating its own
+   * snapshot; never authorizes anything by itself (publish eligibility
+   * always re-queries the motor on its own, never trusts this snapshot).
+   */
+  async refreshServerStatus(organizationId: string, mailboxId: string, actorId: string): Promise<MailboxSummary> {
+    const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    if (mailbox.linkSource !== 'SERVER_TOKEN' || !mailbox.serverMailboxId) {
+      throw new ConflictException('Esta cuenta no está vinculada por token del servidor motor.');
+    }
+    let status;
+    try {
+      status = await this.motor.getMailboxStatus(mailbox.serverMailboxId);
+    } catch (error) {
+      // Fail-closed — the existing snapshot (serverStatusSnapshot/serverCanSendSnapshot/serverStatusCheckedAt) is never touched on failure.
+      await this.auditLogs.record({
+        organizationId,
+        actorId,
+        action: 'mailbox.status_refresh_failed',
+        entityType: 'Mailbox',
+        entityId: mailbox.id,
+        metadata: {
+          serverMailboxId: mailbox.serverMailboxId,
+          error: error instanceof Error ? error.message : 'unknown error',
+        },
+      });
+      throw error;
+    }
+    const updated = await this.mailboxes.update(mailbox.id, {
+      linkStatus: status.linkStatus === 'ACTIVE' ? 'ACTIVE' : 'REVOKED',
+      serverStatusSnapshot: status.technicalStatus,
+      serverCanSendSnapshot: status.canSend,
+      serverStatusCheckedAt: status.checkedAt,
+    });
+    await this.auditLogs.record({
+      organizationId,
+      actorId,
+      action: 'mailbox.status_refreshed',
+      entityType: 'Mailbox',
+      entityId: mailbox.id,
+      metadata: {
+        serverMailboxId: mailbox.serverMailboxId,
+        previousStatus: mailbox.serverStatusSnapshot,
+        newStatus: status.technicalStatus,
+        previousCanSend: mailbox.serverCanSendSnapshot,
+        newCanSend: status.canSend,
+        linkStatus: updated.linkStatus,
+      },
+    });
+    return this.toSummary(updated);
+  }
 
   /**
    * `executiveId` narrows to mailboxes assigned (any role) to that user —
@@ -77,7 +133,84 @@ export class MailboxesService {
 
   async getById(organizationId: string, mailboxId: string): Promise<MailboxSummary> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
-    return this.toSummary(mailbox);
+    return this.withResolvedNames(organizationId, mailbox, this.toSummary(mailbox));
+  }
+
+  /**
+   * A SERVER_TOKEN mailbox already carries clientNameSnapshot/domainSnapshot
+   * (captured at link time — never re-fetched, per §"solo lectura, viene
+   * del token"). A LEGACY_LOCAL mailbox has no snapshot, so its client/
+   * domain name is resolved live from the still-owned ManagedClient/Domain
+   * rows — only ever for a single-record detail fetch, never the list.
+   */
+  private async withResolvedNames(
+    organizationId: string,
+    mailbox: Mailbox,
+    summary: MailboxSummary,
+  ): Promise<MailboxSummary> {
+    let clientName = summary.clientName;
+    let domainName = summary.domainName;
+    if (!clientName && mailbox.clientId) {
+      const client = await this.clients.getOwnedClient(organizationId, mailbox.clientId).catch(() => null);
+      clientName = client?.name ?? null;
+    }
+    if (!domainName && mailbox.domainId) {
+      const domain = await this.domains.findById(mailbox.domainId);
+      domainName = domain?.domainName ?? null;
+    }
+    return { ...summary, clientName, domainName };
+  }
+
+  /**
+   * §12.1 — denormalized rows for the admin listing/filter screen. One
+   * pass over the org's mailboxes/domains/clients/assignments/users
+   * instead of the frontend orchestrating N+1 fetches; filtering itself
+   * happens client-side against this full list (admin-scale datasets).
+   */
+  async listAdminOverview(organizationId: string): Promise<MailboxAdminOverviewItem[]> {
+    const [mailboxes, domains, clients, allAssignments, users] = await Promise.all([
+      this.mailboxes.findAll(organizationId),
+      this.domains.findAll(organizationId),
+      this.clients.list(organizationId),
+      this.assignments.findAllByOrganization(organizationId),
+      this.users.findAll(organizationId),
+    ]);
+
+    const domainById = new Map(domains.map((d) => [d.id, d]));
+    const clientById = new Map(clients.map((c) => [c.id, c]));
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const assignmentsByMailbox = new Map<string, typeof allAssignments>();
+    for (const assignment of allAssignments) {
+      const list = assignmentsByMailbox.get(assignment.mailboxId) ?? [];
+      list.push(assignment);
+      assignmentsByMailbox.set(assignment.mailboxId, list);
+    }
+
+    return mailboxes.map((mailbox) => {
+      const mailboxAssignments = assignmentsByMailbox.get(mailbox.id) ?? [];
+      const primary = mailboxAssignments.find((a) => a.role === 'PRIMARY') ?? null;
+      const primaryUser = primary ? userById.get(primary.userId) : undefined;
+      const domain = mailbox.domainId ? domainById.get(mailbox.domainId) : undefined;
+      const client = mailbox.clientId ? clientById.get(mailbox.clientId) : undefined;
+
+      return {
+        id: mailbox.id,
+        clientId: mailbox.clientId,
+        clientName: client?.name ?? null,
+        domainId: mailbox.domainId,
+        domainName: domain?.domainName ?? null,
+        name: mailbox.name,
+        email: mailbox.email,
+        primaryExecutive: primaryUser ? { id: primaryUser.id, name: fullName(primaryUser) } : null,
+        secondaryExecutiveCount: mailboxAssignments.filter((a) => a.role === 'SECONDARY').length,
+        linkSource: mailbox.linkSource,
+        linkStatus: mailbox.linkStatus,
+        status: mailbox.status,
+        serverStatusSnapshot: mailbox.serverStatusSnapshot,
+        serverCanSendSnapshot: mailbox.serverCanSendSnapshot,
+        serverStatusCheckedAt: mailbox.serverStatusCheckedAt,
+      };
+    });
   }
 
   async create(
@@ -176,6 +309,7 @@ export class MailboxesService {
     actorId: string,
   ): Promise<MailboxTestResultSummary> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    this.requireLegacyCredentials(mailbox);
 
     const result = await this.engineClient.testMailbox({
       email: mailbox.email,
@@ -254,6 +388,7 @@ export class MailboxesService {
    */
   async getInbox(organizationId: string, mailboxId: string): Promise<MailboxInboxSummary> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    this.requireLegacyCredentials(mailbox);
     const result = await this.engineClient.fetchInbox({
       email: mailbox.email,
       imap: this.decryptProtocolConfig(mailbox.imap),
@@ -267,6 +402,7 @@ export class MailboxesService {
     threadId: string,
   ): Promise<MailboxThreadDetail> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    this.requireLegacyCredentials(mailbox);
     const result = await this.engineClient.fetchThread({
       email: mailbox.email,
       imap: this.decryptProtocolConfig(mailbox.imap),
@@ -313,6 +449,7 @@ export class MailboxesService {
     actorId: string,
   ): Promise<MailboxThreadReadStateResult> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    this.requireLegacyCredentials(mailbox);
     const result = await this.engineClient.setThreadReadState({
       email: mailbox.email,
       imap: this.decryptProtocolConfig(mailbox.imap),
@@ -528,21 +665,34 @@ export class MailboxesService {
       userAssignments.map((assignment) => this.mailboxes.findById(assignment.mailboxId)),
     );
 
-    return mailboxes
-      .filter(
-        (mailbox): mailbox is Mailbox => !!mailbox && mailbox.organizationId === organizationId,
-      )
-      .map((mailbox) => ({
-        id: mailbox.id,
-        name: mailbox.name,
-        email: mailbox.email,
-        fromName: mailbox.fromName,
-        replyTo: mailbox.replyTo,
-        status: mailbox.status,
-        connectionStatus: mailbox.connectionStatus,
-        lastTestedAt: mailbox.lastTestedAt ? mailbox.lastTestedAt.toISOString() : null,
-        lastTestMessage: mailbox.lastTestMessage,
-      }));
+    const owned = mailboxes.filter(
+      (mailbox): mailbox is Mailbox => !!mailbox && mailbox.organizationId === organizationId,
+    );
+
+    // Etapa "cuenta del ejecutivo" §6 — Plantillas needs the client/domain
+    // name to auto-derive its own name and to show a read-only preview once
+    // the executive picks a mailbox; reuses the same resolution getById()
+    // already does (snapshot for SERVER_TOKEN, live lookup for legacy).
+    const withNames = await Promise.all(
+      owned.map(async (mailbox) => {
+        const resolved = await this.getById(organizationId, mailbox.id).catch(() => null);
+        return { mailbox, clientName: resolved?.clientName ?? null, domainName: resolved?.domainName ?? null };
+      }),
+    );
+
+    return withNames.map(({ mailbox, clientName, domainName }) => ({
+      id: mailbox.id,
+      name: mailbox.name,
+      email: mailbox.email,
+      fromName: mailbox.fromName,
+      replyTo: mailbox.replyTo,
+      status: mailbox.status,
+      connectionStatus: mailbox.connectionStatus,
+      lastTestedAt: mailbox.lastTestedAt ? mailbox.lastTestedAt.toISOString() : null,
+      lastTestMessage: mailbox.lastTestMessage,
+      clientName,
+      domainName,
+    }));
   }
 
   /** Backs GET /me/mailboxes/:id/assignees — read-only, no add/remove (that stays admin-only via mailboxes.assign). */
@@ -611,6 +761,17 @@ export class MailboxesService {
     };
   }
 
+  /** Fase 2.1 — testConnection/getInbox/getThread/setThreadReadState are all real IMAP/SMTP operations, meaningless for a SERVER_TOKEN mailbox (Mr Outreach never holds its credentials). */
+  private requireLegacyCredentials(
+    mailbox: Mailbox,
+  ): asserts mailbox is Mailbox & { imap: MailboxProtocolConfig; smtp: MailboxProtocolConfig } {
+    if (!mailbox.imap || !mailbox.smtp) {
+      throw new ConflictException(
+        'Esta cuenta está vinculada por token del servidor motor; esta operación solo está disponible para cuentas con configuración IMAP/SMTP local.',
+      );
+    }
+  }
+
   private decryptProtocolConfig(config: MailboxProtocolConfig) {
     return {
       host: config.host,
@@ -676,6 +837,8 @@ export class MailboxesService {
       organizationId: mailbox.organizationId,
       clientId: mailbox.clientId,
       domainId: mailbox.domainId,
+      clientName: mailbox.clientNameSnapshot,
+      domainName: mailbox.domainSnapshot,
       name: mailbox.name,
       email: mailbox.email,
       fromName: mailbox.fromName,
@@ -691,6 +854,14 @@ export class MailboxesService {
       lastTestMessage: mailbox.lastTestMessage,
       imap: this.toProtocolSummary(mailbox.imap),
       smtp: this.toProtocolSummary(mailbox.smtp),
+      linkSource: mailbox.linkSource,
+      linkStatus: mailbox.linkStatus,
+      serverMailboxId: mailbox.serverMailboxId,
+      serverStatusSnapshot: mailbox.serverStatusSnapshot,
+      serverCanSendSnapshot: mailbox.serverCanSendSnapshot,
+      serverStatusCheckedAt: mailbox.serverStatusCheckedAt,
+      linkedAt: mailbox.linkedAt,
+      linkedBy: mailbox.linkedBy,
       createdAt: mailbox.createdAt,
       updatedAt: mailbox.updatedAt,
     };
@@ -718,7 +889,8 @@ export class MailboxesService {
     return 'DRAFT';
   }
 
-  private toProtocolSummary(config: MailboxProtocolConfig): ProtocolConfigSummary {
+  private toProtocolSummary(config: MailboxProtocolConfig | null): ProtocolConfigSummary | null {
+    if (!config) return null;
     return {
       host: config.host,
       port: config.port,

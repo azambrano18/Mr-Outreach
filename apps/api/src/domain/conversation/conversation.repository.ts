@@ -3,6 +3,7 @@ import {
   ConversationClassification,
   ConversationManagementStatus,
   CreateConversationInput,
+  ResponseOutcome,
   UpdateConversationInput,
 } from './conversation.entity';
 
@@ -14,6 +15,8 @@ export interface ConversationFilter {
   sequenceId?: string;
   managementStatus?: ConversationManagementStatus;
   classification?: ConversationClassification;
+  /** §7 — 'UNCLASSIFIED' is the "Sin clasificar" sentinel (matches `responseOutcome === null`); undefined means no filter. */
+  responseOutcome?: ResponseOutcome | 'UNCLASSIFIED';
   tagId?: string;
   isUnread?: boolean;
   /** Case-insensitive substring match against subject/contact name/contact email. */

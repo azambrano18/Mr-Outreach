@@ -1,3 +1,4 @@
+import { TransactionContext } from '../persistence/transaction';
 import {
   CreateIntegrationCommandInput,
   IntegrationCommand,
@@ -18,8 +19,9 @@ export interface IntegrationCommandRepository {
   findByIdempotencyKey(
     organizationId: string,
     idempotencyKey: string,
+    ctx?: TransactionContext,
   ): Promise<IntegrationCommand | null>;
   findAll(organizationId: string, filter?: IntegrationCommandFilter): Promise<IntegrationCommand[]>;
-  create(input: CreateIntegrationCommandInput): Promise<IntegrationCommand>;
-  update(id: string, input: UpdateIntegrationCommandInput): Promise<IntegrationCommand>;
+  create(input: CreateIntegrationCommandInput, ctx?: TransactionContext): Promise<IntegrationCommand>;
+  update(id: string, input: UpdateIntegrationCommandInput, ctx?: TransactionContext): Promise<IntegrationCommand>;
 }

@@ -95,6 +95,7 @@ describe('AdminSequenceMonitorService', () => {
       findAllByOrganization: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
+      conditionalUpdatePublishStatus: jest.fn(),
     };
     steps = {
       findById: jest.fn(),
@@ -112,20 +113,31 @@ describe('AdminSequenceMonitorService', () => {
       findAllByOrganization: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
+      createMany: jest.fn(),
+      bulkSetScheduled: jest.fn(),
+      conditionalRemove: jest.fn(),
+      bulkRemoveByCompany: jest.fn(),
     };
     scheduledEmails = {
       findById: jest.fn(),
       findByIdempotencyKey: jest.fn(),
       findBySequenceContact: jest.fn(),
+      findManyBySequenceContactIds: jest.fn().mockResolvedValue([]),
       findAll: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
+      createMany: jest.fn(),
       update: jest.fn(),
+      cancelFutureForSequenceContact: jest.fn(),
+      cancelFutureForSequenceCompany: jest.fn(),
+      cancelFutureForMailbox: jest.fn(),
     };
     mailboxes = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findByServerMailboxId: jest.fn(),
       findAll: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
+      createLinked: jest.fn(),
       update: jest.fn(),
     };
     users = {
@@ -141,7 +153,7 @@ describe('AdminSequenceMonitorService', () => {
       findAll: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
-      findByCrmClientId: jest.fn(),
+      findByCrmClientId: jest.fn(), findByServerClientId: jest.fn(),
     };
     auditLogs = { record: jest.fn(), findAll: jest.fn().mockResolvedValue([]) };
     scheduling = { cancelFutureJobsForSequence: jest.fn().mockResolvedValue(0) };

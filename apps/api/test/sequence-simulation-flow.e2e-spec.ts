@@ -136,6 +136,7 @@ describe('Sequence mail-engine simulation flow (e2e) — memory + simulated engi
     const publish = await request(app.getHttpServer())
       .post(`/me/sequences/${sequenceId}/publish`)
       .set('Authorization', `Bearer ${executiveToken}`)
+      .set('Idempotency-Key', `sim-flow-publish-${sequenceId}`)
       .send({});
     expect(publish.status).toBe(201);
     expect(publish.body.command.commandType).toBe('SEQUENCE_PUBLISH_REQUESTED');
@@ -165,18 +166,17 @@ describe('Sequence mail-engine simulation flow (e2e) — memory + simulated engi
     expect(mapping.body.validRows).toBe(4);
     expect(mapping.body.companiesDetected).toBe(3);
 
+    // Fase 2, Caso B — confirm() is now a single, synchronous, atomic
+    // operation: no separate /advance call is needed to materialize.
     const confirm = await request(app.getHttpServer())
       .post(`/me/sequence-imports/${importId}/confirm`)
       .set('Authorization', `Bearer ${executiveToken}`)
+      .set('Idempotency-Key', `sim-flow-confirm-${importId}`)
       .send({});
-    expect(confirm.body.command.commandType).toBe('SEQUENCE_IMPORT_REQUESTED');
-    expect(confirm.body.command.payload.storageReference.storageKey).toBeTruthy();
-
-    const advanceImport = await request(app.getHttpServer())
-      .post(`/me/sequence-imports/${importId}/advance`)
-      .set('Authorization', `Bearer ${executiveToken}`)
-      .send({ mode: 'ALL' });
-    expect(advanceImport.body.import.status).toBe('COMPLETED');
+    expect(confirm.status).toBe(201);
+    expect(confirm.body.status).toBe('COMPLETED');
+    expect(confirm.body.commandId).toBeTruthy();
+    expect(confirm.body.contactsEnrolled).toBe(4);
 
     const contactsAfterImport = await request(app.getHttpServer())
       .get(`/me/sequences/${sequenceId}/contacts`)
@@ -230,11 +230,12 @@ describe('Sequence mail-engine simulation flow (e2e) — memory + simulated engi
     const removeContact = await request(app.getHttpServer())
       .post(`/me/sequences/${sequenceId}/contacts/${contactA.id}/remove`)
       .set('Authorization', `Bearer ${executiveToken}`)
+      .set('Idempotency-Key', `sim-flow-remove-contact-${contactA.id}`)
       .send({ reason: 'Solicitud del cliente' });
     expect(removeContact.status).toBe(201);
     expect(removeContact.body.command.commandType).toBe('SEQUENCE_CONTACT_REMOVE_REQUESTED');
-    expect(removeContact.body.cancelledJobs).toBe(1);
-    expect(removeContact.body.contact.status).toBe('REMOVED');
+    expect(removeContact.body.result.cancelledJobs).toBe(1);
+    expect(removeContact.body.result.status).toBe('REMOVED');
 
     // 9. Retire "Empresa Dos" — affects both B and C, cancelling both their pending step-3 jobs.
     const companies = await request(app.getHttpServer())
@@ -244,10 +245,11 @@ describe('Sequence mail-engine simulation flow (e2e) — memory + simulated engi
     const removeCompany = await request(app.getHttpServer())
       .post(`/me/sequences/${sequenceId}/companies/${empresaDos.companyId}/remove`)
       .set('Authorization', `Bearer ${executiveToken}`)
+      .set('Idempotency-Key', `sim-flow-remove-company-${empresaDos.companyId}`)
       .send({ reason: 'Empresa dada de baja' });
     expect(removeCompany.body.command.commandType).toBe('SEQUENCE_COMPANY_REMOVE_REQUESTED');
-    expect(removeCompany.body.cancelledJobs).toBe(2);
-    expect(removeCompany.body.affectedContacts).toBe(2);
+    expect(removeCompany.body.result.cancelledJobs).toBe(2);
+    expect(removeCompany.body.result.affectedContacts).toBe(2);
 
     // 10. Simulate a human reply to D's Seguimiento 2 send — must associate to Step 2, mark REPLIED,
     // and cancel D's still-pending Seguimiento 3 job.

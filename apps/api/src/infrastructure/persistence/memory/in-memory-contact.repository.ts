@@ -88,4 +88,49 @@ export class InMemoryContactRepository implements ContactRepository {
     this.store.contacts.set(id, updated);
     return updated;
   }
+
+  async findManyByEmails(organizationId: string, clientId: string, emails: string[]): Promise<Contact[]> {
+    const normalized = new Set(emails.map((e) => e.toLowerCase()));
+    return Array.from(this.store.contacts.values()).filter(
+      (c) =>
+        !c.deletedAt &&
+        c.organizationId === organizationId &&
+        c.clientId === clientId &&
+        normalized.has(c.email.toLowerCase()),
+    );
+  }
+
+  async findManyByIds(ids: string[]): Promise<Contact[]> {
+    const idSet = new Set(ids);
+    return Array.from(this.store.contacts.values()).filter((c) => !c.deletedAt && idSet.has(c.id));
+  }
+
+  async createMany(inputs: Array<CreateContactInput & { id: string }>): Promise<Contact[]> {
+    const now = new Date();
+    const created: Contact[] = inputs.map((input) => ({
+      id: input.id,
+      organizationId: input.organizationId,
+      clientId: input.clientId,
+      companyId: input.companyId,
+      email: input.email,
+      firstName: input.firstName ?? null,
+      lastName: input.lastName ?? null,
+      fullName: input.fullName ?? null,
+      jobTitle: input.jobTitle ?? null,
+      phone: input.phone ?? null,
+      city: input.city ?? null,
+      country: input.country ?? null,
+      website: input.website ?? null,
+      linkedin: input.linkedin ?? null,
+      customFields: input.customFields ?? {},
+      suppressed: false,
+      suppressedAt: null,
+      suppressedReason: null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    }));
+    for (const contact of created) this.store.contacts.set(contact.id, contact);
+    return created;
+  }
 }

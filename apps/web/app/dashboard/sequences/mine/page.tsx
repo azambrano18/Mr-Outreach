@@ -23,6 +23,12 @@ export default async function MySequencesPage() {
   if (!currentUser.permissions.includes('sequences.manage.own')) {
     return <AccessDenied />;
   }
+  // Etapa "cuenta del ejecutivo" — retirado de la experiencia del ejecutivo;
+  // solo un administrador navegando aquí directamente (sequences.read_all)
+  // sigue viendo esta pantalla sin cambios.
+  if (!currentUser.permissions.includes('sequences.read_all')) {
+    redirect('/dashboard/sequence-templates');
+  }
 
   let sequences: SequenceSummary[] = [];
   let loadError: string | null = null;

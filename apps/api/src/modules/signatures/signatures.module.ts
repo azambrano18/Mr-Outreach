@@ -11,5 +11,6 @@ import { SignaturesController } from './signatures.controller';
   imports: [PersistenceModule, SecurityModule, EngineModule, AuthModule],
   controllers: [SignaturesController, MeSignatureController],
   providers: [SignaturesService],
+  exports: [SignaturesService],
 })
 export class SignaturesModule {}

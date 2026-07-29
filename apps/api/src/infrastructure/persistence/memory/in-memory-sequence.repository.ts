@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   CreateSequenceInput,
   Sequence,
+  SequencePublishStatus,
   UpdateSequenceInput,
 } from '../../../domain/sequence/sequence.entity';
 import { SequenceRepository } from '../../../domain/sequence/sequence.repository';
@@ -93,5 +94,17 @@ export class InMemorySequenceRepository implements SequenceRepository {
     };
     this.store.sequences.set(id, updated);
     return updated;
+  }
+
+  async conditionalUpdatePublishStatus(
+    id: string,
+    blockedStatuses: SequencePublishStatus[],
+    toStatus: SequencePublishStatus,
+  ): Promise<number> {
+    const existing = this.store.sequences.get(id);
+    if (!existing || existing.deletedAt) return 0;
+    if (existing.publishStatus && blockedStatuses.includes(existing.publishStatus)) return 0;
+    this.store.sequences.set(id, { ...existing, publishStatus: toStatus, updatedAt: new Date() });
+    return 1;
   }
 }

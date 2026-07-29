@@ -22,6 +22,25 @@ export type CrmDriver = 'mock' | 'postgres';
 export type MailEngineMode = 'simulation' | 'remote';
 
 /**
+ * Fase 2.1 — gates `MailboxMotorPort` (token-based account linking), a
+ * separate external system from `MailEnginePort`/`EngineClient` above: the
+ * "motor" here owns account registration/credentials/token issuance, never
+ * sending. `http` is a prepared-but-unimplemented driver (see
+ * HttpMailboxMotorAdapter) — no real motor is reachable yet.
+ */
+export type MailboxMotorDriver = 'simulated' | 'http';
+
+/**
+ * Gates `SequenceTemplateMotorPort`/`SequenceExecutionMotorPort` — the
+ * Railway-hosted engine that accepts a published Plantilla and starts a
+ * Gestión. A third external system, distinct from both `MailboxMotorPort`
+ * (account linking) and `MailEnginePort` (the legacy simulated sequence
+ * engine): this one owns template publication receipts (`templateToken`)
+ * and execution receipts (`executionToken`/`serverExecutionId`).
+ */
+export type SequenceMotorMode = 'simulated' | 'http';
+
+/**
  * The one place in the app that reads PERSISTENCE_DRIVER / ENGINE_DRIVER
  * and related settings. Modules ask this service which adapter to use;
  * nothing else should call `configService.get('PERSISTENCE_DRIVER')`
@@ -53,6 +72,38 @@ export class AppConfigService {
 
   get mailEngineMode(): MailEngineMode {
     return this.config.get<MailEngineMode>('MAIL_ENGINE_MODE', 'simulation');
+  }
+
+  get mailboxMotorDriver(): MailboxMotorDriver {
+    return this.config.get<MailboxMotorDriver>('MAILBOX_MOTOR_DRIVER', 'simulated');
+  }
+
+  get mailboxMotorBaseUrl(): string | undefined {
+    return this.config.get<string>('MAILBOX_MOTOR_BASE_URL') || undefined;
+  }
+
+  get mailboxMotorApiKey(): string | undefined {
+    return this.config.get<string>('MAILBOX_MOTOR_API_KEY') || undefined;
+  }
+
+  get mailboxMotorTimeoutMs(): number {
+    return this.config.get<number>('MAILBOX_MOTOR_TIMEOUT_MS', 10_000);
+  }
+
+  get sequenceMotorMode(): SequenceMotorMode {
+    return this.config.get<SequenceMotorMode>('SEQUENCE_MOTOR_MODE', 'simulated');
+  }
+
+  get sequenceMotorBaseUrl(): string | undefined {
+    return this.config.get<string>('SEQUENCE_MOTOR_BASE_URL') || undefined;
+  }
+
+  get sequenceMotorApiKey(): string | undefined {
+    return this.config.get<string>('SEQUENCE_MOTOR_API_KEY') || undefined;
+  }
+
+  get sequenceMotorTimeoutMs(): number {
+    return this.config.get<number>('SEQUENCE_MOTOR_TIMEOUT_MS', 10_000);
   }
 
   get storageDriver(): StorageDriver {

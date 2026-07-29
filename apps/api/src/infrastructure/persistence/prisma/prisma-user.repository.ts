@@ -1,14 +1,17 @@
 import { ConflictException, Injectable } from '@nestjs/common';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { CreateUserInput, UpdateUserInput, User } from '../../../domain/user/user.entity';
 import { UserRepository } from '../../../domain/user/user.repository';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 @Injectable()
 export class PrismaUserRepository implements UserRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<User | null> {
-    return this.prisma.user.findFirst({ where: { id, deletedAt: null } });
+  async findById(id: string, ctx?: TransactionContext): Promise<User | null> {
+    const client = resolveClient(this.prisma, ctx);
+    return client.user.findFirst({ where: { id, deletedAt: null } });
   }
 
   async findByEmail(organizationId: string, email: string): Promise<User | null> {

@@ -38,6 +38,20 @@ export interface MailboxSendingLimits {
   maximumIntervalSeconds: number;
 }
 
+/**
+ * Fase 2.1 — which system is authoritative for this account's credentials.
+ * LEGACY_LOCAL: pre-Fase-2.1 manual IMAP/SMTP flow, kept for coexistence.
+ * SERVER_TOKEN: linked via a motor-issued token; Mr Outreach never holds
+ * its credentials.
+ */
+export type MailboxLinkSource = 'LEGACY_LOCAL' | 'SERVER_TOKEN';
+
+/** Fase 2.1 — orthogonal to MailboxProvisioningStatus/MailboxConnectionStatus, which describe the LEGACY_LOCAL flow only. LEGACY marks a not-yet-migrated pre-Fase-2.1 account. */
+export type MailboxLinkStatus = 'LINK_PENDING' | 'ACTIVE' | 'UNLINK_REQUESTED' | 'REVOKED' | 'LINK_ERROR' | 'LEGACY';
+
+/** Fase 2.1 — mirrors MailboxTechnicalStatus in domain/mailbox-motor/mailbox-motor.types.ts exactly. */
+export type MailboxServerTechnicalStatus = 'CONNECTED' | 'DEGRADED' | 'DISCONNECTED' | 'DISABLED' | 'UNKNOWN';
+
 export interface MailboxProtocolConfig {
   host: string;
   port: number;
@@ -79,8 +93,36 @@ export interface Mailbox {
   lastTestedAt: Date | null;
   lastTestedBy: string | null;
   lastTestMessage: string | null;
-  imap: MailboxProtocolConfig;
-  smtp: MailboxProtocolConfig;
+  /**
+   * Fase 2.1 — null for a SERVER_TOKEN mailbox: Mr Outreach never holds its
+   * IMAP credentials. Always populated for LEGACY_LOCAL. Callers that only
+   * make sense for the legacy manual flow (test connection, legacy
+   * provisioning) must guard on `linkSource`/nullness before use.
+   */
+  imap: MailboxProtocolConfig | null;
+  /** Fase 2.1 — same nullability rule as `imap`, see above. */
+  smtp: MailboxProtocolConfig | null;
+  linkSource: MailboxLinkSource;
+  linkStatus: MailboxLinkStatus;
+  serverMailboxId: string | null;
+  serverDomainId: string | null;
+  serverClientId: string | null;
+  serverRedemptionId: string | null;
+  tokenFingerprint: string | null;
+  emailSnapshot: string | null;
+  domainSnapshot: string | null;
+  clientNameSnapshot: string | null;
+  serverStatusSnapshot: MailboxServerTechnicalStatus | null;
+  serverCanSendSnapshot: boolean | null;
+  serverStatusCheckedAt: Date | null;
+  linkedAt: Date | null;
+  linkedBy: string | null;
+  unlinkRequestedAt: Date | null;
+  unlinkRequestedBy: string | null;
+  unlinkReason: string | null;
+  revokedAt: Date | null;
+  revocationId: string | null;
+  lastLinkCommandId: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -96,6 +138,30 @@ export interface CreateMailboxInput {
   sendingLimits?: MailboxSendingLimits;
   imap: MailboxProtocolConfig;
   smtp: MailboxProtocolConfig;
+}
+
+/** Fase 2.1 — the counterpart of CreateMailboxInput for a SERVER_TOKEN mailbox: never takes imap/smtp, always takes the motor-issued identifiers/snapshots instead. */
+export interface CreateLinkedMailboxInput {
+  organizationId: string;
+  clientId: string;
+  domainId: string;
+  name: string;
+  email: string;
+  fromName: string;
+  serverMailboxId: string;
+  serverDomainId: string;
+  serverClientId: string;
+  serverRedemptionId: string;
+  tokenFingerprint: string;
+  emailSnapshot: string;
+  domainSnapshot: string;
+  clientNameSnapshot: string;
+  serverStatusSnapshot: MailboxServerTechnicalStatus;
+  serverCanSendSnapshot: boolean;
+  serverStatusCheckedAt: Date;
+  linkedAt: Date;
+  linkedBy: string;
+  lastLinkCommandId: string;
 }
 
 export interface UpdateMailboxInput {
@@ -116,4 +182,16 @@ export interface UpdateMailboxInput {
   smtp?: Partial<MailboxProtocolConfig>;
   clientId?: string | null;
   domainId?: string | null;
+  // Fase 2.1 — link lifecycle fields, written by the linking/reassignment/
+  // unlink use cases (never by the legacy CreateMailboxInput/update flow).
+  linkStatus?: MailboxLinkStatus;
+  serverStatusSnapshot?: MailboxServerTechnicalStatus | null;
+  serverCanSendSnapshot?: boolean | null;
+  serverStatusCheckedAt?: Date | null;
+  unlinkRequestedAt?: Date | null;
+  unlinkRequestedBy?: string | null;
+  unlinkReason?: string | null;
+  revokedAt?: Date | null;
+  revocationId?: string | null;
+  lastLinkCommandId?: string | null;
 }

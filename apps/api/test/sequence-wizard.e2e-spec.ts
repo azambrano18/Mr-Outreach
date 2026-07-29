@@ -241,6 +241,7 @@ describe('Sequence creation wizard + publish contract (e2e) — memory + simulat
       await request(app.getHttpServer())
         .post(`/me/sequences/${sequenceId}/publish`)
         .set('Authorization', `Bearer ${executiveToken}`)
+        .set('Idempotency-Key', `wizard-header-publish-${sequenceId}`)
         .send({});
 
       const commandView = await request(app.getHttpServer())
@@ -366,6 +367,7 @@ describe('Sequence creation wizard + publish contract (e2e) — memory + simulat
       const failed = await request(app.getHttpServer())
         .post(`/me/sequences/${sequenceId}/publish`)
         .set('Authorization', `Bearer ${executiveToken}`)
+        .set('Idempotency-Key', `wizard-publish-failed-${sequenceId}`)
         .send({ scenario: 'FAILED' });
       expect(failed.status).toBe(201);
       expect(failed.body.sequence.publishStatus).toBe('FAILED');
@@ -375,6 +377,7 @@ describe('Sequence creation wizard + publish contract (e2e) — memory + simulat
       const retried = await request(app.getHttpServer())
         .post(`/me/sequences/${sequenceId}/publish`)
         .set('Authorization', `Bearer ${executiveToken}`)
+        .set('Idempotency-Key', `wizard-publish-retry-${sequenceId}`)
         .send({});
       expect(retried.status).toBe(201);
       expect(retried.body.sequence.publishStatus).toBe('ACTIVE');

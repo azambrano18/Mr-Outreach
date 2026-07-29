@@ -24,16 +24,26 @@ export class InMemoryManagedClientRepository implements ManagedClientRepository 
   }
 
   async create(input: CreateManagedClientInput): Promise<ManagedClient> {
-    const existing = await this.findByCrmClientId(input.organizationId, input.crmClientId);
-    if (existing) {
-      throw new ConflictException('This CRM client is already configured in this organization.');
+    if (input.crmClientId != null) {
+      const existing = await this.findByCrmClientId(input.organizationId, input.crmClientId);
+      if (existing) {
+        throw new ConflictException('This CRM client is already configured in this organization.');
+      }
+    }
+    if (input.serverClientId) {
+      const existing = await this.findByServerClientId(input.organizationId, input.serverClientId);
+      if (existing) {
+        throw new ConflictException('This server client is already configured in this organization.');
+      }
     }
 
     const now = new Date();
     const client: ManagedClient = {
       id: randomUUID(),
       organizationId: input.organizationId,
-      crmClientId: input.crmClientId,
+      crmClientId: input.crmClientId ?? null,
+      source: input.source ?? (input.crmClientId != null ? 'LEGACY_CRM' : 'SERVER'),
+      serverClientId: input.serverClientId ?? null,
       name: input.name,
       legalName: input.legalName ?? null,
       internalCode: input.internalCode ?? null,
@@ -69,6 +79,15 @@ export class InMemoryManagedClientRepository implements ManagedClientRepository 
   async findByCrmClientId(organizationId: string, crmClientId: number): Promise<ManagedClient | null> {
     for (const client of this.store.managedClients.values()) {
       if (!client.deletedAt && client.organizationId === organizationId && client.crmClientId === crmClientId) {
+        return client;
+      }
+    }
+    return null;
+  }
+
+  async findByServerClientId(organizationId: string, serverClientId: string): Promise<ManagedClient | null> {
+    for (const client of this.store.managedClients.values()) {
+      if (!client.deletedAt && client.organizationId === organizationId && client.serverClientId === serverClientId) {
         return client;
       }
     }

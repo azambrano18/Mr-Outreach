@@ -78,4 +78,39 @@ export class InMemoryCompanyRepository implements CompanyRepository {
     this.store.companies.set(id, updated);
     return updated;
   }
+
+  async findManyByNormalizedNames(
+    organizationId: string,
+    clientId: string,
+    normalizedNames: string[],
+  ): Promise<Company[]> {
+    const names = new Set(normalizedNames);
+    return Array.from(this.store.companies.values()).filter(
+      (c) => !c.deletedAt && c.organizationId === organizationId && c.clientId === clientId && names.has(c.normalizedName),
+    );
+  }
+
+  async findManyByIds(ids: string[]): Promise<Company[]> {
+    const idSet = new Set(ids);
+    return Array.from(this.store.companies.values()).filter((c) => !c.deletedAt && idSet.has(c.id));
+  }
+
+  async createMany(inputs: Array<CreateCompanyInput & { id: string }>): Promise<Company[]> {
+    const now = new Date();
+    const created: Company[] = inputs.map((input) => ({
+      id: input.id,
+      organizationId: input.organizationId,
+      clientId: input.clientId,
+      rawName: input.rawName,
+      normalizedName: normalizeCompanyName(input.rawName),
+      suppressed: false,
+      suppressedAt: null,
+      suppressedReason: null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    }));
+    for (const company of created) this.store.companies.set(company.id, company);
+    return created;
+  }
 }

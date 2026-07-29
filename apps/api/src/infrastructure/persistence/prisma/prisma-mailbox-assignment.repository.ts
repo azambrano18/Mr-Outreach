@@ -5,14 +5,16 @@ import {
   MailboxAssignmentRole,
 } from '../../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../../domain/mailbox-assignment/mailbox-assignment.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 @Injectable()
 export class PrismaMailboxAssignmentRepository implements MailboxAssignmentRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async upsert(input: CreateMailboxAssignmentInput): Promise<MailboxAssignment> {
-    const row = await this.prisma.mailboxAssignment.upsert({
+  async upsert(input: CreateMailboxAssignmentInput, ctx?: TransactionContext): Promise<MailboxAssignment> {
+    const row = await resolveClient(this.prisma, ctx).mailboxAssignment.upsert({
       where: { mailboxId_userId: { mailboxId: input.mailboxId, userId: input.userId } },
       create: {
         organizationId: input.organizationId,
@@ -26,17 +28,22 @@ export class PrismaMailboxAssignmentRepository implements MailboxAssignmentRepos
     return this.toDomain(row);
   }
 
-  async remove(mailboxId: string, userId: string): Promise<void> {
-    await this.prisma.mailboxAssignment.deleteMany({ where: { mailboxId, userId } });
+  async remove(mailboxId: string, userId: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).mailboxAssignment.deleteMany({ where: { mailboxId, userId } });
   }
 
-  async findByMailbox(mailboxId: string): Promise<MailboxAssignment[]> {
-    const rows = await this.prisma.mailboxAssignment.findMany({ where: { mailboxId } });
+  async findByMailbox(mailboxId: string, ctx?: TransactionContext): Promise<MailboxAssignment[]> {
+    const rows = await resolveClient(this.prisma, ctx).mailboxAssignment.findMany({ where: { mailboxId } });
     return rows.map((row) => this.toDomain(row));
   }
 
-  async findByUser(userId: string): Promise<MailboxAssignment[]> {
-    const rows = await this.prisma.mailboxAssignment.findMany({ where: { userId } });
+  async findByUser(userId: string, ctx?: TransactionContext): Promise<MailboxAssignment[]> {
+    const rows = await resolveClient(this.prisma, ctx).mailboxAssignment.findMany({ where: { userId } });
+    return rows.map((row) => this.toDomain(row));
+  }
+
+  async findAllByOrganization(organizationId: string): Promise<MailboxAssignment[]> {
+    const rows = await this.prisma.mailboxAssignment.findMany({ where: { organizationId } });
     return rows.map((row) => this.toDomain(row));
   }
 

@@ -50,17 +50,17 @@ describe('CRM clients (e2e) — memory + mock CRM driver', () => {
       expect(typeof client.name).toBe('string');
     }
     // The demo dataset includes inactive rows (one with a trailing-space status) — must never appear.
-    expect(response.body.map((c: { name: string }) => c.name)).not.toContain('Comercial Andina');
-    expect(response.body.map((c: { name: string }) => c.name)).not.toContain('Frigorífico del Sur');
+    expect(response.body.map((c: { name: string }) => c.name)).not.toContain('Demo Retail Centro');
+    expect(response.body.map((c: { name: string }) => c.name)).not.toContain('Demo Alimentos Costa');
   });
 
   it('filters by search (case-insensitive substring on name)', async () => {
     const response = await request(app.getHttpServer())
-      .get('/crm-clients?search=litoral')
+      .get('/crm-clients?search=tecnología sur')
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
-    expect(response.body.map((c: { name: string }) => c.name)).toEqual(['Litoral Software']);
+    expect(response.body.map((c: { name: string }) => c.name)).toEqual(['Demo Tecnología Sur']);
   });
 
   it('gets a single CRM client by id', async () => {

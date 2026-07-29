@@ -1,6 +1,8 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma, ScheduledEmail as PrismaScheduledEmailRow } from '@prisma/client';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import {
+  CANCELLABLE_SCHEDULED_EMAIL_STATUSES,
   CreateScheduledEmailInput,
   ScheduledEmail,
   UpdateScheduledEmailInput,
@@ -10,6 +12,7 @@ import {
   ScheduledEmailRepository,
 } from '../../../domain/scheduled-email/scheduled-email.repository';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaScheduledEmailRow): ScheduledEmail {
   return {
@@ -72,10 +75,24 @@ export class PrismaScheduledEmailRepository implements ScheduledEmailRepository 
     return rows.map(toDomain);
   }
 
+  async findManyBySequenceContactIds(
+    sequenceContactIds: string[],
+    ctx?: TransactionContext,
+  ): Promise<ScheduledEmail[]> {
+    if (sequenceContactIds.length === 0) return [];
+    const client = resolveClient(this.prisma, ctx);
+    const rows = await client.scheduledEmail.findMany({
+      where: { sequenceContactId: { in: sequenceContactIds } },
+    });
+    return rows.map(toDomain);
+  }
+
   async findAll(
     organizationId: string,
     filter: ScheduledEmailFilter = {},
+    ctx?: TransactionContext,
   ): Promise<ScheduledEmail[]> {
+    const client = resolveClient(this.prisma, ctx);
     const where: Prisma.ScheduledEmailWhereInput = { organizationId };
     if (filter.status) where.status = filter.status as never;
     if (filter.sequenceContactId) where.sequenceContactId = filter.sequenceContactId;
@@ -83,13 +100,14 @@ export class PrismaScheduledEmailRepository implements ScheduledEmailRepository 
     if (filter.batchId) where.batchId = filter.batchId;
     if (filter.sequenceId) where.sequenceId = filter.sequenceId;
     if (filter.companyId) where.companyId = filter.companyId;
-    const rows = await this.prisma.scheduledEmail.findMany({ where, orderBy: { scheduledAt: 'asc' } });
+    const rows = await client.scheduledEmail.findMany({ where, orderBy: { scheduledAt: 'asc' } });
     return rows.map(toDomain);
   }
 
-  async create(input: CreateScheduledEmailInput): Promise<ScheduledEmail> {
+  async create(input: CreateScheduledEmailInput, ctx?: TransactionContext): Promise<ScheduledEmail> {
+    const client = resolveClient(this.prisma, ctx);
     try {
-      const row = await this.prisma.scheduledEmail.create({
+      const row = await client.scheduledEmail.create({
         data: {
           organizationId: input.organizationId,
           sequenceId: input.sequenceId,
@@ -115,8 +133,102 @@ export class PrismaScheduledEmailRepository implements ScheduledEmailRepository 
     }
   }
 
+  async createMany(
+    inputs: Array<CreateScheduledEmailInput & { id: string }>,
+    ctx?: TransactionContext,
+  ): Promise<ScheduledEmail[]> {
+    if (inputs.length === 0) return [];
+    const client = resolveClient(this.prisma, ctx);
+    const now = new Date();
+    await client.scheduledEmail.createMany({
+      data: inputs.map((input) => ({
+        id: input.id,
+        organizationId: input.organizationId,
+        sequenceId: input.sequenceId,
+        sequenceVersion: input.sequenceVersion,
+        sequenceContactId: input.sequenceContactId,
+        contactId: input.contactId,
+        companyId: input.companyId,
+        sequenceStepId: input.sequenceStepId,
+        stepVersion: input.stepVersion,
+        mailboxId: input.mailboxId,
+        batchId: input.batchId,
+        scheduledAt: input.scheduledAt,
+        priority: input.priority,
+        idempotencyKey: input.idempotencyKey,
+      })),
+    });
+    return inputs.map((input) => ({
+      id: input.id,
+      organizationId: input.organizationId,
+      sequenceId: input.sequenceId,
+      sequenceVersion: input.sequenceVersion,
+      sequenceContactId: input.sequenceContactId,
+      contactId: input.contactId,
+      companyId: input.companyId,
+      sequenceStepId: input.sequenceStepId,
+      stepVersion: input.stepVersion,
+      mailboxId: input.mailboxId,
+      batchId: input.batchId,
+      scheduledAt: input.scheduledAt,
+      status: 'PENDING',
+      priority: input.priority,
+      attemptCount: 0,
+      idempotencyKey: input.idempotencyKey,
+      lastError: null,
+      cancelledAt: null,
+      cancellationReason: null,
+      sentAt: null,
+      subjectSnapshot: null,
+      htmlBodySnapshot: null,
+      plainTextBodySnapshot: null,
+      signatureSnapshot: null,
+      messageIdHeader: null,
+      inReplyTo: null,
+      referencesHeader: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+  }
+
   async update(id: string, input: UpdateScheduledEmailInput): Promise<ScheduledEmail> {
     const row = await this.prisma.scheduledEmail.update({ where: { id }, data: input });
     return toDomain(row);
+  }
+
+  async cancelFutureForSequenceContact(
+    sequenceContactId: string,
+    reason: string,
+    ctx?: TransactionContext,
+  ): Promise<number> {
+    const client = resolveClient(this.prisma, ctx);
+    const result = await client.scheduledEmail.updateMany({
+      where: { sequenceContactId, status: { in: CANCELLABLE_SCHEDULED_EMAIL_STATUSES } },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: reason },
+    });
+    return result.count;
+  }
+
+  async cancelFutureForSequenceCompany(
+    sequenceId: string,
+    companyId: string,
+    reason: string,
+    ctx?: TransactionContext,
+  ): Promise<number> {
+    const client = resolveClient(this.prisma, ctx);
+    const result = await client.scheduledEmail.updateMany({
+      where: { sequenceId, companyId, status: { in: CANCELLABLE_SCHEDULED_EMAIL_STATUSES } },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: reason },
+    });
+    return result.count;
+  }
+
+  async cancelFutureForMailbox(mailboxId: string, reason: string, ctx?: TransactionContext): Promise<number> {
+    const client = resolveClient(this.prisma, ctx);
+    const result = await client.scheduledEmail.updateMany({
+      where: { mailboxId, status: { in: CANCELLABLE_SCHEDULED_EMAIL_STATUSES } },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: reason },
+    });
+    return result.count;
   }
 }

@@ -46,6 +46,30 @@ const CLASSIFICATION_LABEL: Record<ConversationClassification, string> = {
 
 const CLASSIFICATION_OPTIONS = Object.keys(CLASSIFICATION_LABEL) as ConversationClassification[];
 
+/** §7 — exact required visible text for each outcome; the badge shown in the list, the detail header and the filter. */
+const RESPONSE_OUTCOME_LABEL: Record<ResponseOutcome, string> = {
+  NOT_INTERESTED: 'No interesado',
+  DO_NOT_CONTACT: 'No Contactar',
+  INTERESTED: 'Interesado',
+  REFERRED: 'Deriva',
+};
+
+const RESPONSE_OUTCOME_STYLE: Record<ResponseOutcome, string> = {
+  NOT_INTERESTED: 'bg-slate-100 text-slate-700',
+  DO_NOT_CONTACT: 'bg-red-100 text-red-700',
+  INTERESTED: 'bg-emerald-100 text-emerald-700',
+  REFERRED: 'bg-brand-100 text-brand-700',
+};
+
+function ResponseOutcomeBadge({ outcome }: { outcome: ResponseOutcome | null }) {
+  if (!outcome) return null;
+  return (
+    <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONSE_OUTCOME_STYLE[outcome]}`}>
+      {RESPONSE_OUTCOME_LABEL[outcome]}
+    </span>
+  );
+}
+
 function relativeDate(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const hours = Math.round(diffMs / (60 * 60 * 1000));
@@ -111,6 +135,8 @@ export function AccountsWorkspace({
   const [sequenceFilter, setSequenceFilter] = useState('');
   const [unreadFilter, setUnreadFilter] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('');
+  /** §7 — 'UNCLASSIFIED' is the "Sin clasificar" sentinel; '' means "Todos" (no filter applied). */
+  const [responseOutcomeFilter, setResponseOutcomeFilter] = useState('');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
 
@@ -160,6 +186,7 @@ export function AccountsWorkspace({
         if (sequenceFilter) params.set('sequenceId', sequenceFilter);
         if (unreadFilter) params.set('unread', unreadFilter);
         if (classificationFilter) params.set('classification', classificationFilter);
+        if (responseOutcomeFilter) params.set('responseOutcome', responseOutcomeFilter);
         if (dateFromFilter) params.set('dateFrom', new Date(dateFromFilter).toISOString());
         if (dateToFilter) params.set('dateTo', new Date(dateToFilter).toISOString());
       }
@@ -363,6 +390,22 @@ export function AccountsWorkspace({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+            Resultado de la conversación
+            <select
+              value={responseOutcomeFilter}
+              onChange={(event) => setResponseOutcomeFilter(event.target.value)}
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">Todos</option>
+              <option value="UNCLASSIFIED">Sin clasificar</option>
+              {(Object.keys(RESPONSE_OUTCOME_LABEL) as ResponseOutcome[]).map((value) => (
+                <option key={value} value={value}>
+                  {RESPONSE_OUTCOME_LABEL[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
             Desde
             <input
               type="date"
@@ -442,6 +485,7 @@ export function AccountsWorkspace({
             </div>
             <span className="truncate text-sm text-slate-600">{conversation.subject}</span>
             <span className="truncate text-[11px] text-slate-400">{conversation.companyName ?? 'Empresa sin identificar'}</span>
+            <ResponseOutcomeBadge outcome={conversation.responseOutcome} />
             {mode === 'admin' && (
               <span className="truncate text-[11px] text-slate-400">
                 Ejecutivo: {conversation.assignedExecutiveName ?? 'Sin asignar'}
@@ -472,7 +516,10 @@ export function AccountsWorkspace({
 
             <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
               <div className="flex flex-col gap-1">
-                <h3 className="text-base font-semibold text-slate-900">{detail.subject}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-semibold text-slate-900">{detail.subject}</h3>
+                  <ResponseOutcomeBadge outcome={detail.responseOutcome} />
+                </div>
                 <p className="text-xs text-slate-500">
                   {detail.contactName ?? detail.contactEmail} · {detail.contactEmail}
                 </p>

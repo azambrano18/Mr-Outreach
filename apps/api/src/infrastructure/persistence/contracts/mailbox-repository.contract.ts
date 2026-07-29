@@ -30,7 +30,7 @@ export function runMailboxRepositoryContractTests(
 
     expect(created.status).toBe('ACTIVE');
     expect(created.connectionStatus).toBe('NOT_TESTED');
-    expect(created.imap.secretCiphertext).toBe('iv.tag.cipher');
+    expect(created.imap!.secretCiphertext).toBe('iv.tag.cipher');
   });
 
   it('enforces email uniqueness within the same organization', async () => {
@@ -93,9 +93,9 @@ export function runMailboxRepositoryContractTests(
 
     const updated = await repo.update(created.id, { imap: { host: 'imap2.example.com' } });
 
-    expect(updated.imap.host).toBe('imap2.example.com');
-    expect(updated.imap.port).toBe(993);
-    expect(updated.imap.secretCiphertext).toBe('iv.tag.cipher');
-    expect(updated.smtp.host).toBe('imap.example.com');
+    expect(updated.imap!.host).toBe('imap2.example.com');
+    expect(updated.imap!.port).toBe(993);
+    expect(updated.imap!.secretCiphertext).toBe('iv.tag.cipher');
+    expect(updated.smtp!.host).toBe('imap.example.com');
   });
 }

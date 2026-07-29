@@ -1,16 +1,20 @@
 import { Module } from '@nestjs/common';
 import { AdminSequenceMonitorService } from '../../application/sequences/admin-sequence-monitor.service';
-import { SequencePublishService } from '../../application/sequences/sequence-publish.service';
+import { PublishSequenceUseCase } from '../../application/sequences/publish-sequence.use-case';
+import { SequenceEligibilityService } from '../../application/sequences/sequence-eligibility.service';
 import { SequenceStepsService } from '../../application/sequences/sequence-steps.service';
 import { SequencesService } from '../../application/sequences/sequences.service';
 import { SchedulingService } from '../../application/scheduling/scheduling.service';
+import { IdempotencyModule } from '../../application/idempotency/idempotency.module';
 import { AppConfigModule } from '../../infrastructure/config/app-config.module';
 import { EngineModule } from '../../infrastructure/engine/engine.module';
 import { MailEngineModule } from '../../infrastructure/mail-engine/mail-engine.module';
+import { MailboxMotorModule } from '../../infrastructure/mailbox-motor/mailbox-motor.module';
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { SecurityModule } from '../../infrastructure/security/security.module';
 import { AuthModule } from '../auth/auth.module';
 import { ClientsModule } from '../clients/clients.module';
+import { CrmClientsModule } from '../crm-clients/crm-clients.module';
 import { IntegrationModule } from '../integration/integration.module';
 import { MeSequenceStepsController } from './me-sequence-steps.controller';
 import { MeSequencesController } from './me-sequences.controller';
@@ -27,6 +31,9 @@ import { SequencesController } from './sequences.controller';
     AppConfigModule,
     MailEngineModule,
     ClientsModule,
+    CrmClientsModule,
+    IdempotencyModule,
+    MailboxMotorModule,
   ],
   controllers: [
     SequencesController,
@@ -37,10 +44,17 @@ import { SequencesController } from './sequences.controller';
   providers: [
     SequencesService,
     SequenceStepsService,
-    SequencePublishService,
+    PublishSequenceUseCase,
     AdminSequenceMonitorService,
     SchedulingService,
+    SequenceEligibilityService,
   ],
-  exports: [SequencesService, SequencePublishService, AdminSequenceMonitorService, SchedulingService],
+  exports: [
+    SequencesService,
+    PublishSequenceUseCase,
+    AdminSequenceMonitorService,
+    SchedulingService,
+    SequenceEligibilityService,
+  ],
 })
 export class SequencesModule {}

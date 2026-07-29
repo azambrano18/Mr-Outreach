@@ -318,6 +318,16 @@ export class SequenceImportsService {
     this.simulatedAdapter.setImportScenario(commandId, scenario);
   }
 
+  /**
+   * Fase 2, Caso B — deprecated as the functional path for confirming an
+   * import: `ConfirmProspectImportUseCase` now materializes synchronously
+   * and atomically inside `confirm()` itself, never leaving an import in
+   * `SUBMITTED` (the only status this legacy `advance()`/`materialize()`
+   * pair was ever meant to react to). Guarded to a safe no-op once an
+   * import has already reached a terminal status — through either path —
+   * so it can never re-materialize (duplicate companies/contacts/
+   * enrollments) a confirmation the new use case already completed.
+   */
   async advance(
     organizationId: string,
     importId: string,
@@ -327,6 +337,10 @@ export class SequenceImportsService {
     const importRow = await this.getOwnedImport(organizationId, importId);
     if (!importRow.commandId) {
       throw new NotFoundException('Esta importación no tiene un comando activo.');
+    }
+    const ADVANCEABLE_STATUSES = new Set(['SUBMITTED', 'ACCEPTED', 'PROCESSING']);
+    if (!ADVANCEABLE_STATUSES.has(importRow.status)) {
+      return { import: importRow, events: [] };
     }
 
     const events = await this.integration.advance(organizationId, importRow.commandId, mode, actorId);

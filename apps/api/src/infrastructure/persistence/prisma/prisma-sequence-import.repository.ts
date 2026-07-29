@@ -8,7 +8,9 @@ import {
   UpdateSequenceImportInput,
 } from '../../../domain/sequence-import/sequence-import.entity';
 import { SequenceImportRepository } from '../../../domain/sequence-import/sequence-import.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaSequenceImportRow): SequenceImport {
   return {
@@ -45,8 +47,8 @@ function toDomain(row: PrismaSequenceImportRow): SequenceImport {
 export class PrismaSequenceImportRepository implements SequenceImportRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<SequenceImport | null> {
-    const row = await this.prisma.sequenceImport.findUnique({ where: { id } });
+  async findById(id: string, ctx?: TransactionContext): Promise<SequenceImport | null> {
+    const row = await resolveClient(this.prisma, ctx).sequenceImport.findUnique({ where: { id } });
     return row ? toDomain(row) : null;
   }
 
@@ -76,7 +78,7 @@ export class PrismaSequenceImportRepository implements SequenceImportRepository 
     return toDomain(row);
   }
 
-  async update(id: string, input: UpdateSequenceImportInput): Promise<SequenceImport> {
+  async update(id: string, input: UpdateSequenceImportInput, ctx?: TransactionContext): Promise<SequenceImport> {
     const { rejections, columnMapping, ...rest } = input;
     const data: Prisma.SequenceImportUpdateInput = { ...rest };
     if (rejections) {
@@ -85,7 +87,20 @@ export class PrismaSequenceImportRepository implements SequenceImportRepository 
     if (columnMapping) {
       data.columnMapping = columnMapping as unknown as Prisma.InputJsonValue;
     }
-    const row = await this.prisma.sequenceImport.update({ where: { id }, data });
+    const row = await resolveClient(this.prisma, ctx).sequenceImport.update({ where: { id }, data });
     return toDomain(row);
+  }
+
+  async conditionalUpdateStatus(
+    id: string,
+    fromStatus: string,
+    toStatus: string,
+    ctx?: TransactionContext,
+  ): Promise<number> {
+    const result = await resolveClient(this.prisma, ctx).sequenceImport.updateMany({
+      where: { id, status: fromStatus as never },
+      data: { status: toStatus as never },
+    });
+    return result.count;
   }
 }

@@ -18,6 +18,7 @@ export class InMemoryClientExecutiveAssignmentRepository implements ClientExecut
 
     if (existing) {
       existing.role = input.role;
+      existing.visibilitySource = input.visibilitySource ?? 'MANUAL';
       existing.assignedBy = input.assignedBy;
       existing.assignedAt = new Date();
       return existing;
@@ -29,6 +30,7 @@ export class InMemoryClientExecutiveAssignmentRepository implements ClientExecut
       clientId: input.clientId,
       userId: input.userId,
       role: input.role,
+      visibilitySource: input.visibilitySource ?? 'MANUAL',
       assignedBy: input.assignedBy,
       assignedAt: new Date(),
     };
@@ -51,5 +53,38 @@ export class InMemoryClientExecutiveAssignmentRepository implements ClientExecut
 
   async findByUser(userId: string): Promise<ClientExecutiveAssignment[]> {
     return this.store.clientExecutiveAssignments.filter((a) => a.userId === userId);
+  }
+
+  async ensureDerivedVisibility(input: {
+    organizationId: string;
+    clientId: string;
+    userId: string;
+    assignedBy: string;
+  }): Promise<void> {
+    const existing = this.store.clientExecutiveAssignments.find(
+      (a) => a.clientId === input.clientId && a.userId === input.userId,
+    );
+    if (existing) {
+      return;
+    }
+    this.store.clientExecutiveAssignments.push({
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      clientId: input.clientId,
+      userId: input.userId,
+      role: 'SECONDARY',
+      visibilitySource: 'MAILBOX_DERIVED',
+      assignedBy: input.assignedBy,
+      assignedAt: new Date(),
+    });
+  }
+
+  async removeDerivedVisibilityIfPresent(clientId: string, userId: string): Promise<void> {
+    const index = this.store.clientExecutiveAssignments.findIndex(
+      (a) => a.clientId === clientId && a.userId === userId && a.visibilitySource === 'MAILBOX_DERIVED',
+    );
+    if (index !== -1) {
+      this.store.clientExecutiveAssignments.splice(index, 1);
+    }
   }
 }

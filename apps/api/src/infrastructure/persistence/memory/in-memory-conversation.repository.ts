@@ -71,6 +71,11 @@ export class InMemoryConversationRepository implements ConversationRepository {
     if (filter.classification) {
       results = results.filter((c) => c.classification === filter.classification);
     }
+    if (filter.responseOutcome === 'UNCLASSIFIED') {
+      results = results.filter((c) => c.responseOutcome === null);
+    } else if (filter.responseOutcome) {
+      results = results.filter((c) => c.responseOutcome === filter.responseOutcome);
+    }
     if (filter.isUnread !== undefined) {
       results = results.filter((c) => c.isUnread === filter.isUnread);
     }

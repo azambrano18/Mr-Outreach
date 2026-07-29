@@ -44,6 +44,8 @@ export interface NormalizedImportRowData {
   country: string | null;
   website: string | null;
   linkedin: string | null;
+  /** Fase 2, Caso B — extracted from `mapping.customFields` at confirmation time; normalized keys (see confirm-prospect-import.use-case.ts), reserved base names excluded. */
+  customFields?: Record<string, string>;
 }
 
 export interface CreateSequenceImportRowInput {

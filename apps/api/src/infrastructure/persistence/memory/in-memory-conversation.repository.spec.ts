@@ -69,4 +69,35 @@ describe('InMemoryConversationRepository — new filters', () => {
     const results = await repo.findAll(organizationId, { sequenceId: 'sequence-does-not-exist' });
     expect(results).toHaveLength(0);
   });
+
+  describe('§7 — responseOutcome filter', () => {
+    beforeEach(async () => {
+      const all = await repo.findAll(organizationId);
+      const thread1 = all.find((c) => c.emailThreadId === 'thread-1')!;
+      await repo.update(thread1.id, { responseOutcome: 'INTERESTED' });
+      // thread-2 stays unclassified (responseOutcome === null)
+    });
+
+    it('filters by a specific outcome', async () => {
+      const results = await repo.findAll(organizationId, { responseOutcome: 'INTERESTED' });
+      expect(results).toHaveLength(1);
+      expect(results[0].emailThreadId).toBe('thread-1');
+    });
+
+    it('filters by UNCLASSIFIED, matching only conversations with no outcome', async () => {
+      const results = await repo.findAll(organizationId, { responseOutcome: 'UNCLASSIFIED' });
+      expect(results).toHaveLength(1);
+      expect(results[0].emailThreadId).toBe('thread-2');
+    });
+
+    it('returns everything when no responseOutcome filter is given', async () => {
+      const results = await repo.findAll(organizationId, {});
+      expect(results).toHaveLength(2);
+    });
+
+    it('returns nothing for an outcome no conversation has', async () => {
+      const results = await repo.findAll(organizationId, { responseOutcome: 'DO_NOT_CONTACT' });
+      expect(results).toHaveLength(0);
+    });
+  });
 });

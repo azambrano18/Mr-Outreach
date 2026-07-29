@@ -19,11 +19,11 @@ export const MOCK_CRM_OUTAGE_SENTINEL_ID = 999999;
  * gets exercised even without a live Neon connection.
  */
 const DEMO_CLIENTS: CrmClient[] = [
-  { crmClientId: 1001, name: 'Litoral Software', rut: '76.123.456-7', rubro: 'Tecnología', status: 'ACTIVO' },
-  { crmClientId: 1002, name: 'Vertex Ingeniería', rut: '76.234.567-8', rubro: 'Construcción', status: 'ACTIVO' },
-  { crmClientId: 1003, name: 'GTD', rut: '76.345.678-9', rubro: 'Telecomunicaciones', status: 'ACTIVO' },
-  { crmClientId: 1004, name: 'Comercial Andina', rut: '76.456.789-0', rubro: 'Retail', status: 'INACTIVO' },
-  { crmClientId: 1005, name: 'Frigorífico del Sur', rut: '76.567.890-1', rubro: 'Alimentos', status: 'INACTIVO ' },
+  { crmClientId: 1001, name: 'Empresa Demostración', rut: '76.123.456-7', rubro: 'Servicios', status: 'ACTIVO' },
+  { crmClientId: 1002, name: 'Demo Servicios Norte', rut: '76.234.567-8', rubro: 'Servicios', status: 'ACTIVO' },
+  { crmClientId: 1003, name: 'Demo Tecnología Sur', rut: '76.345.678-9', rubro: 'Servicios', status: 'ACTIVO' },
+  { crmClientId: 1004, name: 'Demo Retail Centro', rut: '76.456.789-0', rubro: 'Servicios', status: 'INACTIVO' },
+  { crmClientId: 1005, name: 'Demo Alimentos Costa', rut: '76.567.890-1', rubro: 'Servicios', status: 'INACTIVO ' },
   // A generous block of generic active entries — e2e/admin-UI tests each
   // "configure" their own throwaway ManagedClient and need a distinct,
   // real (mock) crmClientId to do so; 5 named entries above aren't enough

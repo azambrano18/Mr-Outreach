@@ -9,7 +9,9 @@ import {
   IntegrationCommandFilter,
   IntegrationCommandRepository,
 } from '../../../domain/integration/integration-command.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaIntegrationCommandRow): IntegrationCommand {
   return {
@@ -32,6 +34,9 @@ function toDomain(row: PrismaIntegrationCommandRow): IntegrationCommand {
     sentAt: row.sentAt,
     acceptedAt: row.acceptedAt,
     completedAt: row.completedAt,
+    payloadHash: row.payloadHash,
+    resultSnapshot: (row.resultSnapshot as Record<string, unknown> | null) ?? null,
+    httpStatusCode: row.httpStatusCode,
   };
 }
 
@@ -52,8 +57,9 @@ export class PrismaIntegrationCommandRepository implements IntegrationCommandRep
   async findByIdempotencyKey(
     organizationId: string,
     idempotencyKey: string,
+    ctx?: TransactionContext,
   ): Promise<IntegrationCommand | null> {
-    const row = await this.prisma.integrationCommand.findUnique({
+    const row = await resolveClient(this.prisma, ctx).integrationCommand.findUnique({
       where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
     });
     return row ? toDomain(row) : null;
@@ -79,9 +85,9 @@ export class PrismaIntegrationCommandRepository implements IntegrationCommandRep
     return rows.map(toDomain);
   }
 
-  async create(input: CreateIntegrationCommandInput): Promise<IntegrationCommand> {
+  async create(input: CreateIntegrationCommandInput, ctx?: TransactionContext): Promise<IntegrationCommand> {
     try {
-      const row = await this.prisma.integrationCommand.create({
+      const row = await resolveClient(this.prisma, ctx).integrationCommand.create({
         data: {
           organizationId: input.organizationId,
           commandId: input.commandId,
@@ -93,6 +99,9 @@ export class PrismaIntegrationCommandRepository implements IntegrationCommandRep
           correlationId: input.correlationId,
           payload: input.payload as Prisma.InputJsonValue,
           requestedBy: input.requestedBy,
+          payloadHash: input.payloadHash ?? null,
+          resultSnapshot: (input.resultSnapshot ?? undefined) as Prisma.InputJsonValue | undefined,
+          httpStatusCode: input.httpStatusCode ?? null,
         },
       });
       return toDomain(row);
@@ -104,8 +113,11 @@ export class PrismaIntegrationCommandRepository implements IntegrationCommandRep
     }
   }
 
-  async update(id: string, input: UpdateIntegrationCommandInput): Promise<IntegrationCommand> {
-    const row = await this.prisma.integrationCommand.update({ where: { id }, data: input });
+  async update(id: string, input: UpdateIntegrationCommandInput, ctx?: TransactionContext): Promise<IntegrationCommand> {
+    const row = await resolveClient(this.prisma, ctx).integrationCommand.update({
+      where: { id },
+      data: { ...input, resultSnapshot: (input.resultSnapshot ?? undefined) as Prisma.InputJsonValue | undefined },
+    });
     return toDomain(row);
   }
 }

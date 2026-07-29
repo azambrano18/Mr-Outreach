@@ -117,9 +117,14 @@ describe('SchedulingService.createBatch', () => {
       findById: jest.fn(),
       findByIdempotencyKey: jest.fn(),
       findBySequenceContact: jest.fn().mockResolvedValue([]),
+      findManyBySequenceContactIds: jest.fn().mockResolvedValue([]),
       findAll: jest.fn(),
       create: jest.fn(),
+      createMany: jest.fn(),
       update: jest.fn(),
+      cancelFutureForSequenceContact: jest.fn(),
+      cancelFutureForSequenceCompany: jest.fn(),
+      cancelFutureForMailbox: jest.fn(),
     };
     sequenceContacts = {
       findById: jest.fn(),
@@ -129,6 +134,10 @@ describe('SchedulingService.createBatch', () => {
       findAllByOrganization: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      createMany: jest.fn(),
+      bulkSetScheduled: jest.fn(),
+      conditionalRemove: jest.fn(),
+      bulkRemoveByCompany: jest.fn(),
     };
     steps = {
       findById: jest.fn(),
@@ -139,7 +148,7 @@ describe('SchedulingService.createBatch', () => {
       remove: jest.fn(),
     };
     stepVersions = { create: jest.fn(), findByStep: jest.fn().mockResolvedValue([{ versionNumber: 3 }]) };
-    mailboxes = { findById: jest.fn(), findByEmail: jest.fn(), findAll: jest.fn(), create: jest.fn(), update: jest.fn() };
+    mailboxes = { findById: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn(), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
     sequences = {
       findById: jest.fn().mockResolvedValue({ timezone: 'America/Santiago' }),
@@ -148,6 +157,7 @@ describe('SchedulingService.createBatch', () => {
       findAllByOrganization: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      conditionalUpdatePublishStatus: jest.fn(),
     };
 
     service = new SchedulingService(scheduledEmails, sequenceContacts, sequences, steps, stepVersions, mailboxes, auditLogs);

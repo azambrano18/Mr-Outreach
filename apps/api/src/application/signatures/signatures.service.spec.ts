@@ -119,8 +119,10 @@ describe('SignaturesService', () => {
     mailboxes = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
+      createLinked: jest.fn(),
       update: jest.fn(),
     };
     assignments = {
@@ -128,6 +130,7 @@ describe('SignaturesService', () => {
       remove: jest.fn(),
       findByMailbox: jest.fn().mockResolvedValue([]),
       findByUser: jest.fn(),
+      findAllByOrganization: jest.fn().mockResolvedValue([]),
     };
     users = {
       findById: jest.fn(),

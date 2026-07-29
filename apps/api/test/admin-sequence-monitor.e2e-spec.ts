@@ -122,6 +122,7 @@ describe('Admin sequence monitoring panel (e2e) — memory + simulated engine', 
     await request(app.getHttpServer())
       .post(`/me/sequences/${sequenceId}/publish`)
       .set('Authorization', `Bearer ${executive.token}`)
+      .set('Idempotency-Key', `admin-monitor-publish-${sequenceId}`)
       .send({});
 
     const csv = 'email,firstName,company\ncontacta.monitor@example.com,Ana,Empresa Uno\ncontactb.monitor@example.com,Beto,Empresa Dos\n';
@@ -134,14 +135,13 @@ describe('Admin sequence monitoring panel (e2e) — memory + simulated engine', 
       .post(`/me/sequence-imports/${importId}/mapping`)
       .set('Authorization', `Bearer ${executive.token}`)
       .send({ email: 'email', firstName: 'firstName', company: 'company' });
+    // Fase 2, Caso B — confirm() is now a single, synchronous, atomic
+    // operation: no separate /advance call is needed to materialize.
     await request(app.getHttpServer())
       .post(`/me/sequence-imports/${importId}/confirm`)
       .set('Authorization', `Bearer ${executive.token}`)
+      .set('Idempotency-Key', `admin-monitor-confirm-${importId}`)
       .send({});
-    await request(app.getHttpServer())
-      .post(`/me/sequence-imports/${importId}/advance`)
-      .set('Authorization', `Bearer ${executive.token}`)
-      .send({ mode: 'ALL' });
 
     const contacts = await request(app.getHttpServer())
       .get(`/me/sequences/${sequenceId}/contacts`)
@@ -263,10 +263,11 @@ describe('Admin sequence monitoring panel (e2e) — memory + simulated engine', 
     const removed = await request(app.getHttpServer())
       .post(`/sequences/${sequenceId}/contacts/${contactToRemove.id}/remove`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', `admin-monitor-remove-contact-${contactToRemove.id}`)
       .send({ reason: 'Retiro administrativo E2E' });
 
     expect(removed.status).toBe(201);
-    expect(removed.body.contact.status).toBe('REMOVED');
+    expect(removed.body.result.status).toBe('REMOVED');
   });
 
   it('an executive without sequences.read_all cannot access the global list or detail', async () => {

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   UploadedFile,
@@ -10,8 +11,9 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser } from '../../application/auth/auth.types';
+import { ConfirmProspectImportUseCase } from '../../application/sequence-imports/confirm-prospect-import.use-case';
 import { IntegrationService } from '../../application/integration/integration.service';
 import { SequenceImportsService } from '../../application/sequence-imports/sequence-imports.service';
 import { SequencesService } from '../../application/sequences/sequences.service';
@@ -20,7 +22,6 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { AdvanceImportDto } from './dto/advance-import.dto';
-import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { SetImportMappingDto } from './dto/set-import-mapping.dto';
 import { SetImportScenarioDto } from './dto/set-import-scenario.dto';
 
@@ -36,6 +37,7 @@ export class MeSequenceImportsController {
     private readonly imports: SequenceImportsService,
     private readonly sequencesService: SequencesService,
     private readonly integration: IntegrationService,
+    private readonly confirmImport: ConfirmProspectImportUseCase,
   ) {}
 
   @Get('sequences/:sequenceId/imports')
@@ -74,23 +76,27 @@ export class MeSequenceImportsController {
     return this.imports.setMappingAndValidate(user.organizationId, importId, dto, user.id);
   }
 
+  /** Fase 2, Caso B — single, atomic, idempotent confirmation (see the admin controller's twin for the full rationale). */
   @Post('sequence-imports/:importId/confirm')
   @RequirePermissions('sequence_imports.create')
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
   async confirm(
     @CurrentUser() user: AuthenticatedUser,
     @Param('importId') importId: string,
-    @Body() dto: ConfirmImportDto,
+    @Headers('idempotency-key') idempotencyKey: string,
   ) {
-    const {
-      import: importRow,
-      command,
-      duplicate,
-    } = await this.imports.confirm(user.organizationId, importId, user.id, dto.idempotencyKey);
-    return {
-      import: importRow,
-      command: { ...command, payload: this.integration.redact(command.payload) },
-      duplicate,
-    };
+    if (!idempotencyKey) {
+      throw new BadRequestException('El encabezado Idempotency-Key es obligatorio.');
+    }
+    const importRow = await this.imports.getById(user.organizationId, importId);
+    const { result } = await this.confirmImport.execute({
+      organizationId: user.organizationId,
+      importId,
+      sequenceId: importRow.sequenceId,
+      actorId: user.id,
+      idempotencyKey,
+    });
+    return result;
   }
 
   /** §41 — choose the outcome the NEXT simulated advance will follow for this import's command. */

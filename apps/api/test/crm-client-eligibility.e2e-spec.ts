@@ -243,6 +243,7 @@ describe('CRM client eligibility (e2e) — memory + mock CRM driver', () => {
       const response = await request(app.getHttpServer())
         .post(`/sequences/${sequenceId}/publish`)
         .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `crm-elig-publish-${sequenceId}`)
         .send({});
 
       expect(response.status).toBe(409);

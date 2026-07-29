@@ -11,6 +11,14 @@ export type ScheduledEmailStatus =
 
 export type ScheduledEmailPriority = 'FOLLOW_UP' | 'NEW_CONTACT';
 
+/** §27-28 — statuses a "retirar" action is still allowed to cancel; a SENT/FAILED/CANCELLED job is never touched. */
+export const CANCELLABLE_SCHEDULED_EMAIL_STATUSES: ScheduledEmailStatus[] = [
+  'PENDING',
+  'SCHEDULED',
+  'QUEUED',
+  'RETRY_SCHEDULED',
+];
+
 /**
  * §25. Uniqueness is `sequenceContactId + sequenceStepId + stepVersion` —
  * enforced by the repository's `create()`, not a DB constraint (same

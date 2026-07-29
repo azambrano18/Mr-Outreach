@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { SequenceStep as PrismaSequenceStepRow } from '@prisma/client';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import {
   CreateSequenceStepInput,
   DelayUnit,
@@ -10,6 +11,7 @@ import {
 } from '../../../domain/sequence/sequence-step.entity';
 import { SequenceStepRepository } from '../../../domain/sequence/sequence-step.repository';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaSequenceStepRow): SequenceStep {
   return {
@@ -39,13 +41,15 @@ function toDomain(row: PrismaSequenceStepRow): SequenceStep {
 export class PrismaSequenceStepRepository implements SequenceStepRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<SequenceStep | null> {
-    const row = await this.prisma.sequenceStep.findFirst({ where: { id, deletedAt: null } });
+  async findById(id: string, ctx?: TransactionContext): Promise<SequenceStep | null> {
+    const client = resolveClient(this.prisma, ctx);
+    const row = await client.sequenceStep.findFirst({ where: { id, deletedAt: null } });
     return row ? toDomain(row) : null;
   }
 
-  async findBySequence(sequenceId: string): Promise<SequenceStep[]> {
-    const rows = await this.prisma.sequenceStep.findMany({
+  async findBySequence(sequenceId: string, ctx?: TransactionContext): Promise<SequenceStep[]> {
+    const client = resolveClient(this.prisma, ctx);
+    const rows = await client.sequenceStep.findMany({
       where: { sequenceId, deletedAt: null },
       orderBy: { position: 'asc' },
     });

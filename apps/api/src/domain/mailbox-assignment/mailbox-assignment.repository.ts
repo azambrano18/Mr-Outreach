@@ -1,3 +1,4 @@
+import { TransactionContext } from '../persistence/transaction';
 import { CreateMailboxAssignmentInput, MailboxAssignment } from './mailbox-assignment.entity';
 
 /**
@@ -10,8 +11,10 @@ import { CreateMailboxAssignmentInput, MailboxAssignment } from './mailbox-assig
  * that ever writes assignments.
  */
 export interface MailboxAssignmentRepository {
-  upsert(input: CreateMailboxAssignmentInput): Promise<MailboxAssignment>;
-  remove(mailboxId: string, userId: string): Promise<void>;
-  findByMailbox(mailboxId: string): Promise<MailboxAssignment[]>;
-  findByUser(userId: string): Promise<MailboxAssignment[]>;
+  upsert(input: CreateMailboxAssignmentInput, ctx?: TransactionContext): Promise<MailboxAssignment>;
+  remove(mailboxId: string, userId: string, ctx?: TransactionContext): Promise<void>;
+  findByMailbox(mailboxId: string, ctx?: TransactionContext): Promise<MailboxAssignment[]>;
+  findByUser(userId: string, ctx?: TransactionContext): Promise<MailboxAssignment[]>;
+  /** §12.1 — one call for the admin listing page, instead of one findByMailbox() per row. */
+  findAllByOrganization(organizationId: string): Promise<MailboxAssignment[]>;
 }

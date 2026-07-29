@@ -75,6 +75,16 @@ describe('Auth (e2e) — memory + mock', () => {
         'sequence_contacts.read',
         'sequence_contacts.remove',
         'sequence_contacts.suppress',
+        'sequence_templates.create_own',
+        'sequence_templates.read_own',
+        'sequence_templates.update_own',
+        'sequence_templates.publish_own',
+        'sequence_templates.archive_own',
+        'sequence_executions.create_own',
+        'sequence_executions.read_own',
+        'sequence_executions.import_own',
+        'sequence_executions.start_own',
+        'sequence_executions.refresh_status_own',
       ].sort(),
     );
   });

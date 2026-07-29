@@ -7,10 +7,13 @@ import {
   UpdateSequenceImportRowInput,
 } from '../../../domain/sequence-import-row/sequence-import-row.entity';
 import {
+  BulkRowResult,
   SequenceImportRowFilter,
   SequenceImportRowRepository,
 } from '../../../domain/sequence-import-row/sequence-import-row.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaSequenceImportRowRow): SequenceImportRow {
   return {
@@ -45,10 +48,14 @@ export class PrismaSequenceImportRowRepository implements SequenceImportRowRepos
     organizationId: string,
     importId: string,
     filter: SequenceImportRowFilter = {},
+    ctx?: TransactionContext,
   ): Promise<SequenceImportRow[]> {
     const where: Prisma.SequenceImportRowWhereInput = { organizationId, importId };
     if (filter.validationStatus) where.validationStatus = filter.validationStatus as never;
-    const rows = await this.prisma.sequenceImportRow.findMany({ where, orderBy: { rowNumber: 'asc' } });
+    const rows = await resolveClient(this.prisma, ctx).sequenceImportRow.findMany({
+      where,
+      orderBy: { rowNumber: 'asc' },
+    });
     return rows.map(toDomain);
   }
 
@@ -86,5 +93,29 @@ export class PrismaSequenceImportRowRepository implements SequenceImportRowRepos
   async update(id: string, input: UpdateSequenceImportRowInput): Promise<SequenceImportRow> {
     const row = await this.prisma.sequenceImportRow.update({ where: { id }, data: input });
     return toDomain(row);
+  }
+
+  /**
+   * Fase 2, Caso B — a single `UPDATE ... FROM (VALUES ...)` statement for
+   * however many rows are in the batch (never one UPDATE per row).
+   */
+  async bulkSetContactAndNormalizedData(updates: BulkRowResult[], ctx?: TransactionContext): Promise<void> {
+    if (updates.length === 0) return;
+    const client = resolveClient(this.prisma, ctx);
+    const values = Prisma.join(
+      updates.map(
+        (u) =>
+          // id/contactId are Prisma `String @id` — plain TEXT columns in
+          // Postgres, never native uuid — cast accordingly or the join
+          // below fails with "operator does not exist: text = uuid".
+          Prisma.sql`(${u.rowId}::text, ${u.contactId}::text, ${JSON.stringify(u.normalizedData)}::jsonb)`,
+      ),
+    );
+    await client.$executeRaw`
+      UPDATE "sequence_import_rows" AS r
+      SET "contactId" = v.contact_id, "normalizedData" = v.normalized_data, "updatedAt" = now()
+      FROM (VALUES ${values}) AS v(row_id, contact_id, normalized_data)
+      WHERE r.id = v.row_id
+    `;
   }
 }

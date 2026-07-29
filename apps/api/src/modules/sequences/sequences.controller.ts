@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser } from '../../application/auth/auth.types';
 import { IntegrationService } from '../../application/integration/integration.service';
@@ -7,7 +7,7 @@ import {
   AdminSequenceDetail,
   AdminSequenceListRow,
 } from '../../application/sequences/admin-sequence-monitor.types';
-import { SequencePublishService } from '../../application/sequences/sequence-publish.service';
+import { PublishSequenceUseCase } from '../../application/sequences/publish-sequence.use-case';
 import { SequencesService } from '../../application/sequences/sequences.service';
 import {
   SchedulePreview,
@@ -39,7 +39,7 @@ import { UpdateSequenceDto } from './dto/update-sequence.dto';
 export class SequencesController {
   constructor(
     private readonly sequencesService: SequencesService,
-    private readonly publishService: SequencePublishService,
+    private readonly publishSequence: PublishSequenceUseCase,
     private readonly integration: IntegrationService,
     private readonly monitor: AdminSequenceMonitorService,
   ) {}
@@ -136,25 +136,29 @@ export class SequencesController {
     return this.sequencesService.reassignExecutive(user.organizationId, id, dto, user.id);
   }
 
-  /** Admin equivalent of MeSequencesController.publish — same underlying service call, no ownership check. */
+  /** Admin equivalent of MeSequencesController.publish — same underlying use case, no ownership check. */
   @Post('sequences/:id/publish')
   @RequirePermissions('sequences.publish')
   async publish(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: PublishSequenceDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    const { sequence, command, duplicate } = await this.publishService.publish(
-      user.organizationId,
-      id,
-      user.id,
-      dto.idempotencyKey,
-      dto.scenario,
-    );
+    if (!idempotencyKey) {
+      throw new BadRequestException('El header Idempotency-Key es obligatorio.');
+    }
+    const { result } = await this.publishSequence.execute({
+      organizationId: user.organizationId,
+      sequenceId: id,
+      actorId: user.id,
+      idempotencyKey,
+      scenario: dto.scenario,
+    });
+    const command = await this.integration.getCommand(user.organizationId, result.commandId);
     return {
-      sequence: await this.sequencesService.getById(user.organizationId, sequence.id),
+      sequence: await this.sequencesService.getById(user.organizationId, result.sequenceId),
       command: { ...command, payload: this.integration.redact(command.payload) },
-      duplicate,
     };
   }
 

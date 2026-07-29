@@ -36,6 +36,12 @@ export interface IntegrationCommand {
   sentAt: Date | null;
   acceptedAt: Date | null;
   completedAt: Date | null;
+  /** Fase 2 — SHA-256 of the canonicalized logical payload of the use case that created this command. Null for commands created before Fase 2 or outside the idempotent-use-case path. */
+  payloadHash: string | null;
+  /** Fase 2 — sanitized use-case result replayed verbatim on an idempotent retry. Never credentials/tokens/connection strings. */
+  resultSnapshot: Record<string, unknown> | null;
+  /** Fase 2 — the logical HTTP status code the originating use case returned. */
+  httpStatusCode: number | null;
 }
 
 export interface CreateIntegrationCommandInput {
@@ -49,6 +55,9 @@ export interface CreateIntegrationCommandInput {
   correlationId: string;
   payload: Record<string, unknown>;
   requestedBy: string;
+  payloadHash?: string | null;
+  resultSnapshot?: Record<string, unknown> | null;
+  httpStatusCode?: number | null;
 }
 
 export interface UpdateIntegrationCommandInput {
@@ -59,4 +68,7 @@ export interface UpdateIntegrationCommandInput {
   sentAt?: Date | null;
   acceptedAt?: Date | null;
   completedAt?: Date | null;
+  payloadHash?: string | null;
+  resultSnapshot?: Record<string, unknown> | null;
+  httpStatusCode?: number | null;
 }

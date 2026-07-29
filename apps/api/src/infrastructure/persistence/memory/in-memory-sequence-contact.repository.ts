@@ -104,4 +104,82 @@ export class InMemorySequenceContactRepository implements SequenceContactReposit
     this.store.sequenceContacts.set(id, updated);
     return updated;
   }
+
+  async createMany(inputs: Array<CreateSequenceContactInput & { id: string }>): Promise<SequenceContact[]> {
+    const now = new Date();
+    const created: SequenceContact[] = inputs.map((input) => ({
+      id: input.id,
+      organizationId: input.organizationId,
+      clientId: input.clientId,
+      sequenceId: input.sequenceId,
+      sequenceVersion: input.sequenceVersion,
+      contactId: input.contactId,
+      companyId: input.companyId,
+      sourceImportId: input.sourceImportId ?? null,
+      assignedMailboxId: input.assignedMailboxId,
+      assignedExecutiveId: input.assignedExecutiveId,
+      currentStepId: input.currentStepId,
+      currentStepPosition: input.currentStepPosition,
+      status: 'ACTIVE',
+      nextScheduledAt: null,
+      startedAt: now,
+      lastSentAt: null,
+      repliedAt: null,
+      completedAt: null,
+      stoppedAt: null,
+      stopReason: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    for (const row of created) this.store.sequenceContacts.set(row.id, row);
+    return created;
+  }
+
+  async conditionalRemove(id: string, reason: string): Promise<number> {
+    const existing = this.store.sequenceContacts.get(id);
+    if (!existing || existing.status === 'REMOVED') return 0;
+    this.store.sequenceContacts.set(id, {
+      ...existing,
+      status: 'REMOVED',
+      stoppedAt: new Date(),
+      stopReason: reason,
+      updatedAt: new Date(),
+    });
+    return 1;
+  }
+
+  async bulkRemoveByCompany(organizationId: string, sequenceId: string, companyId: string, reason: string): Promise<number> {
+    let count = 0;
+    for (const row of this.store.sequenceContacts.values()) {
+      if (
+        row.organizationId === organizationId &&
+        row.sequenceId === sequenceId &&
+        row.companyId === companyId &&
+        row.status !== 'REMOVED'
+      ) {
+        this.store.sequenceContacts.set(row.id, {
+          ...row,
+          status: 'REMOVED',
+          stoppedAt: new Date(),
+          stopReason: reason,
+          updatedAt: new Date(),
+        });
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  async bulkSetScheduled(updates: Array<{ sequenceContactId: string; nextScheduledAt: Date }>): Promise<void> {
+    for (const update of updates) {
+      const existing = this.store.sequenceContacts.get(update.sequenceContactId);
+      if (!existing) continue;
+      this.store.sequenceContacts.set(update.sequenceContactId, {
+        ...existing,
+        status: 'SCHEDULED',
+        nextScheduledAt: update.nextScheduledAt,
+        updatedAt: new Date(),
+      });
+    }
+  }
 }

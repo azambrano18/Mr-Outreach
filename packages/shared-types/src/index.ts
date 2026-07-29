@@ -100,6 +100,15 @@ export type MailboxProvisioningStatus =
 /** Computed, never persisted — derived from status + connectionStatus + provisioningStatus. */
 export type MailboxOperationalStatus = 'DRAFT' | 'READY' | 'PAUSED' | 'SUSPENDED' | 'ERROR' | 'ARCHIVED';
 
+/** Fase 2.1 — which system is authoritative for this account's credentials. */
+export type MailboxLinkSource = 'LEGACY_LOCAL' | 'SERVER_TOKEN';
+
+/** Fase 2.1 — the token-link lifecycle, orthogonal to connectionStatus/provisioningStatus (LEGACY_LOCAL-only). */
+export type MailboxLinkStatus = 'LINK_PENDING' | 'ACTIVE' | 'UNLINK_REQUESTED' | 'REVOKED' | 'LINK_ERROR' | 'LEGACY';
+
+/** Fase 2.1 — mirrors the motor's own MailboxTechnicalStatus vocabulary. */
+export type MailboxServerTechnicalStatus = 'CONNECTED' | 'DEGRADED' | 'DISCONNECTED' | 'DISABLED' | 'UNKNOWN';
+
 export interface MailboxSendingLimits {
   dailyLimit: number;
   minimumIntervalSeconds: number;
@@ -120,6 +129,10 @@ export interface MailboxSummary {
   organizationId: string;
   clientId: string | null;
   domainId: string | null;
+  /** Read-only display name of the client this mailbox belongs to — never editable from here. */
+  clientName: string | null;
+  /** Read-only display name of the domain this mailbox belongs to — never editable from here. */
+  domainName: string | null;
   name: string;
   email: string;
   fromName: string;
@@ -133,10 +146,39 @@ export interface MailboxSummary {
   lastProvisionCommandId: string | null;
   lastTestedAt: string | null;
   lastTestMessage: string | null;
-  imap: ProtocolConfigSummary;
-  smtp: ProtocolConfigSummary;
+  /** Fase 2.1 — null for a SERVER_TOKEN mailbox. */
+  imap: ProtocolConfigSummary | null;
+  /** Fase 2.1 — null for a SERVER_TOKEN mailbox. */
+  smtp: ProtocolConfigSummary | null;
+  linkSource: MailboxLinkSource;
+  linkStatus: MailboxLinkStatus;
+  serverMailboxId: string | null;
+  serverStatusSnapshot: MailboxServerTechnicalStatus | null;
+  serverCanSendSnapshot: boolean | null;
+  serverStatusCheckedAt: string | null;
+  linkedAt: string | null;
+  linkedBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** §12.1 — denormalized row for the admin mailbox listing/filter screen. */
+export interface MailboxAdminOverviewItem {
+  id: string;
+  clientId: string | null;
+  clientName: string | null;
+  domainId: string | null;
+  domainName: string | null;
+  name: string;
+  email: string;
+  primaryExecutive: { id: string; name: string } | null;
+  secondaryExecutiveCount: number;
+  linkSource: MailboxLinkSource;
+  linkStatus: MailboxLinkStatus;
+  status: MailboxAdminStatus;
+  serverStatusSnapshot: MailboxServerTechnicalStatus | null;
+  serverCanSendSnapshot: boolean | null;
+  serverStatusCheckedAt: string | null;
 }
 
 export interface ProtocolConfigPayload {
@@ -224,6 +266,9 @@ export interface AssignedMailboxSummary {
   connectionStatus: MailboxConnectionStatus;
   lastTestedAt: string | null;
   lastTestMessage: string | null;
+  /** Read-only — resolved from the mailbox's SERVER_TOKEN snapshot or live ManagedClient lookup, same rule as MailboxSummary.clientName. */
+  clientName: string | null;
+  domainName: string | null;
 }
 
 export type TemplateStatus = 'ACTIVE' | 'ARCHIVED';
@@ -688,10 +733,15 @@ export interface MailboxThreadReadStateResult {
 
 export type ManagedClientStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 
+export type ManagedClientSource = 'SERVER' | 'LEGACY_CRM' | 'MANUAL';
+
 export interface ManagedClientSummary {
   id: string;
   organizationId: string;
-  crmClientId: number;
+  /** Null for a SERVER-origin client (Fase 2.1, §9.1) with no CRM linkage. */
+  crmClientId: number | null;
+  source: ManagedClientSource;
+  serverClientId: string | null;
   /** Fase 1.5 — snapshot local del nombre corporativo. Ya no editable a mano. */
   name: string;
   legalName: string | null;

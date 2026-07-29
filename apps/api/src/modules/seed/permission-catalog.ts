@@ -23,6 +23,18 @@ export const PERMISSION_CATALOG: Permission[] = [
   { key: 'mailboxes.test', description: 'Run a connection test for a mailbox.' },
   { key: 'mailboxes.assign', description: 'Assign or reassign a mailbox to an executive.' },
   { key: 'mailboxes.disable', description: 'Deactivate a mailbox.' },
+  {
+    key: 'mailboxes.link',
+    description: 'Fase 2.1: introspect and redeem a Railway mailbox-link token to link a mailbox.',
+  },
+  {
+    key: 'mailboxes.refresh_status',
+    description: "Fase 2.1: query the motor for a SERVER_TOKEN mailbox's current status.",
+  },
+  {
+    key: 'mailboxes.unlink',
+    description: 'Fase 2.1: revoke Mr Outreach\'s authorization to use a SERVER_TOKEN mailbox (owner/admin only).',
+  },
 
   { key: 'templates.read', description: 'View templates.' },
   { key: 'templates.create', description: 'Create a template.' },
@@ -180,9 +192,60 @@ export const PERMISSION_CATALOG: Permission[] = [
     key: 'simulation.manage',
     description: 'Choose simulated scenarios and drive the Monitor de integración (simulation mode only).',
   },
+
+  // Etapa "cuenta del ejecutivo" — Plantilla/Gestión. Distinct prefixes
+  // (sequence_templates.*/sequence_executions.*) so these never collide
+  // with the pre-existing, unrelated `templates.*` (canned-reply) or
+  // `sequences.*` (legacy hybrid template+execution) resources.
+  { key: 'sequence_templates.create_own', description: 'Create a Plantilla (reusable sequence content) for one of your own assigned mailboxes.' },
+  { key: 'sequence_templates.read_own', description: 'View your own Plantillas.' },
+  { key: 'sequence_templates.update_own', description: 'Edit your own Plantilla content, variables and scheduling.' },
+  { key: 'sequence_templates.publish_own', description: 'Publish a new immutable version of your own Plantilla to the sequence-template motor.' },
+  { key: 'sequence_templates.archive_own', description: 'Archive your own Plantilla.' },
+  { key: 'sequence_templates.delete_own', description: 'Logically delete your own archived Plantilla (§11) — never a currently-published or DRAFT one.' },
+  { key: 'sequence_executions.create_own', description: 'Create a Gestión (execution) from one of your own published Plantillas.' },
+  { key: 'sequence_executions.read_own', description: 'View your own Gestiones.' },
+  { key: 'sequence_executions.update_own', description: 'Edit your own Gestión while it is still DRAFT (§10) — never one already sent/accepted.' },
+  { key: 'sequence_executions.delete_own', description: 'Delete your own Gestión while it is still DRAFT (§10) — never sends anything to the server.' },
+  { key: 'sequence_executions.import_own', description: 'Upload and map a prospect file for your own Gestión.' },
+  { key: 'sequence_executions.start_own', description: 'Submit your own Gestión to the sequence-execution motor.' },
+  { key: 'sequence_executions.refresh_status_own', description: "Query the motor for your own Gestión's current status." },
+  { key: 'sequence_executions.monitor_all', description: 'Read-only: view every Gestión in the organization (admin monitor).' },
+  { key: 'sequence_executions.refresh_status_all', description: "Admin: query the motor for any executive's Gestión status." },
+
+  // Dev-only tool — never reachable when SEQUENCE_MOTOR_MODE=http or in production (see DevSimulatedExecutionsController).
+  {
+    key: 'dev_tools.simulate_execution_state',
+    description: 'Dev-only: force a Gestión into a simulated terminal/in-flight state for local visual validation (never a real motor call).',
+  },
 ];
 
-export const ADMIN_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
+/**
+ * §26 — deliberately excluded from ADMIN_PERMISSION_KEYS below: the admin
+ * role must never be able to create/edit/publish a Plantilla or create/
+ * start a Gestión, even via a direct API call bypassing the UI. Only
+ * `sequence_executions.monitor_all`/`.refresh_status_all` (admin-specific,
+ * read-only) stay in the admin grant.
+ */
+const EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS: string[] = [
+  'sequence_templates.create_own',
+  'sequence_templates.read_own',
+  'sequence_templates.update_own',
+  'sequence_templates.publish_own',
+  'sequence_templates.archive_own',
+  'sequence_templates.delete_own',
+  'sequence_executions.create_own',
+  'sequence_executions.read_own',
+  'sequence_executions.update_own',
+  'sequence_executions.delete_own',
+  'sequence_executions.import_own',
+  'sequence_executions.start_own',
+  'sequence_executions.refresh_status_own',
+];
+
+export const ADMIN_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key).filter(
+  (key) => !EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS.includes(key),
+);
 
 export const EXECUTIVE_PERMISSION_KEYS: string[] = [
   'mailboxes.read.assigned',
@@ -215,4 +278,5 @@ export const EXECUTIVE_PERMISSION_KEYS: string[] = [
   'sequence_contacts.read',
   'sequence_contacts.remove',
   'sequence_contacts.suppress',
+  ...EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS,
 ];

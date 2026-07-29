@@ -53,6 +53,8 @@ model Organization {
   sequenceImportRows  SequenceImportRow[]
   sequenceContacts    SequenceContact[]
   scheduledEmails     ScheduledEmail[]
+  sequenceTemplates   SequenceTemplate[]
+  sequenceExecutions  SequenceExecution[]
 
   @@map("organizations")
 }
@@ -82,6 +84,8 @@ model User {
   mailboxAssignments         MailboxAssignment[]
   sequences                  Sequence[]
   clientExecutiveAssignments ClientExecutiveAssignment[]
+  ownedSequenceTemplates     SequenceTemplate[]
+  sequenceExecutions         SequenceExecution[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -141,6 +145,39 @@ enum MailboxAdminStatus {
   ARCHIVED
 }
 
+/// Fase 2.1 — which system is authoritative for this account's credentials.
+/// LEGACY_LOCAL: Mr Outreach itself holds IMAP/SMTP credentials (pre-Fase
+/// 2.1 flow, kept for coexistence — never the model for new accounts).
+/// SERVER_TOKEN: linked via a motor-issued token; Mr Outreach never holds
+/// its credentials.
+enum MailboxLinkSource {
+  LEGACY_LOCAL
+  SERVER_TOKEN
+}
+
+/// Fase 2.1 — the link lifecycle, orthogonal to MailboxProvisioningStatus/
+/// MailboxConnectionStatus (those describe the LEGACY_LOCAL credential
+/// flow). LEGACY marks a pre-Fase-2.1 account that has not been migrated.
+enum MailboxLinkStatus {
+  LINK_PENDING
+  ACTIVE
+  UNLINK_REQUESTED
+  REVOKED
+  LINK_ERROR
+  LEGACY
+}
+
+/// Fase 2.1 — mirrors MailboxTechnicalStatus in
+/// domain/mailbox-motor/mailbox-motor.types.ts exactly; this is a snapshot
+/// of what the motor last reported, never authorization to act on its own.
+enum MailboxServerTechnicalStatus {
+  CONNECTED
+  DEGRADED
+  DISCONNECTED
+  DISABLED
+  UNKNOWN
+}
+
 enum MailboxConnectionStatus {
   NOT_TESTED
   TESTING
@@ -180,19 +217,48 @@ model Mailbox {
   minimumIntervalSeconds Int                       @default(60)
   maximumIntervalSeconds Int                       @default(180)
 
-  imapHost              String
-  imapPort              Int
-  imapEncryption        MailboxEncryption
-  imapUsername          String
-  imapVerifyCertificate Boolean           @default(true)
-  imapSecretCiphertext  String
+  // Fase 2.1 — nullable: a SERVER_TOKEN account never populates these; Mr
+  // Outreach never holds its IMAP/SMTP credentials. Existing LEGACY_LOCAL
+  // rows keep their values untouched (this is a relaxed constraint, not a
+  // data-affecting change — see migration comment).
+  imapHost              String?
+  imapPort              Int?
+  imapEncryption        MailboxEncryption?
+  imapUsername          String?
+  imapVerifyCertificate Boolean?           @default(true)
+  imapSecretCiphertext  String?
 
-  smtpHost              String
-  smtpPort              Int
-  smtpEncryption        MailboxEncryption
-  smtpUsername          String
-  smtpVerifyCertificate Boolean           @default(true)
-  smtpSecretCiphertext  String
+  smtpHost              String?
+  smtpPort              Int?
+  smtpEncryption        MailboxEncryption?
+  smtpUsername          String?
+  smtpVerifyCertificate Boolean?           @default(true)
+  smtpSecretCiphertext  String?
+
+  // Fase 2.1 — token-based linking (§9 of the phase spec). All nullable:
+  // LEGACY_LOCAL rows never populate them; linkSource/linkStatus below
+  // distinguish the two flows on the same table rather than a parallel one.
+  linkSource            MailboxLinkSource             @default(LEGACY_LOCAL)
+  linkStatus            MailboxLinkStatus             @default(LEGACY)
+  serverMailboxId       String?                       @unique
+  serverDomainId        String?
+  serverClientId        String?
+  serverRedemptionId    String?                       @unique
+  tokenFingerprint      String?
+  emailSnapshot         String?
+  domainSnapshot        String?
+  clientNameSnapshot    String?
+  serverStatusSnapshot  MailboxServerTechnicalStatus?
+  serverCanSendSnapshot Boolean?
+  serverStatusCheckedAt DateTime?
+  linkedAt              DateTime?
+  linkedBy              String?
+  unlinkRequestedAt     DateTime?
+  unlinkRequestedBy     String?
+  unlinkReason          String?
+  revokedAt             DateTime?
+  revocationId          String?
+  lastLinkCommandId     String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -204,14 +270,17 @@ model Mailbox {
   connectionTests MailboxConnectionTest[]
   assignments     MailboxAssignment[]
   signature       Signature?
-  sequences       Sequence[]
-  sequenceImports SequenceImport[]
-  scheduledEmails ScheduledEmail[]
+  sequences         Sequence[]
+  sequenceImports   SequenceImport[]
+  scheduledEmails   ScheduledEmail[]
+  sequenceTemplates SequenceTemplate[]
+  sequenceExecutions SequenceExecution[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
   @@index([clientId])
   @@index([domainId])
+  @@index([linkStatus])
   @@map("mailboxes")
 }
 
@@ -365,20 +434,44 @@ enum SequenceStatus {
   ARCHIVED
 }
 
+/// Fase 2 — mirrors the pre-existing (previously Postgres-unpersisted, see
+/// PrismaSequenceRepository's old hardcoded-null comment) engine-reported
+/// publish lifecycle. Deliberately separate from SequenceStatus: this is
+/// "what is happening to the already-published content", never the
+/// administrative DRAFT/PAUSED/ARCHIVED editing lifecycle.
+enum SequencePublishStatus {
+  REQUESTED
+  ACCEPTED
+  PROCESSING
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 model Sequence {
-  id             String         @id @default(uuid())
-  organizationId String
-  executiveId    String
-  mailboxId      String?
-  name           String
-  description    String?
-  status         SequenceStatus @default(DRAFT)
-  timezone       String
-  createdBy      String
-  updatedBy      String
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  deletedAt      DateTime?
+  id                   String                 @id @default(uuid())
+  organizationId       String
+  executiveId          String
+  mailboxId            String?
+  name                 String
+  description          String?
+  status               SequenceStatus         @default(DRAFT)
+  timezone             String
+  /// Fase 2 — real persistence for the publish lifecycle (was hardcoded to null under Postgres — see PrismaSequenceRepository.toDomain's prior comment). Null until the first successful publish.
+  publishStatus        SequencePublishStatus?
+  /// Fase 2 — 0 until the first publish; bumped only when a publish changes publish-relevant content (was hardcoded to 0 under Postgres).
+  sequenceVersion      Int                    @default(0)
+  /// Fase 2 — frozen at the moment of a successful publish (America/Santiago-resolved). Null before the first publish.
+  effectiveStartAt     DateTime?
+  lastPublishedAt      DateTime?
+  lastPublishCommandId String?
+  createdBy            String
+  updatedBy            String
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  deletedAt            DateTime?
 
   organization     Organization      @relation(fields: [organizationId], references: [id])
   executive        User              @relation(fields: [executiveId], references: [id])
@@ -487,14 +580,31 @@ enum ManagedClientStatus {
   ARCHIVED
 }
 
+enum ManagedClientSource {
+  SERVER
+  LEGACY_CRM
+  MANUAL
+}
+
 // The customer whose outbound campaigns are operated from Mr Outreach —
 // linked to the external Neon CRM's master row via crmClientId (see
 // domain/crm-client/). Mr Outreach never writes back to maestro_clientes;
 // this table only holds Mr Outreach's own operational configuration.
+//
+// Fase 2.1 — crmClientId is nullable: a client whose source is SERVER
+// (created from a Railway mailbox-link redemption with no CRM linkage
+// reported) never gets one fabricated. serverClientId is the external
+// identity key for that case, mirroring crmClientId's role for LEGACY_CRM
+// rows. Every pre-existing row keeps source = LEGACY_CRM (the migration's
+// column default) and its non-null crmClientId untouched.
 model ManagedClient {
   id                 String              @id @default(uuid())
   organizationId     String
-  crmClientId        Int
+  crmClientId        Int?
+  /// Fase 2.1 — which system is authoritative for this client's identity/name. SERVER: from a Railway redemption, may have no CRM linkage. LEGACY_CRM: pre-Fase-2.1 flow, always has crmClientId. MANUAL: reserved, not created by any flow yet.
+  source             ManagedClientSource @default(LEGACY_CRM)
+  /// Fase 2.1 — external Railway client id (serverClientId), set only when source = SERVER. Unique so repeated redemptions for the same Railway client upsert instead of duplicating.
+  serverClientId     String?             @unique
   /// Fase 1.5 — snapshot local del nombre corporativo (maestro_clientes.empresa). Ya no editable a mano; lo escribe el upsert.
   name               String
   legalName          String?
@@ -565,17 +675,24 @@ enum ClientAssignmentRole {
   SECONDARY
 }
 
+/// Fase 2.1 §10 — MANUAL: explicit admin grant. MAILBOX_DERIVED: automatic, from a mailbox assignment; auto-removed once the executive has no remaining mailbox for the client, never demotes an existing MANUAL row.
+enum ClientVisibilitySource {
+  MANUAL
+  MAILBOX_DERIVED
+}
+
 // Visibility onto a CLIENT (can see it in "Mis clientes") — deliberately
 // separate from MailboxAssignment (operate a specific mailbox); assigning
 // a client never implies mailbox access, see README > client-hierarchy pivot.
 model ClientExecutiveAssignment {
-  id             String               @id @default(uuid())
-  organizationId String
-  clientId       String
-  userId         String
-  role           ClientAssignmentRole
-  assignedBy     String
-  assignedAt     DateTime             @default(now())
+  id               String                 @id @default(uuid())
+  organizationId   String
+  clientId         String
+  userId           String
+  role             ClientAssignmentRole
+  visibilitySource ClientVisibilitySource @default(MANUAL)
+  assignedBy       String
+  assignedAt       DateTime               @default(now())
 
   client ManagedClient @relation(fields: [clientId], references: [id])
   user   User          @relation(fields: [userId], references: [id])
@@ -632,6 +749,12 @@ model IntegrationCommand {
   sentAt         DateTime?
   acceptedAt     DateTime?
   completedAt    DateTime?
+  /// Fase 2 — SHA-256 of the canonicalized logical payload of the use case that created this command (never the raw command `payload` itself, which may include server-generated fields). Compared on retry: same idempotencyKey + same hash replays `resultSnapshot`; same key + different hash is a 409.
+  payloadHash    String?
+  /// Fase 2 — sanitized use-case result to replay verbatim on an idempotent retry (created/updated entity ids, etc.). Never credentials, tokens or connection strings — same redaction rules as `payload`.
+  resultSnapshot Json?
+  /// Fase 2 — the logical HTTP status code the originating use case returned, replayed as-is on a retry (e.g. 201).
+  httpStatusCode Int?
 
   organization Organization       @relation(fields: [organizationId], references: [id])
   events       IntegrationEvent[]
@@ -982,4 +1105,300 @@ model ScheduledEmail {
   @@index([mailboxId])
   @@index([batchId])
   @@map("scheduled_emails")
+}
+
+// ---------------------------------------------------------------------------
+// Etapa "cuenta del ejecutivo" — Plantilla/Gestión, deliberately new/additive
+// tables rather than a reuse of Sequence/SequenceStep above: those keep
+// backing the admin "Secuencias" monitor and the old wizard untouched.
+// A SequenceTemplate is reusable content tied to exactly one Mailbox; a
+// SequenceExecution is one concrete run against an immutable published
+// SequenceTemplateVersion. Railway (the "motor") computes and performs the
+// actual sends for a Gestión — no ScheduledEmail-equivalent is modeled here.
+// ---------------------------------------------------------------------------
+
+enum SequenceTemplateStatus {
+  DRAFT
+  PUBLISHING
+  PUBLISHED
+  PUBLISH_FAILED
+  ARCHIVED
+}
+
+model SequenceTemplate {
+  id                  String                 @id @default(uuid())
+  organizationId      String
+  ownerUserId         String
+  mailboxId           String
+  name                String
+  description         String?
+  /// §5 (revised) — shared across the 3 envíos. Header is no longer shared
+  /// here (moved back to per-envío on SequenceTemplateStep.headerText) — this
+  /// column is vestigial, kept only so no destructive migration is needed.
+  subjectTemplate     String                 @default("")
+  headerText          String?
+  status              SequenceTemplateStatus @default(DRAFT)
+  currentDraftVersion Int                    @default(1)
+  timezone            String                 @default("America/Santiago")
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  archivedAt          DateTime?
+  /// §11 — logical delete for an archived template; never a hard delete (preserves historical FK integrity for executions/versions).
+  deletedAt           DateTime?
+
+  organization Organization               @relation(fields: [organizationId], references: [id])
+  owner        User                       @relation(fields: [ownerUserId], references: [id])
+  mailbox      Mailbox                    @relation(fields: [mailboxId], references: [id])
+  steps        SequenceTemplateStep[]
+  versions     SequenceTemplateVersion[]
+  executions   SequenceExecution[]
+
+  @@index([organizationId])
+  @@index([organizationId, ownerUserId])
+  @@index([mailboxId])
+  @@map("sequence_templates")
+}
+
+enum SequenceTemplateStepDelayUnit {
+  MINUTES
+  HOURS
+  CALENDAR_DAYS
+  BUSINESS_DAYS
+}
+
+enum SequenceTemplateStepDelayReference {
+  EXECUTION_START
+  PREVIOUS_STEP
+}
+
+model SequenceTemplateStep {
+  id              String                             @id @default(uuid())
+  organizationId  String
+  templateId      String
+  stepNumber      Int
+  name            String
+  enabled         Boolean                            @default(true)
+  subjectTemplate String                              @default("")
+  /// Vestigial — never read/written since the shared-header revision; superseded by headerText below.
+  headerHtml      String?
+  /// §4 (revised) — individual, optional header per envío, plain text (no HTML editor); see SequenceTemplatesService.
+  headerText      String?
+  bodyHtml        String                              @default("")
+  bodyText        String                              @default("")
+  delayValue      Int                                @default(0)
+  delayUnit       SequenceTemplateStepDelayUnit       @default(BUSINESS_DAYS)
+  delayReference  SequenceTemplateStepDelayReference  @default(PREVIOUS_STEP)
+  /// String array of Weekday values (MONDAY..SUNDAY).
+  allowedWeekdays Json                               @default("[\"MONDAY\",\"TUESDAY\",\"WEDNESDAY\",\"THURSDAY\",\"FRIDAY\"]")
+  sendWindowStart String                              @default("09:00")
+  sendWindowEnd   String                              @default("17:00")
+  createdAt       DateTime                            @default(now())
+  updatedAt       DateTime                            @updatedAt
+
+  template SequenceTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([templateId, stepNumber])
+  @@index([organizationId])
+  @@index([templateId])
+  @@map("sequence_template_steps")
+}
+
+enum SequenceTemplateVersionStatus {
+  REQUESTED
+  ACCEPTED
+  FAILED
+}
+
+model SequenceTemplateVersion {
+  id                      String                        @id @default(uuid())
+  templateId              String
+  versionNumber           Int
+  name                    String
+  mailboxId               String
+  timezone                String
+  /// §5 — shared across the 3 envíos, frozen at publish time.
+  subjectTemplate         String
+  /// Vestigial — header is per-envío again, frozen inside each `steps[]` snapshot instead.
+  headerText              String?
+  signatureHtml           String
+  /// Array of { key, required }.
+  variables               Json
+  /// Array of frozen SequenceTemplateVersionStepSnapshot (bodyHtml + headerText + schedule per envío).
+  steps                   Json
+  status                  SequenceTemplateVersionStatus @default(REQUESTED)
+  serverTemplateId        String?                       @unique
+  templateTokenCiphertext String?
+  acceptedAt              DateTime?
+  lastPublishCommandId    String?
+  lastError               String?
+  /// §12-17 — populated only when this version resulted from "Editar plantilla publicada" (a SEQUENCE_TEMPLATE_UPDATE), never on the first publish.
+  previousVersionNumber     Int?
+  effectiveScope            String?
+  affectedExecutions        Int?
+  affectedPendingJobs       Int?
+  unchangedSentJobs         Int?
+  processingJobsNotChanged  Int?
+  appliedAt                 DateTime?
+  createdBy               String
+  createdAt               DateTime                      @default(now())
+
+  template   SequenceTemplate    @relation(fields: [templateId], references: [id])
+  executions SequenceExecution[]
+
+  @@unique([templateId, versionNumber])
+  @@index([templateId])
+  @@map("sequence_template_versions")
+}
+
+/// §7 — no SCHEDULED: the executive never picks a start date/time, so there is nothing to "schedule" locally. SUBMISSION_UNKNOWN means the /start call itself timed out — distinct from SUBMITTING, never silently conflated with it nor reverted to DRAFT.
+/// §11 — ACCEPTED is the outcome of a successful submission; the server may separately report its own internal QUEUED status later (surfaced via serverStatus), never a decision Mr Outreach made.
+enum SequenceExecutionStatus {
+  DRAFT
+  VALIDATING
+  SUBMITTING
+  SUBMISSION_UNKNOWN
+  ACCEPTED
+  RUNNING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+enum SequenceExecutionServerStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+model SequenceExecution {
+  id                            String                          @id @default(uuid())
+  organizationId                String
+  executiveId                   String
+  mailboxId                     String
+  templateId                    String
+  templateVersionId             String
+  /// §3 — null while DRAFT; generated as "Gestión_DDMMYYYY[_n]" only when the start command is actually sent.
+  name                          String?
+  timezone                      String
+  status                        SequenceExecutionStatus        @default(DRAFT)
+  prospectImportId              String?                         @unique
+  /// §5 — real submission-lifecycle instants; never a manually-picked date, never sent to the server.
+  requestedAt                   DateTime?
+  receivedAt                    DateTime?
+  estimatedStartAt              DateTime?
+  startedAt                     DateTime?
+  completedAt                   DateTime?
+  failedAt                      DateTime?
+  serverStatus                  SequenceExecutionServerStatus?
+  currentStepNumber             Int?
+  sentCount                     Int?
+  pendingCount                  Int?
+  failedCount                   Int?
+  receivedProspects             Int?
+  acceptedProspects             Int?
+  rejectedProspects             Int?
+  /// §2 — the server's own initial per-prospect state on acceptance (contractually STEP_01_PENDING).
+  initialProspectState          ProspectExecutionState?
+  lastSyncedAt                  DateTime?
+  lastError                     String?
+  serverExecutionId             String?                         @unique
+  executionTokenCiphertext      String?
+  /// §11 — the idempotencyKey used for the most recent /start attempt; reused verbatim on retry.
+  lastSubmissionIdempotencyKey  String?
+  createdBy                     String
+  createdAt                     DateTime                        @default(now())
+  updatedAt                     DateTime                        @updatedAt
+
+  organization    Organization            @relation(fields: [organizationId], references: [id])
+  executive       User                    @relation(fields: [executiveId], references: [id])
+  mailbox         Mailbox                 @relation(fields: [mailboxId], references: [id])
+  template        SequenceTemplate        @relation(fields: [templateId], references: [id])
+  templateVersion SequenceTemplateVersion @relation(fields: [templateVersionId], references: [id])
+  prospectImport  ProspectImport?
+
+  @@index([organizationId])
+  @@index([organizationId, executiveId])
+  @@index([templateId])
+  @@index([mailboxId])
+  @@map("sequence_executions")
+}
+
+enum ProspectImportStatus {
+  UPLOADED
+  MAPPING_REQUIRED
+  VALIDATING
+  READY
+  FAILED
+}
+
+model ProspectImport {
+  id             String                @id @default(uuid())
+  organizationId String
+  executionId    String                @unique
+  fileName       String
+  storageKey     String
+  checksum       String
+  status         ProspectImportStatus  @default(UPLOADED)
+  /// ProspectColumnMapping | null.
+  columnMapping  Json?
+  totalRows      Int                   @default(0)
+  validRows      Int                   @default(0)
+  invalidRows    Int                   @default(0)
+  duplicateRows  Int                   @default(0)
+  excludedRows   Int                   @default(0)
+  createdBy      String
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  execution SequenceExecution   @relation(fields: [executionId], references: [id])
+  rows      ProspectImportRow[]
+
+  @@index([organizationId])
+  @@map("prospect_imports")
+}
+
+enum ProspectImportRowValidationStatus {
+  VALID
+  INVALID
+  DUPLICATE
+}
+
+/// §2/§11 — server-administered per-prospect lifecycle; Mr Outreach only records what the server itself reported.
+enum ProspectExecutionState {
+  STEP_01_PENDING
+  STEP_01_PROCESSING
+  STEP_01_SENT
+  STEP_02_PENDING
+  STEP_02_PROCESSING
+  STEP_02_SENT
+  STEP_03_PENDING
+  STEP_03_PROCESSING
+  STEP_03_SENT
+  COMPLETED
+  FAILED
+}
+
+model ProspectImportRow {
+  id               String                             @id @default(uuid())
+  organizationId   String
+  importId         String
+  rowNumber        Int
+  rawData          Json
+  /// NormalizedProspectData | null.
+  normalizedData   Json?
+  validationStatus ProspectImportRowValidationStatus
+  validationErrors Json                               @default("[]")
+  /// Null until the Gestión this row belongs to is accepted by the server.
+  executionState   ProspectExecutionState?
+  createdAt        DateTime                           @default(now())
+
+  import ProspectImport @relation(fields: [importId], references: [id])
+
+  @@unique([importId, rowNumber])
+  @@index([organizationId])
+  @@index([importId])
+  @@index([importId, validationStatus])
+  @@map("prospect_import_rows")
 }

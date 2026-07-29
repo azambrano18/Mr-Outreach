@@ -40,6 +40,8 @@ describe('ClientsService (Fase 1.5)', () => {
     id: 'client_1',
     organizationId: orgId,
     crmClientId: 1001,
+    source: 'LEGACY_CRM',
+    serverClientId: null,
     name: 'Acme Inc',
     legalName: null,
     internalCode: null,
@@ -67,6 +69,7 @@ describe('ClientsService (Fase 1.5)', () => {
       create: jest.fn(),
       update: jest.fn(),
       findByCrmClientId: jest.fn(),
+      findByServerClientId: jest.fn(),
     };
     assignments = {
       findByClient: jest.fn().mockResolvedValue([]),
@@ -115,6 +118,7 @@ describe('ClientsService (Fase 1.5)', () => {
           crmStatusSnapshot: 'ACTIVO',
           createdBy: 'admin_1',
         }),
+        undefined,
       );
       expect(auditLogs.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'client.activate' }),
@@ -134,6 +138,7 @@ describe('ClientsService (Fase 1.5)', () => {
       expect(clients.update).toHaveBeenCalledWith(
         existing.id,
         expect.objectContaining({ name: 'Acme Incorporated', updatedBy: 'admin_1' }),
+        undefined,
       );
       expect(auditLogs.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'client.crm_sync' }),
@@ -165,6 +170,7 @@ describe('ClientsService (Fase 1.5)', () => {
 
       expect(clients.create).toHaveBeenCalledWith(
         expect.objectContaining({ legalName: 'Acme Legal SpA', notes: 'VIP' }),
+        undefined,
       );
     });
 

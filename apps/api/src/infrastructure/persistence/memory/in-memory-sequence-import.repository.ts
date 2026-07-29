@@ -65,4 +65,11 @@ export class InMemorySequenceImportRepository implements SequenceImportRepositor
     this.store.sequenceImports.set(id, updated);
     return updated;
   }
+
+  async conditionalUpdateStatus(id: string, fromStatus: string, toStatus: string): Promise<number> {
+    const existing = this.store.sequenceImports.get(id);
+    if (!existing || existing.status !== fromStatus) return 0;
+    this.store.sequenceImports.set(id, { ...existing, status: toStatus as never, updatedAt: new Date() });
+    return 1;
+  }
 }

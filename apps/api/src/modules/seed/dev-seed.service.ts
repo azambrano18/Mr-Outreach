@@ -247,16 +247,16 @@ export class DevSeedService implements OnApplicationBootstrap {
       assignedBy: admin.id,
     });
 
-    // Demo-only client-hierarchy pivot data: one ManagedClient ("Litoral
-    // Software (Demo)") with one Domain matching the demo mailboxes' own
+    // Demo-only client-hierarchy pivot data: one ManagedClient ("Empresa
+    // Demostración (Demo)") with one Domain matching the demo mailboxes' own
     // email domain (mejoreferido-demo.test) — both demo mailboxes above get
     // linked to it, so the Clientes → Dominio → Cuenta navigation has
     // real data to click through instead of landing on an empty state.
     const demoClient = await this.managedClients.create({
       organizationId: organization.id,
       crmClientId: 9001, // demo placeholder — out of the mock CRM dataset's 1001-1005 range, on purpose
-      name: 'Litoral Software (Demo)',
-      legalName: 'Litoral Software SpA (Demo)',
+      name: 'Empresa Demostración (Demo)',
+      legalName: 'Empresa Demostración SpA (Demo)',
       industry: 'Tecnología',
       supervisorUserId: admin.id,
       createdBy: admin.id,
@@ -466,8 +466,8 @@ export class DevSeedService implements OnApplicationBootstrap {
     const gtdClient = await this.managedClients.create({
       organizationId: organization.id,
       crmClientId: 9002,
-      name: 'GTD (Demo)',
-      legalName: 'GTD Chile S.A. (Demo)',
+      name: 'Demo Dos (Demo)',
+      legalName: 'Demo Dos Chile S.A. (Demo)',
       industry: 'Telecomunicaciones',
       supervisorUserId: admin.id,
       createdBy: admin.id,
@@ -495,9 +495,9 @@ export class DevSeedService implements OnApplicationBootstrap {
 
     const prospeccionMailbox = await this.createDemoMailbox({
       organizationId: organization.id,
-      name: 'Prospección GTD (Demo)',
+      name: 'Prospección Demo Dos (Demo)',
       email: 'prospeccion@gtd.cl',
-      fromName: 'Prospección GTD',
+      fromName: 'Prospección Demo Dos',
       clientId: gtdClient.id,
       domainId: gtdClDomain.id,
       executiveId: executive.id,
@@ -505,9 +505,9 @@ export class DevSeedService implements OnApplicationBootstrap {
     });
     const comercialMailbox = await this.createDemoMailbox({
       organizationId: organization.id,
-      name: 'Comercial GTD (Demo)',
+      name: 'Comercial Demo Dos (Demo)',
       email: 'comercial@gtd.cl',
-      fromName: 'Equipo Comercial GTD',
+      fromName: 'Equipo Comercial Demo Dos',
       clientId: gtdClient.id,
       domainId: gtdClDomain.id,
       executiveId: executive.id,
@@ -515,22 +515,22 @@ export class DevSeedService implements OnApplicationBootstrap {
     });
     const circuloMailbox = await this.createDemoMailbox({
       organizationId: organization.id,
-      name: 'Contacto Círculo GTD (Demo)',
+      name: 'Contacto Círculo Demo Dos (Demo)',
       email: 'contacto@circulogtd.com',
-      fromName: 'Círculo GTD',
+      fromName: 'Círculo Demo Dos',
       clientId: gtdClient.id,
       domainId: circuloDomain.id,
       executiveId: executive.id,
       adminId: admin.id,
     });
 
-    // Constructora Andes (Demo) — one domain, one account, deliberately
+    // Empresa Demostración Tres (Demo) — one domain, one account, deliberately
     // left with zero conversations ("cuenta sin respuestas").
     const andesClient = await this.managedClients.create({
       organizationId: organization.id,
       crmClientId: 9003,
-      name: 'Constructora Andes (Demo)',
-      legalName: 'Constructora Andes Ltda. (Demo)',
+      name: 'Empresa Demostración Tres (Demo)',
+      legalName: 'Empresa Demostración Tres Ltda. (Demo)',
       industry: 'Construcción',
       supervisorUserId: admin.id,
       createdBy: admin.id,
@@ -550,9 +550,9 @@ export class DevSeedService implements OnApplicationBootstrap {
     });
     await this.createDemoMailbox({
       organizationId: organization.id,
-      name: 'Ventas Andes (Demo)',
+      name: 'Ventas Empresa Demostración Tres (Demo)',
       email: 'ventas@andes-demo.cl',
-      fromName: 'Ventas Constructora Andes',
+      fromName: 'Ventas Empresa Demostración Tres',
       clientId: andesClient.id,
       domainId: andesDomain.id,
       executiveId: executive.id,
@@ -565,13 +565,13 @@ export class DevSeedService implements OnApplicationBootstrap {
       executiveId: executive.id,
       clientId: gtdClient.id,
       mailboxId: prospeccionMailbox.id,
-      name: 'Prospección tecnología GTD (Demo)',
+      name: 'Prospección tecnología Demo Dos (Demo)',
       adminId: admin.id,
     });
     const minera = await this.companies.create({
       organizationId: organization.id,
       clientId: gtdClient.id,
-      rawName: 'Minera Los Andes SPA',
+      rawName: 'Empresa Contacto Demo Tres SPA',
     });
     await this.seedProspectThread({
       organizationId: organization.id,
@@ -604,7 +604,7 @@ export class DevSeedService implements OnApplicationBootstrap {
       contactEmail: 'maria.soto@mineralosandes-demo.cl',
       contactFirstName: 'María',
       contactLastName: 'Soto',
-      subject: 'Re: Una consulta para Minera Los Andes SPA',
+      subject: 'Re: Una consulta para Empresa Contacto Demo Tres SPA',
       replyText: 'Gracias por el mensaje, ya lo revisamos internamente.',
       isUnread: false,
       hoursAgo: 30,
@@ -639,7 +639,7 @@ export class DevSeedService implements OnApplicationBootstrap {
       executiveId: executive.id,
       clientId: gtdClient.id,
       mailboxId: comercialMailbox.id,
-      name: 'Prospección comercial GTD (Demo)',
+      name: 'Prospección comercial Demo Dos (Demo)',
       adminId: admin.id,
     });
     const bioSur = await this.companies.create({
@@ -672,7 +672,7 @@ export class DevSeedService implements OnApplicationBootstrap {
       executiveId: executive.id,
       clientId: gtdClient.id,
       mailboxId: circuloMailbox.id,
-      name: 'Gestión círculo GTD (Demo)',
+      name: 'Gestión círculo Demo Dos (Demo)',
       adminId: admin.id,
     });
 
@@ -882,7 +882,7 @@ export class DevSeedService implements OnApplicationBootstrap {
     const vertexSur = await this.companies.create({
       organizationId: organization.id,
       clientId: gtdClient.id,
-      rawName: 'Constructora Vertex Sur',
+      rawName: 'Empresa Contacto Demo Cuatro',
     });
     const vertexContact1 = await this.contacts.create({
       organizationId: organization.id,
@@ -982,7 +982,7 @@ export class DevSeedService implements OnApplicationBootstrap {
       `Dev seed loaded (memory mode): organization "${organization.name}", ` +
         `admin <${admin.email}>, executive <${executive.email}>, ` +
         `plus 2 demo-only executives (1 active, 1 inactive), 6 demo-only ` +
-        `mailboxes across 3 clients (Litoral Software, GTD, Constructora Andes — ` +
+        `mailboxes across 3 clients (Empresa Demostración, Demo Dos, Empresa Demostración Tres — ` +
         `varying domain/account counts, unread states, and one worked ` +
         `example each of No interesado/No contactar/Interesado/Deriva), ` +
         `2 demo-only templates (1 active, 1 archived), 3 demo-only variables ` +
@@ -1001,7 +1001,7 @@ export class DevSeedService implements OnApplicationBootstrap {
    * `MockEngineClient` fabricates the SAME fixed pool of canned demo
    * threads (Camila Torres, Diego Fuentes, etc.) for ANY mailbox whose
    * inbox gets synced, regardless of which one it is — harmless for the
-   * original Litoral Software mailboxes (that's their whole point), but it would
+   * original Empresa Demostración mailboxes (that's their whole point), but it would
    * silently add 2 extra "unread" conversations on top of whatever this
    * seed deliberately places in these NEW mailboxes, breaking the precise
    * unread-count scenarios ("cuenta sin respuestas", "una respuesta

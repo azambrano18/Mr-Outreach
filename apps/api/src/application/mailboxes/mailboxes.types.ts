@@ -2,8 +2,11 @@ import {
   MailboxAdminStatus,
   MailboxConnectionStatus,
   MailboxEncryption,
+  MailboxLinkSource,
+  MailboxLinkStatus,
   MailboxProvisioningStatus,
   MailboxSendingLimits,
+  MailboxServerTechnicalStatus,
 } from '../../domain/mailbox/mailbox.entity';
 
 /** §12 — computed, never persisted (see Mailbox entity's doc comment on provisioningStatus). */
@@ -24,6 +27,10 @@ export interface MailboxSummary {
   organizationId: string;
   clientId: string | null;
   domainId: string | null;
+  /** Read-only display name of the client this mailbox belongs to — resolved from the snapshot (SERVER_TOKEN) or the live ManagedClient (legacy); never editable from here. */
+  clientName: string | null;
+  /** Read-only display name of the domain this mailbox belongs to — same resolution rule as clientName. */
+  domainName: string | null;
   name: string;
   email: string;
   fromName: string;
@@ -37,10 +44,44 @@ export interface MailboxSummary {
   lastProvisionCommandId: string | null;
   lastTestedAt: Date | null;
   lastTestMessage: string | null;
-  imap: ProtocolConfigSummary;
-  smtp: ProtocolConfigSummary;
+  /** Fase 2.1 — null for a SERVER_TOKEN mailbox. */
+  imap: ProtocolConfigSummary | null;
+  /** Fase 2.1 — null for a SERVER_TOKEN mailbox. */
+  smtp: ProtocolConfigSummary | null;
+  linkSource: MailboxLinkSource;
+  linkStatus: MailboxLinkStatus;
+  serverMailboxId: string | null;
+  serverStatusSnapshot: MailboxServerTechnicalStatus | null;
+  serverCanSendSnapshot: boolean | null;
+  serverStatusCheckedAt: Date | null;
+  linkedAt: Date | null;
+  linkedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * §12.1 — one denormalized row per mailbox for the admin listing/filter
+ * screen: client/domain names and primary-executive name resolved
+ * server-side (one pass over the org's mailboxes/domains/clients/
+ * assignments) so the frontend never has to orchestrate N+1 fetches.
+ */
+export interface MailboxAdminOverviewItem {
+  id: string;
+  clientId: string | null;
+  clientName: string | null;
+  domainId: string | null;
+  domainName: string | null;
+  name: string;
+  email: string;
+  primaryExecutive: { id: string; name: string } | null;
+  secondaryExecutiveCount: number;
+  linkSource: MailboxLinkSource;
+  linkStatus: MailboxLinkStatus;
+  status: MailboxAdminStatus;
+  serverStatusSnapshot: MailboxServerTechnicalStatus | null;
+  serverCanSendSnapshot: boolean | null;
+  serverStatusCheckedAt: Date | null;
 }
 
 export interface ProtocolConfigInput {

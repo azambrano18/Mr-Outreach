@@ -170,6 +170,13 @@ export function SequenceWizard({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // Fase 2 — generated once per mount, reused on every retry of the same
+  // "iniciar secuencia" attempt so a retry never duplicates the import
+  // confirmation or the sequence publish (see ConfirmProspectImportUseCase /
+  // PublishSequenceUseCase, both now require a client-generated Idempotency-Key header).
+  const [confirmImportIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [publishIdempotencyKey] = useState(() => crypto.randomUUID());
+
   // Step 1
   const [clientId, setClientId] = useState('');
   const [domainId, setDomainId] = useState('');
@@ -633,20 +640,17 @@ export function SequenceWizard({
         });
       }
       if (uploadResult) {
+        // Fase 2, Caso B — confirm() is now synchronous and atomic; no
+        // separate /advance call is needed to materialize contacts.
         await fetch(`${importBase}/${uploadResult.import.id}/confirm`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': confirmImportIdempotencyKey },
           body: JSON.stringify({}),
-        });
-        await fetch(`${importBase}/${uploadResult.import.id}/advance`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'ALL' }),
         });
       }
       const response = await fetch(`${seqBase}/${sequence.id}/publish`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': publishIdempotencyKey },
         body: JSON.stringify({}),
       });
       const body = await readJsonSafe(response);

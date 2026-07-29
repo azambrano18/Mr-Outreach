@@ -1,8 +1,6 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Inject, Injectable } from '@nestjs/common';
 import { CompanyRepository } from '../../domain/company/company.repository';
 import { ContactRepository } from '../../domain/contact/contact.repository';
-import { IntegrationCommand } from '../../domain/integration/integration-command.entity';
 import { SequenceContact } from '../../domain/sequence-contact/sequence-contact.entity';
 import {
   SequenceContactFilter,
@@ -13,8 +11,6 @@ import {
   CONTACT_REPOSITORY,
   SEQUENCE_CONTACT_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
-import { IntegrationService } from '../integration/integration.service';
-import { SchedulingService } from '../scheduling/scheduling.service';
 
 export interface SequenceContactSummary {
   id: string;
@@ -44,13 +40,11 @@ export interface SequenceCompanySummary {
 }
 
 /**
- * §27-28 — "Retirar de esta secuencia" for a single contact or for every
- * contact of one company within ONE sequence (never a global exclusion by
- * itself — see Contact/Company.suppressed for that separate action, §30).
- * Both commands complete near-instantly in simulation (their planned event
- * lists are single-event), so — same choice as SequencePublishService —
- * this advances to completion synchronously instead of exposing a manual
- * step-by-step control.
+ * §49-50 — read-side of "prospectos"/"empresas" for a sequence. The
+ * "retirar" write actions moved to RemoveContactFromSequenceUseCase /
+ * RemoveCompanyFromSequenceUseCase (Fase 2, Casos D/E) — transactional,
+ * idempotent, replacing this service's former ad hoc removeContact()/
+ * removeCompany() methods.
  */
 @Injectable()
 export class SequenceContactsService {
@@ -58,8 +52,6 @@ export class SequenceContactsService {
     @Inject(SEQUENCE_CONTACT_REPOSITORY) private readonly sequenceContacts: SequenceContactRepository,
     @Inject(COMPANY_REPOSITORY) private readonly companies: CompanyRepository,
     @Inject(CONTACT_REPOSITORY) private readonly contacts: ContactRepository,
-    private readonly integration: IntegrationService,
-    private readonly scheduling: SchedulingService,
   ) {}
 
   /** §49 — "UI de prospectos de la secuencia". */
@@ -120,101 +112,4 @@ export class SequenceContactsService {
     return summaries;
   }
 
-  async removeContact(
-    organizationId: string,
-    sequenceId: string,
-    sequenceContactId: string,
-    reason: string,
-    actorId: string,
-    idempotencyKey?: string,
-  ): Promise<{ contact: SequenceContact; command: IntegrationCommand; duplicate: boolean; cancelledJobs: number }> {
-    const contact = await this.getOwnedContact(organizationId, sequenceId, sequenceContactId);
-
-    const { command, duplicate } = await this.integration.submit(
-      {
-        organizationId,
-        commandType: 'SEQUENCE_CONTACT_REMOVE_REQUESTED',
-        aggregateType: 'SEQUENCE_CONTACT',
-        aggregateId: contact.id,
-        payload: { sequenceId, sequenceContactId: contact.id, contactId: contact.contactId, reason },
-        requestedBy: actorId,
-        idempotencyKey: idempotencyKey ?? `sequence-contact-remove:${contact.id}:${randomUUID()}`,
-      },
-      actorId,
-    );
-
-    let cancelledJobs = 0;
-    if (!duplicate) {
-      await this.integration.advance(organizationId, command.commandId, 'ALL', actorId);
-      cancelledJobs = await this.scheduling.cancelFutureJobsForContact(organizationId, contact.id, reason);
-      await this.sequenceContacts.update(contact.id, {
-        status: 'REMOVED',
-        stoppedAt: new Date(),
-        stopReason: reason,
-      });
-    }
-
-    const updated = await this.getOwnedContact(organizationId, sequenceId, sequenceContactId);
-    return { contact: updated, command, duplicate, cancelledJobs };
-  }
-
-  async removeCompany(
-    organizationId: string,
-    sequenceId: string,
-    companyId: string,
-    reason: string,
-    actorId: string,
-    idempotencyKey?: string,
-  ): Promise<{ command: IntegrationCommand; duplicate: boolean; cancelledJobs: number; affectedContacts: number }> {
-    const company = await this.companies.findById(companyId);
-    if (!company || company.organizationId !== organizationId) {
-      throw new NotFoundException('Company not found.');
-    }
-
-    const { command, duplicate } = await this.integration.submit(
-      {
-        organizationId,
-        commandType: 'SEQUENCE_COMPANY_REMOVE_REQUESTED',
-        aggregateType: 'SEQUENCE_COMPANY',
-        aggregateId: companyId,
-        payload: { sequenceId, companyId, reason },
-        requestedBy: actorId,
-        idempotencyKey: idempotencyKey ?? `sequence-company-remove:${sequenceId}:${companyId}:${randomUUID()}`,
-      },
-      actorId,
-    );
-
-    let cancelledJobs = 0;
-    let affectedContacts = 0;
-    if (!duplicate) {
-      await this.integration.advance(organizationId, command.commandId, 'ALL', actorId);
-      cancelledJobs = await this.scheduling.cancelFutureJobsForCompany(organizationId, sequenceId, companyId, reason);
-      const contacts = await this.sequenceContacts.findBySequence(organizationId, sequenceId, { companyId });
-      const stillActive = contacts.filter((contact) => contact.status !== 'REMOVED');
-      await Promise.all(
-        stillActive.map((contact) =>
-          this.sequenceContacts.update(contact.id, {
-            status: 'REMOVED',
-            stoppedAt: new Date(),
-            stopReason: reason,
-          }),
-        ),
-      );
-      affectedContacts = stillActive.length;
-    }
-
-    return { command, duplicate, cancelledJobs, affectedContacts };
-  }
-
-  private async getOwnedContact(
-    organizationId: string,
-    sequenceId: string,
-    sequenceContactId: string,
-  ): Promise<SequenceContact> {
-    const contact = await this.sequenceContacts.findById(sequenceContactId);
-    if (!contact || contact.organizationId !== organizationId || contact.sequenceId !== sequenceId) {
-      throw new NotFoundException('Sequence contact not found.');
-    }
-    return contact;
-  }
 }

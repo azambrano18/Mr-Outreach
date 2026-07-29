@@ -16,6 +16,7 @@ export const envValidationSchema = Joi.object({
   PERSISTENCE_DRIVER: Joi.string().valid('memory', 'postgres').default('memory'),
   ENGINE_DRIVER: Joi.string().valid('mock', 'http').default('mock'),
   MAIL_ENGINE_MODE: Joi.string().valid('simulation', 'remote').default('simulation'),
+  MAILBOX_MOTOR_DRIVER: Joi.string().valid('simulated', 'http').default('simulated'),
   STORAGE_DRIVER: Joi.string().valid('local', 's3').default('local'),
   API_PUBLIC_URL: Joi.string().uri().optional(),
 
@@ -43,6 +44,21 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().allow('').optional(),
   }),
   ENGINE_API_KEY: Joi.string().allow('').optional(),
+
+  // Fase 2.1 §17 — the motor API key must be a real, non-empty value at
+  // startup when MAILBOX_MOTOR_DRIVER=http; in simulated mode (the only
+  // mode implemented so far) no real key is required.
+  MAILBOX_MOTOR_BASE_URL: Joi.string().when('MAILBOX_MOTOR_DRIVER', {
+    is: 'http',
+    then: Joi.string().uri().required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  MAILBOX_MOTOR_API_KEY: Joi.string().when('MAILBOX_MOTOR_DRIVER', {
+    is: 'http',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  MAILBOX_MOTOR_TIMEOUT_MS: Joi.number().default(10_000),
 
   // External, read-only Neon CRM database (table maestro_clientes) — a
   // wholly separate driver from PERSISTENCE_DRIVER, since it's a different

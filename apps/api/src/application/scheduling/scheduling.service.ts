@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
-import { ScheduledEmail, ScheduledEmailStatus } from '../../domain/scheduled-email/scheduled-email.entity';
+import { CANCELLABLE_SCHEDULED_EMAIL_STATUSES, ScheduledEmail } from '../../domain/scheduled-email/scheduled-email.entity';
 import { ScheduledEmailRepository } from '../../domain/scheduled-email/scheduled-email.repository';
 import { SequenceContact } from '../../domain/sequence-contact/sequence-contact.entity';
 import { SequenceContactRepository } from '../../domain/sequence-contact/sequence-contact.repository';
@@ -30,7 +30,7 @@ export interface BatchResult {
   scheduledEmails: ScheduledEmail[];
 }
 
-const CANCELLABLE_STATUSES: ScheduledEmailStatus[] = ['PENDING', 'SCHEDULED', 'QUEUED', 'RETRY_SCHEDULED'];
+const CANCELLABLE_STATUSES = CANCELLABLE_SCHEDULED_EMAIL_STATUSES;
 
 /**
  * §21-27 — auto-enrollment into the first published step, batching/limits

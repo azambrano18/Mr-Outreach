@@ -135,12 +135,15 @@ describe('SequenceStepsService', () => {
       findAllByOrganization: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      conditionalUpdatePublishStatus: jest.fn(),
     };
     mailboxes = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
+      createLinked: jest.fn(),
       update: jest.fn(),
     };
     signatures = {

@@ -13,7 +13,7 @@
     "test:watch": "cross-env NODE_ENV=test jest --watch",
     "test:cov": "cross-env NODE_ENV=test jest --coverage",
     "test:e2e": "cross-env NODE_ENV=test jest --config ./test/jest-e2e.json",
-    "test:integration": "cross-env NODE_ENV=test DATABASE_ENVIRONMENT=test jest --runInBand --testPathPattern=\"prisma-.*\\.contract\\.spec\\.ts$|restart-durability\"",
+    "test:integration": "cross-env NODE_ENV=test DATABASE_ENVIRONMENT=test PERSISTENCE_DRIVER=postgres CRM_DRIVER=mock jest --runInBand --testPathPattern=\"prisma-.*\\.contract\\.spec\\.ts$|restart-durability|\\.integration\\.spec\\.ts$\"",
     "test:crm-integration": "cross-env NODE_ENV=test CRM_DRIVER=postgres ALLOW_REAL_CRM_IN_TESTS=true jest --testPathPattern=\"\\.crm-integration\\.spec\\.ts$\""
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.4.4",
     "@nestjs/swagger": "^7.4.2",
+    "@nestjs/throttler": "^6.5.0",
     "@outreach/validation": "0.1.0",
     "@prisma/client": "^5.20.0",
     "@types/papaparse": "^5.5.2",

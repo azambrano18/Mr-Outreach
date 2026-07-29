@@ -6,6 +6,7 @@ import {
   UpdateSequenceImportRowInput,
 } from '../../../domain/sequence-import-row/sequence-import-row.entity';
 import {
+  BulkRowResult,
   SequenceImportRowFilter,
   SequenceImportRowRepository,
 } from '../../../domain/sequence-import-row/sequence-import-row.repository';
@@ -75,5 +76,18 @@ export class InMemorySequenceImportRowRepository implements SequenceImportRowRep
     const updated: SequenceImportRow = { ...existing, ...input, updatedAt: new Date() };
     this.store.sequenceImportRows.set(id, updated);
     return updated;
+  }
+
+  async bulkSetContactAndNormalizedData(updates: BulkRowResult[]): Promise<void> {
+    for (const u of updates) {
+      const existing = this.store.sequenceImportRows.get(u.rowId);
+      if (!existing) continue;
+      this.store.sequenceImportRows.set(u.rowId, {
+        ...existing,
+        contactId: u.contactId,
+        normalizedData: u.normalizedData,
+        updatedAt: new Date(),
+      });
+    }
   }
 }

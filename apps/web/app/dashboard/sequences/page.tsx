@@ -17,8 +17,10 @@ export default async function SequencesAliasPage() {
   if (currentUser.permissions.includes('sequences.read_all')) {
     redirect('/dashboard/sequences/all');
   }
+  // Etapa "cuenta del ejecutivo" — el módulo "Secuencias" quedó retirado de
+  // la experiencia del ejecutivo; su equivalente seguro es "Plantillas".
   if (currentUser.permissions.includes('sequences.manage.own')) {
-    redirect('/dashboard/sequences/mine');
+    redirect('/dashboard/sequence-templates');
   }
 
   return <AccessDenied />;

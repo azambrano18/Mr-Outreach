@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { extractTemplateVariables } from '@outreach/validation';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { EngineClient } from '../../domain/engine/engine-client';
@@ -207,6 +207,11 @@ export class SignaturesService {
     actorId: string,
   ): Promise<SendTestSignatureResult> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    if (!mailbox.smtp) {
+      throw new ConflictException(
+        'Esta cuenta está vinculada por token del servidor motor; el envío de prueba mediante SMTP local no está disponible para este tipo de cuenta.',
+      );
+    }
     const signature = await this.getOwnedSignatureByMailbox(mailboxId);
     const version = await this.getActiveVersion(signature);
 

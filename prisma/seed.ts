@@ -32,6 +32,9 @@ const PERMISSION_CATALOG = [
   { key: 'mailboxes.test', description: 'Run a connection test for a mailbox.' },
   { key: 'mailboxes.assign', description: 'Assign or reassign a mailbox to an executive.' },
   { key: 'mailboxes.disable', description: 'Deactivate a mailbox.' },
+  { key: 'mailboxes.link', description: 'Fase 2.1: introspect and redeem a Railway mailbox-link token to link a mailbox.' },
+  { key: 'mailboxes.refresh_status', description: "Fase 2.1: query the motor for a SERVER_TOKEN mailbox's current status." },
+  { key: 'mailboxes.unlink', description: "Fase 2.1: revoke Mr Outreach's authorization to use a SERVER_TOKEN mailbox (owner/admin only)." },
 
   { key: 'templates.read', description: 'View templates.' },
   { key: 'templates.create', description: 'Create a template.' },

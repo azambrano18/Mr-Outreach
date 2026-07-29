@@ -1,3 +1,4 @@
+import { TransactionContext } from '../persistence/transaction';
 import {
   CreateSequenceStepInput,
   SequenceStep,
@@ -5,9 +6,9 @@ import {
 } from './sequence-step.entity';
 
 export interface SequenceStepRepository {
-  findById(id: string): Promise<SequenceStep | null>;
+  findById(id: string, ctx?: TransactionContext): Promise<SequenceStep | null>;
   /** Ordered by position ascending. */
-  findBySequence(sequenceId: string): Promise<SequenceStep[]>;
+  findBySequence(sequenceId: string, ctx?: TransactionContext): Promise<SequenceStep[]>;
   /** Every non-deleted step across every sequence in the org — used to check whether a variable key is still referenced anywhere before allowing its catalog entry to be deleted. */
   findAllByOrganization(organizationId: string): Promise<SequenceStep[]>;
   create(input: CreateSequenceStepInput): Promise<SequenceStep>;

@@ -25,7 +25,7 @@ describe('AdminClientsService', () => {
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      findByCrmClientId: jest.fn(),
+      findByCrmClientId: jest.fn(), findByServerClientId: jest.fn(),
     };
     domains = {
       findById: jest.fn(),
@@ -47,6 +47,8 @@ describe('AdminClientsService', () => {
       remove: jest.fn(),
       findByClient: jest.fn(),
       findByUser: jest.fn(),
+      ensureDerivedVisibility: jest.fn(),
+      removeDerivedVisibilityIfPresent: jest.fn(),
     };
     crmClients = { list: jest.fn(), getById: jest.fn() } as unknown as jest.Mocked<CrmClientsService>;
 
@@ -91,6 +93,8 @@ describe('AdminClientsService', () => {
         id: 'client_1',
         organizationId: orgId,
         crmClientId: 1,
+        source: 'LEGACY_CRM',
+        serverClientId: null,
         name: 'Acme',
         legalName: null,
         internalCode: null,
@@ -128,6 +132,8 @@ describe('AdminClientsService', () => {
         id: 'client_1',
         organizationId: orgId,
         crmClientId: 1,
+        source: 'LEGACY_CRM',
+        serverClientId: null,
         name: 'Acme',
         legalName: null,
         internalCode: null,

@@ -1,9 +1,9 @@
 import { notFound, redirect } from 'next/navigation';
-import type { MailboxConnectionTestSummary, MailboxSummary, SignatureSummary } from '@outreach/shared-types';
+import type { MailboxSummary, SignatureSummary, UserSummary } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../../../lib/api';
 import { getCurrentUser } from '../../../../../lib/session';
-import { ConnectionTestHistory } from './connection-test-history';
-import { EditMailboxForm } from './edit-mailbox-form';
+import { LegacyMailboxPanel } from './legacy-mailbox-panel';
+import { ServerLinkedMailboxPanel } from './server-linked-mailbox-panel';
 import { SignatureSection } from '../../../../../components/mailboxes/signature-section';
 
 export default async function EditMailboxPage({ params }: { params: { id: string } }) {
@@ -12,7 +12,7 @@ export default async function EditMailboxPage({ params }: { params: { id: string
     redirect('/login');
   }
   if (!currentUser.permissions.includes('mailboxes.update')) {
-    redirect('/dashboard/clients');
+    redirect('/dashboard/mailboxes');
   }
 
   let mailbox: MailboxSummary;
@@ -23,17 +23,6 @@ export default async function EditMailboxPage({ params }: { params: { id: string
       notFound();
     }
     throw error;
-  }
-
-  let history: MailboxConnectionTestSummary[] = [];
-  if (currentUser.permissions.includes('mailboxes.read.all')) {
-    try {
-      history = await apiFetch<MailboxConnectionTestSummary[]>(
-        `/mailboxes/${params.id}/connection-tests`,
-      );
-    } catch {
-      history = [];
-    }
   }
 
   let signature: SignatureSummary | null = null;
@@ -49,19 +38,40 @@ export default async function EditMailboxPage({ params }: { params: { id: string
     }
   }
 
+  let executives: UserSummary[] = [];
+  if (currentUser.permissions.includes('mailboxes.assign')) {
+    try {
+      executives = (await apiFetch<UserSummary[]>('/users')).filter((u) => u.status === 'ACTIVE');
+    } catch {
+      executives = [];
+    }
+  }
+
+  // Fase 2.1, §17 — a SERVER_TOKEN mailbox gets its own screen: no IMAP/SMTP
+  // fields, no "Probar conexión". A LEGACY_LOCAL account gets a minimal,
+  // read-mostly panel (§9 of the interface cleanup) — Mr Outreach no longer
+  // allows creating or editing manual credentials for either kind.
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 py-4">
-      <h1 className="text-2xl font-semibold text-slate-900">Editar cuenta de correo</h1>
+      <h1 className="text-2xl font-semibold text-slate-900">
+        {mailbox.linkSource === 'SERVER_TOKEN' ? 'Cuenta vinculada por token' : 'Cuenta heredada'}
+      </h1>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">General</h2>
-        <EditMailboxForm mailbox={mailbox} />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Conexión</h2>
-        <ConnectionTestHistory history={history} />
-      </section>
+      {mailbox.linkSource === 'SERVER_TOKEN' ? (
+        <ServerLinkedMailboxPanel
+          mailbox={mailbox}
+          executives={executives}
+          canReassign={currentUser.permissions.includes('mailboxes.assign')}
+          canUnlink={currentUser.permissions.includes('mailboxes.unlink')}
+          canViewAudit={currentUser.permissions.includes('audit.read')}
+        />
+      ) : (
+        <LegacyMailboxPanel
+          mailbox={mailbox}
+          executives={executives}
+          canReassign={currentUser.permissions.includes('mailboxes.assign')}
+        />
+      )}
 
       {canReadSignature && (
         <section className="flex flex-col gap-3">
@@ -78,50 +88,6 @@ export default async function EditMailboxPage({ params }: { params: { id: string
           />
         </section>
       )}
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Estado y diagnóstico
-        </h2>
-        <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5 sm:grid-cols-2">
-          <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Estado general
-            </span>
-            <p className="text-sm text-slate-800">
-              {mailbox.status === 'ACTIVE' ? 'Operativa' : 'Inactiva'}
-            </p>
-          </div>
-          <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              IMAP / SMTP
-            </span>
-            <p className="text-sm text-slate-800">{mailbox.connectionStatus}</p>
-          </div>
-          <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Firma
-            </span>
-            <p className="text-sm text-slate-800">
-              {signature?.activeVersion ? 'Configurada' : 'No configurada'}
-            </p>
-          </div>
-          <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Capacidad disponible
-            </span>
-            <p className="text-sm text-slate-800">No disponible en esta fase</p>
-          </div>
-          <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Último error
-            </span>
-            <p className="text-sm text-slate-800">
-              {mailbox.lastTestMessage ?? 'Sin errores recientes'}
-            </p>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

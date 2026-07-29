@@ -1,10 +1,13 @@
 import { ClientAssignmentRole } from '../../domain/client/client-executive-assignment.entity';
-import { ManagedClientStatus } from '../../domain/client/managed-client.entity';
+import { ManagedClientSource, ManagedClientStatus } from '../../domain/client/managed-client.entity';
 
 export interface ManagedClientSummary {
   id: string;
   organizationId: string;
-  crmClientId: number;
+  /** Null for a SERVER-origin client (Fase 2.1, §9.1) with no CRM linkage. */
+  crmClientId: number | null;
+  source: ManagedClientSource;
+  serverClientId: string | null;
   /** Fase 1.5 — snapshot local del nombre corporativo (maestro_clientes.empresa). Ya no editable a mano. */
   name: string;
   legalName: string | null;

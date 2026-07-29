@@ -21,17 +21,24 @@ import {
   ORGANIZATION_REPOSITORY,
   PERMISSION_REPOSITORY,
   PRISMA_SERVICE,
+  PROSPECT_IMPORT_REPOSITORY,
+  PROSPECT_IMPORT_ROW_REPOSITORY,
   ROLE_REPOSITORY,
   SCHEDULED_EMAIL_REPOSITORY,
   SEQUENCE_CONTACT_REPOSITORY,
+  SEQUENCE_EXECUTION_REPOSITORY,
   SEQUENCE_IMPORT_REPOSITORY,
   SEQUENCE_IMPORT_ROW_REPOSITORY,
   SEQUENCE_REPOSITORY,
   SEQUENCE_STEP_REPOSITORY,
   SEQUENCE_STEP_VERSION_REPOSITORY,
+  SEQUENCE_TEMPLATE_REPOSITORY,
+  SEQUENCE_TEMPLATE_STEP_REPOSITORY,
+  SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
   SIGNATURE_REPOSITORY,
   SIGNATURE_VERSION_REPOSITORY,
   TEMPLATE_REPOSITORY,
+  TRANSACTION_MANAGER,
   USER_REPOSITORY,
   USER_ROLE_REPOSITORY,
   VARIABLE_REPOSITORY,
@@ -66,6 +73,12 @@ import { InMemorySequenceImportRepository } from './memory/in-memory-sequence-im
 import { InMemorySequenceImportRowRepository } from './memory/in-memory-sequence-import-row.repository';
 import { InMemorySequenceContactRepository } from './memory/in-memory-sequence-contact.repository';
 import { InMemoryScheduledEmailRepository } from './memory/in-memory-scheduled-email.repository';
+import { InMemorySequenceTemplateRepository } from './memory/in-memory-sequence-template.repository';
+import { InMemorySequenceTemplateStepRepository } from './memory/in-memory-sequence-template-step.repository';
+import { InMemorySequenceTemplateVersionRepository } from './memory/in-memory-sequence-template-version.repository';
+import { InMemorySequenceExecutionRepository } from './memory/in-memory-sequence-execution.repository';
+import { InMemoryProspectImportRepository } from './memory/in-memory-prospect-import.repository';
+import { InMemoryProspectImportRowRepository } from './memory/in-memory-prospect-import-row.repository';
 import { InMemoryUserRepository } from './memory/in-memory-user.repository';
 import { InMemoryUserRoleRepository } from './memory/in-memory-user-role.repository';
 import { InMemoryVariableRepository } from './memory/in-memory-variable.repository';
@@ -97,15 +110,33 @@ import { PrismaSequenceImportRepository } from './prisma/prisma-sequence-import.
 import { PrismaSequenceImportRowRepository } from './prisma/prisma-sequence-import-row.repository';
 import { PrismaSequenceContactRepository } from './prisma/prisma-sequence-contact.repository';
 import { PrismaScheduledEmailRepository } from './prisma/prisma-scheduled-email.repository';
+import { PrismaSequenceTemplateRepository } from './prisma/prisma-sequence-template.repository';
+import { PrismaSequenceTemplateStepRepository } from './prisma/prisma-sequence-template-step.repository';
+import { PrismaSequenceTemplateVersionRepository } from './prisma/prisma-sequence-template-version.repository';
+import { PrismaSequenceExecutionRepository } from './prisma/prisma-sequence-execution.repository';
+import { PrismaProspectImportRepository } from './prisma/prisma-prospect-import.repository';
+import { PrismaProspectImportRowRepository } from './prisma/prisma-prospect-import-row.repository';
 import { MockCrmClientRepository } from './crm/mock-crm-client.repository';
 import { PostgresCrmClientRepository } from './crm/postgres-crm-client.repository';
 import { assertCrmDriverAllowedInTests } from './crm/crm-test-guard';
+import { PrismaTransactionManager } from './prisma/prisma-transaction-manager';
+import { InMemoryTransactionManager } from './memory/in-memory-transaction-manager';
 
 const prismaServiceProvider: Provider = {
   provide: PRISMA_SERVICE,
   useFactory: (config: AppConfigService): PrismaService | null =>
     config.persistenceDriver === 'postgres' ? new PrismaService() : null,
   inject: [AppConfigService],
+};
+
+/** Fase 2 — Unit of Work, same postgres/memory split as every repository below. */
+const transactionManagerProvider: Provider = {
+  provide: TRANSACTION_MANAGER,
+  useFactory: (config: AppConfigService, prisma: PrismaService | null) =>
+    config.persistenceDriver === 'postgres'
+      ? new PrismaTransactionManager(prisma!)
+      : new InMemoryTransactionManager(),
+  inject: [AppConfigService, PRISMA_SERVICE],
 };
 
 /**
@@ -359,6 +390,54 @@ const repositoryProviders: Provider[] = [
     inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   {
+    provide: SEQUENCE_TEMPLATE_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaSequenceTemplateRepository(prisma!)
+        : new InMemorySequenceTemplateRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
+    provide: SEQUENCE_TEMPLATE_STEP_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaSequenceTemplateStepRepository(prisma!)
+        : new InMemorySequenceTemplateStepRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
+    provide: SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaSequenceTemplateVersionRepository(prisma!)
+        : new InMemorySequenceTemplateVersionRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
+    provide: SEQUENCE_EXECUTION_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaSequenceExecutionRepository(prisma!)
+        : new InMemorySequenceExecutionRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
+    provide: PROSPECT_IMPORT_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaProspectImportRepository(prisma!)
+        : new InMemoryProspectImportRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
+    provide: PROSPECT_IMPORT_ROW_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaProspectImportRowRepository(prisma!)
+        : new InMemoryProspectImportRowRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
     // Independent of PERSISTENCE_DRIVER — gated by its own CRM_DRIVER, since
     // this is a wholly separate external database, never the app's own.
     provide: CRM_CLIENT_REPOSITORY,
@@ -378,11 +457,13 @@ const repositoryProviders: Provider[] = [
   providers: [
     MemoryStore,
     prismaServiceProvider,
+    transactionManagerProvider,
     PersistenceHealthIndicator,
     ...repositoryProviders,
   ],
   exports: [
     MemoryStore,
+    TRANSACTION_MANAGER,
     ORGANIZATION_REPOSITORY,
     USER_REPOSITORY,
     ROLE_REPOSITORY,
@@ -414,6 +495,12 @@ const repositoryProviders: Provider[] = [
     SEQUENCE_IMPORT_ROW_REPOSITORY,
     SEQUENCE_CONTACT_REPOSITORY,
     SCHEDULED_EMAIL_REPOSITORY,
+    SEQUENCE_TEMPLATE_REPOSITORY,
+    SEQUENCE_TEMPLATE_STEP_REPOSITORY,
+    SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
+    SEQUENCE_EXECUTION_REPOSITORY,
+    PROSPECT_IMPORT_REPOSITORY,
+    PROSPECT_IMPORT_ROW_REPOSITORY,
     CRM_CLIENT_REPOSITORY,
     PersistenceHealthIndicator,
   ],

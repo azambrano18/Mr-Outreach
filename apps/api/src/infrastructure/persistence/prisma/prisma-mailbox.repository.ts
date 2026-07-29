@@ -1,32 +1,42 @@
 import { Injectable } from '@nestjs/common';
 import { Mailbox as PrismaMailboxRow } from '@prisma/client';
 import {
+  CreateLinkedMailboxInput,
   CreateMailboxInput,
   Mailbox,
   MailboxProtocolConfig,
   UpdateMailboxInput,
 } from '../../../domain/mailbox/mailbox.entity';
 import { MailboxRepository } from '../../../domain/mailbox/mailbox.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
-function toImap(row: PrismaMailboxRow): MailboxProtocolConfig {
+/** Null whenever the account is SERVER_TOKEN-linked (see schema comment on the now-nullable imap* columns). */
+function toImap(row: PrismaMailboxRow): MailboxProtocolConfig | null {
+  if (row.imapHost === null || row.imapPort === null || row.imapEncryption === null || row.imapUsername === null || row.imapSecretCiphertext === null) {
+    return null;
+  }
   return {
     host: row.imapHost,
     port: row.imapPort,
     encryption: row.imapEncryption,
     username: row.imapUsername,
-    verifyCertificate: row.imapVerifyCertificate,
+    verifyCertificate: row.imapVerifyCertificate ?? true,
     secretCiphertext: row.imapSecretCiphertext,
   };
 }
 
-function toSmtp(row: PrismaMailboxRow): MailboxProtocolConfig {
+function toSmtp(row: PrismaMailboxRow): MailboxProtocolConfig | null {
+  if (row.smtpHost === null || row.smtpPort === null || row.smtpEncryption === null || row.smtpUsername === null || row.smtpSecretCiphertext === null) {
+    return null;
+  }
   return {
     host: row.smtpHost,
     port: row.smtpPort,
     encryption: row.smtpEncryption,
     username: row.smtpUsername,
-    verifyCertificate: row.smtpVerifyCertificate,
+    verifyCertificate: row.smtpVerifyCertificate ?? true,
     secretCiphertext: row.smtpSecretCiphertext,
   };
 }
@@ -56,6 +66,27 @@ function toDomain(row: PrismaMailboxRow): Mailbox {
     lastTestMessage: row.lastTestMessage,
     imap: toImap(row),
     smtp: toSmtp(row),
+    linkSource: row.linkSource,
+    linkStatus: row.linkStatus,
+    serverMailboxId: row.serverMailboxId,
+    serverDomainId: row.serverDomainId,
+    serverClientId: row.serverClientId,
+    serverRedemptionId: row.serverRedemptionId,
+    tokenFingerprint: row.tokenFingerprint,
+    emailSnapshot: row.emailSnapshot,
+    domainSnapshot: row.domainSnapshot,
+    clientNameSnapshot: row.clientNameSnapshot,
+    serverStatusSnapshot: row.serverStatusSnapshot,
+    serverCanSendSnapshot: row.serverCanSendSnapshot,
+    serverStatusCheckedAt: row.serverStatusCheckedAt,
+    linkedAt: row.linkedAt,
+    linkedBy: row.linkedBy,
+    unlinkRequestedAt: row.unlinkRequestedAt,
+    unlinkRequestedBy: row.unlinkRequestedBy,
+    unlinkReason: row.unlinkReason,
+    revokedAt: row.revokedAt,
+    revocationId: row.revocationId,
+    lastLinkCommandId: row.lastLinkCommandId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
@@ -66,25 +97,30 @@ function toDomain(row: PrismaMailboxRow): Mailbox {
 export class PrismaMailboxRepository implements MailboxRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<Mailbox | null> {
-    const row = await this.prisma.mailbox.findFirst({ where: { id, deletedAt: null } });
+  async findById(id: string, ctx?: TransactionContext): Promise<Mailbox | null> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.findFirst({ where: { id, deletedAt: null } });
     return row ? toDomain(row) : null;
   }
 
-  async findByEmail(organizationId: string, email: string): Promise<Mailbox | null> {
-    const row = await this.prisma.mailbox.findFirst({
+  async findByEmail(organizationId: string, email: string, ctx?: TransactionContext): Promise<Mailbox | null> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.findFirst({
       where: { organizationId, email: { equals: email, mode: 'insensitive' }, deletedAt: null },
     });
     return row ? toDomain(row) : null;
   }
 
-  async findAll(organizationId: string): Promise<Mailbox[]> {
-    const rows = await this.prisma.mailbox.findMany({ where: { organizationId, deletedAt: null } });
+  async findByServerMailboxId(serverMailboxId: string, ctx?: TransactionContext): Promise<Mailbox | null> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.findFirst({ where: { serverMailboxId, deletedAt: null } });
+    return row ? toDomain(row) : null;
+  }
+
+  async findAll(organizationId: string, ctx?: TransactionContext): Promise<Mailbox[]> {
+    const rows = await resolveClient(this.prisma, ctx).mailbox.findMany({ where: { organizationId, deletedAt: null } });
     return rows.map(toDomain);
   }
 
-  async create(input: CreateMailboxInput): Promise<Mailbox> {
-    const row = await this.prisma.mailbox.create({
+  async create(input: CreateMailboxInput, ctx?: TransactionContext): Promise<Mailbox> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.create({
       data: {
         organizationId: input.organizationId,
         name: input.name,
@@ -114,8 +150,38 @@ export class PrismaMailboxRepository implements MailboxRepository {
     return toDomain(row);
   }
 
-  async update(id: string, input: UpdateMailboxInput): Promise<Mailbox> {
-    const row = await this.prisma.mailbox.update({
+  async createLinked(input: CreateLinkedMailboxInput, ctx?: TransactionContext): Promise<Mailbox> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.create({
+      data: {
+        organizationId: input.organizationId,
+        clientId: input.clientId,
+        domainId: input.domainId,
+        name: input.name,
+        email: input.email,
+        fromName: input.fromName,
+        linkSource: 'SERVER_TOKEN',
+        linkStatus: 'ACTIVE',
+        serverMailboxId: input.serverMailboxId,
+        serverDomainId: input.serverDomainId,
+        serverClientId: input.serverClientId,
+        serverRedemptionId: input.serverRedemptionId,
+        tokenFingerprint: input.tokenFingerprint,
+        emailSnapshot: input.emailSnapshot,
+        domainSnapshot: input.domainSnapshot,
+        clientNameSnapshot: input.clientNameSnapshot,
+        serverStatusSnapshot: input.serverStatusSnapshot,
+        serverCanSendSnapshot: input.serverCanSendSnapshot,
+        serverStatusCheckedAt: input.serverStatusCheckedAt,
+        linkedAt: input.linkedAt,
+        linkedBy: input.linkedBy,
+        lastLinkCommandId: input.lastLinkCommandId,
+      },
+    });
+    return toDomain(row);
+  }
+
+  async update(id: string, input: UpdateMailboxInput, ctx?: TransactionContext): Promise<Mailbox> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.update({
       where: { id },
       data: {
         name: input.name,
@@ -132,6 +198,16 @@ export class PrismaMailboxRepository implements MailboxRepository {
         lastTestedAt: input.lastTestedAt,
         lastTestedBy: input.lastTestedBy,
         lastTestMessage: input.lastTestMessage,
+        linkStatus: input.linkStatus,
+        serverStatusSnapshot: input.serverStatusSnapshot,
+        serverCanSendSnapshot: input.serverCanSendSnapshot,
+        serverStatusCheckedAt: input.serverStatusCheckedAt,
+        unlinkRequestedAt: input.unlinkRequestedAt,
+        unlinkRequestedBy: input.unlinkRequestedBy,
+        unlinkReason: input.unlinkReason,
+        revokedAt: input.revokedAt,
+        revocationId: input.revocationId,
+        lastLinkCommandId: input.lastLinkCommandId,
         ...(input.sendingLimits && {
           ...(input.sendingLimits.dailyLimit !== undefined && { dailyLimit: input.sendingLimits.dailyLimit }),
           ...(input.sendingLimits.minimumIntervalSeconds !== undefined && {

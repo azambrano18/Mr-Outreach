@@ -14,6 +14,12 @@ export default async function NewSequencePage() {
   if (!currentUser.permissions.includes('sequences.manage.own')) {
     return <AccessDenied />;
   }
+  // Etapa "cuenta del ejecutivo" — retirado de la experiencia del ejecutivo;
+  // solo un administrador navegando aquí directamente sigue viendo esta
+  // pantalla sin cambios.
+  if (!currentUser.permissions.includes('sequences.read_all')) {
+    redirect('/dashboard/sequence-templates/new');
+  }
 
   const [clients, tree] = await Promise.all([
     apiFetch<ManagedClientSummary[]>('/me/clients'),

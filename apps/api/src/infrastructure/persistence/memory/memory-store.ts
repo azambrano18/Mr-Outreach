@@ -16,8 +16,14 @@ import { MailboxConnectionTest } from '../../../domain/mailbox/mailbox-connectio
 import { Mailbox } from '../../../domain/mailbox/mailbox.entity';
 import { Organization } from '../../../domain/organization/organization.entity';
 import { Permission } from '../../../domain/permission/permission.entity';
+import { ProspectImport } from '../../../domain/prospect-import/prospect-import.entity';
+import { ProspectImportRow } from '../../../domain/prospect-import/prospect-import-row.entity';
 import { Role } from '../../../domain/role/role.entity';
 import { ScheduledEmail } from '../../../domain/scheduled-email/scheduled-email.entity';
+import { SequenceExecution } from '../../../domain/sequence-execution/sequence-execution.entity';
+import { SequenceTemplateStep } from '../../../domain/sequence-template/sequence-template-step.entity';
+import { SequenceTemplateVersion } from '../../../domain/sequence-template/sequence-template-version.entity';
+import { SequenceTemplate } from '../../../domain/sequence-template/sequence-template.entity';
 import { SequenceContact } from '../../../domain/sequence-contact/sequence-contact.entity';
 import { SequenceImport } from '../../../domain/sequence-import/sequence-import.entity';
 import { SequenceImportRow } from '../../../domain/sequence-import-row/sequence-import-row.entity';
@@ -77,6 +83,12 @@ export class MemoryStore {
   readonly sequenceImportRows = new Map<string, SequenceImportRow>();
   readonly sequenceContacts = new Map<string, SequenceContact>();
   readonly scheduledEmails = new Map<string, ScheduledEmail>();
+  readonly sequenceTemplates = new Map<string, SequenceTemplate>();
+  readonly sequenceTemplateSteps = new Map<string, SequenceTemplateStep>();
+  readonly sequenceTemplateVersions = new Map<string, SequenceTemplateVersion>();
+  readonly sequenceExecutions = new Map<string, SequenceExecution>();
+  readonly prospectImports = new Map<string, ProspectImport>();
+  readonly prospectImportRows = new Map<string, ProspectImportRow>();
 
   /** Used by tests to start each case from a clean slate. */
   reset(): void {
@@ -113,5 +125,11 @@ export class MemoryStore {
     this.sequenceImportRows.clear();
     this.sequenceContacts.clear();
     this.scheduledEmails.clear();
+    this.sequenceTemplates.clear();
+    this.sequenceTemplateSteps.clear();
+    this.sequenceTemplateVersions.clear();
+    this.sequenceExecutions.clear();
+    this.prospectImports.clear();
+    this.prospectImportRows.clear();
   }
 }

@@ -15,7 +15,19 @@ export type CommandType =
   | 'SEQUENCE_IMPORT_REQUESTED'
   | 'SEQUENCE_CONTACT_REMOVE_REQUESTED'
   | 'SEQUENCE_COMPANY_REMOVE_REQUESTED'
-  | 'PROSPECT_SEQUENCE_ACTION';
+  | 'PROSPECT_SEQUENCE_ACTION'
+  /**
+   * Fase 2.1 — durable idempotency/audit record for the token-based
+   * linking flow. Deliberately distinct from MAILBOX_PROVISION_REQUESTED
+   * (that one represents local IMAP/SMTP credential provisioning; this one
+   * never carries any credential). Never dispatched through
+   * MailEnginePort/IntegrationService.advance() — the "engine" here is
+   * MailboxMotorPort, called directly, not through the Outbox/Inbox.
+   */
+  | 'MAILBOX_LINK_REQUESTED'
+  | 'MAILBOX_UNLINK_REQUESTED'
+  /** Fase 2.1 — purely local idempotency/audit record; never talks to the motor (no token, no client/domain/email change). */
+  | 'MAILBOX_REASSIGN_PRIMARY_REQUESTED';
 
 export type EventType =
   | 'MAILBOX_PROVISION_ACCEPTED'

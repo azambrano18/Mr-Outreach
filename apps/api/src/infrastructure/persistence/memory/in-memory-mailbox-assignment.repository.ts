@@ -52,4 +52,8 @@ export class InMemoryMailboxAssignmentRepository implements MailboxAssignmentRep
   async findByUser(userId: string): Promise<MailboxAssignment[]> {
     return this.store.mailboxAssignments.filter((a) => a.userId === userId);
   }
+
+  async findAllByOrganization(organizationId: string): Promise<MailboxAssignment[]> {
+    return this.store.mailboxAssignments.filter((a) => a.organizationId === organizationId);
+  }
 }

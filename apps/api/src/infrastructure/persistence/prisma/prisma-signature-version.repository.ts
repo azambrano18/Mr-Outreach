@@ -5,7 +5,9 @@ import {
   SignatureVersion,
 } from '../../../domain/signature/signature-version.entity';
 import { SignatureVersionRepository } from '../../../domain/signature/signature-version.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaSignatureVersionRow): SignatureVersion {
   return {
@@ -23,11 +25,12 @@ function toDomain(row: PrismaSignatureVersionRow): SignatureVersion {
 export class PrismaSignatureVersionRepository implements SignatureVersionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(input: CreateSignatureVersionInput): Promise<SignatureVersion> {
-    const count = await this.prisma.signatureVersion.count({
+  async create(input: CreateSignatureVersionInput, ctx?: TransactionContext): Promise<SignatureVersion> {
+    const client = resolveClient(this.prisma, ctx);
+    const count = await client.signatureVersion.count({
       where: { signatureId: input.signatureId },
     });
-    const row = await this.prisma.signatureVersion.create({
+    const row = await client.signatureVersion.create({
       data: {
         signatureId: input.signatureId,
         versionNumber: count + 1,

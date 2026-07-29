@@ -124,8 +124,22 @@ export class IntegrationService {
       requestedBy: input.requestedBy,
     });
 
-    const result = await this.port.submitCommand(this.buildEnvelope(created));
-    const updated = await this.commandRepo.update(created.id, {
+    const updated = await this.dispatchExistingCommand(created, actorId);
+    return { command: updated, duplicate: false };
+  }
+
+  /**
+   * Fase 2 — the "submit to the port" half of `submit()`, extracted so a
+   * transactional use case can create the command row itself (status
+   * REQUESTED, inside its own business transaction — see
+   * IdempotentOperationService.claim) and then dispatch it to the
+   * (simulated) port as a separate, non-transactional step right after
+   * commit — the same "never hold a local transaction open waiting on an
+   * external call" rule already required for the CRM.
+   */
+  async dispatchExistingCommand(command: IntegrationCommand, actorId: string): Promise<IntegrationCommand> {
+    const result = await this.port.submitCommand(this.buildEnvelope(command));
+    const updated = await this.commandRepo.update(command.id, {
       sentAt: new Date(),
       status: result.accepted ? 'ACCEPTED' : 'FAILED',
       acceptedAt: result.accepted ? new Date() : null,
@@ -133,20 +147,20 @@ export class IntegrationService {
     });
 
     await this.auditLogs.record({
-      organizationId: input.organizationId,
+      organizationId: command.organizationId,
       actorId,
       action: 'integration_command.submit',
       entityType: 'IntegrationCommand',
       entityId: updated.id,
       metadata: {
-        commandType: input.commandType,
+        commandType: command.commandType,
         commandId: updated.commandId,
-        aggregateType: input.aggregateType,
-        aggregateId: input.aggregateId,
+        aggregateType: command.aggregateType,
+        aggregateId: command.aggregateId,
       },
     });
 
-    return { command: updated, duplicate: false };
+    return updated;
   }
 
   /** The full deterministic event sequence the simulated engine will emit for this command — used by "Ver JSON" and by `advance`'s own diffing. */

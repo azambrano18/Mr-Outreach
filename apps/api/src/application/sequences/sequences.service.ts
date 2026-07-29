@@ -1,9 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
-import { ClientsService } from '../clients/clients.service';
 import { ClientExecutiveAssignmentRepository } from '../../domain/client/client-executive-assignment.repository';
-import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
-import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { Mailbox } from '../../domain/mailbox/mailbox.entity';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
@@ -18,16 +15,15 @@ import { UserRepository } from '../../domain/user/user.repository';
 import {
   AUDIT_LOG_REPOSITORY,
   CLIENT_EXECUTIVE_ASSIGNMENT_REPOSITORY,
-  DOMAIN_REPOSITORY,
   MAILBOX_ASSIGNMENT_REPOSITORY,
   MAILBOX_REPOSITORY,
-  MANAGED_CLIENT_REPOSITORY,
   SEQUENCE_REPOSITORY,
   SEQUENCE_STEP_REPOSITORY,
   SIGNATURE_REPOSITORY,
   SIGNATURE_VERSION_REPOSITORY,
   USER_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
+import { SequenceEligibilityService } from './sequence-eligibility.service';
 import { SequenceStepsService } from './sequence-steps.service';
 import { addDelay, computeEffectiveStart, generateSequenceName, SANTIAGO_TIMEZONE } from './sequence-timing.util';
 import {
@@ -72,10 +68,8 @@ export class SequencesService {
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     @Inject(CLIENT_EXECUTIVE_ASSIGNMENT_REPOSITORY)
     private readonly clientExecutiveAssignments: ClientExecutiveAssignmentRepository,
-    @Inject(MANAGED_CLIENT_REPOSITORY) private readonly managedClients: ManagedClientRepository,
-    @Inject(DOMAIN_REPOSITORY) private readonly domains: DomainRepository,
     private readonly sequenceSteps: SequenceStepsService,
-    private readonly clients: ClientsService,
+    private readonly eligibility: SequenceEligibilityService,
   ) {}
 
   async listForExecutive(organizationId: string, executiveId: string): Promise<SequenceSummary[]> {
@@ -137,9 +131,9 @@ export class SequencesService {
     actorId: string,
   ): Promise<SequenceSummary> {
     await this.requireOwnedActiveExecutive(organizationId, executiveId);
-    // Fase 1.5 §9 — same gate as the admin wizard path below; this self-service
-    // path had no client-eligibility check of any kind before this phase.
-    await this.clients.assertClientCrmEligible(organizationId, input.clientId, actorId);
+    // Fase 2 — centralized eligibility (client active + CRM active +
+    // executive assigned to client); no PostgreSQL write happens here.
+    await this.eligibility.verify({ organizationId, clientId: input.clientId, executiveId });
     const mailbox = await this.requireAssignedOperationalMailbox(organizationId, executiveId, input.mailboxId);
     if (mailbox.clientId !== input.clientId) {
       throw new BadRequestException('La cuenta de correo seleccionada no pertenece al cliente indicado.');
@@ -167,31 +161,21 @@ export class SequencesService {
     actorId: string,
   ): Promise<SequenceSummary> {
     await this.requireOwnedActiveExecutive(organizationId, executiveId);
-    await this.requireActiveManagedClient(organizationId, input.clientId);
-    // Fase 1.5 §9 — CRM eligibility, distinct from the operational check above.
-    await this.clients.assertClientCrmEligible(organizationId, input.clientId, actorId);
-    await this.requireExecutiveAssignedToClient(executiveId, input.clientId);
-    await this.requireActiveClientDomain(organizationId, input.domainId, input.clientId);
-
-    const mailbox = await this.mailboxes.findById(input.mailboxId);
-    if (!mailbox || mailbox.organizationId !== organizationId) {
-      throw new BadRequestException('Invalid mailbox id.');
-    }
-    if (mailbox.clientId !== input.clientId) {
-      throw new BadRequestException('La cuenta de correo seleccionada no pertenece al cliente indicado.');
-    }
-    if (mailbox.domainId !== input.domainId) {
-      throw new BadRequestException('La cuenta de correo seleccionada no pertenece al dominio indicado.');
-    }
-    if (mailbox.status !== 'ACTIVE' || mailbox.connectionStatus !== 'CONNECTED' || mailbox.provisioningStatus !== 'PROVISIONED') {
-      throw new BadRequestException(
-        'La cuenta de correo seleccionada no está vinculada o tiene errores de conexión.',
-      );
-    }
+    // Fase 2 — centralized eligibility: client operationally active + CRM
+    // active + executive assigned to client + domain active + mailbox
+    // active/connected/provisioned/belongs to domain+client. Pure
+    // validation — no PostgreSQL write happens inside `verify()`.
+    const eligible = await this.eligibility.verify({
+      organizationId,
+      clientId: input.clientId,
+      executiveId,
+      domainId: input.domainId,
+      mailboxId: input.mailboxId,
+    });
+    const mailbox = eligible.mailbox as Mailbox;
 
     const mailboxAssignments = await this.assignments.findByMailbox(mailbox.id);
-    const alreadyAssigned = mailboxAssignments.some((assignment) => assignment.userId === executiveId);
-    if (!alreadyAssigned) {
+    if (!eligible.mailboxAlreadyAssigned) {
       if (!input.authorizeMailboxAssignment) {
         throw new BadRequestException(
           'La cuenta de correo no está asignada al ejecutivo. Autoriza la asignación para continuar.',
@@ -670,31 +654,6 @@ export class SequencesService {
     const isAssigned = clientAssignments.some((assignment) => assignment.clientId === clientId);
     if (!isAssigned) {
       throw new BadRequestException('El ejecutivo no está asignado a este cliente.');
-    }
-  }
-
-  /** Spec §1.1 — the wizard only allows creating sequences for an ACTIVE client. */
-  private async requireActiveManagedClient(organizationId: string, clientId: string): Promise<void> {
-    const client = await this.managedClients.findById(clientId);
-    if (!client || client.organizationId !== organizationId) {
-      throw new BadRequestException('Invalid client id.');
-    }
-    if (client.status !== 'ACTIVE') {
-      throw new BadRequestException('El cliente seleccionado no está activo.');
-    }
-  }
-
-  /** Spec §1.1 paso 2 — the domain must belong to the given client and be ACTIVE. */
-  private async requireActiveClientDomain(organizationId: string, domainId: string, clientId: string): Promise<void> {
-    const domain = await this.domains.findById(domainId);
-    if (!domain || domain.organizationId !== organizationId) {
-      throw new BadRequestException('Invalid domain id.');
-    }
-    if (domain.clientId !== clientId) {
-      throw new BadRequestException('El dominio seleccionado no pertenece al cliente indicado.');
-    }
-    if (domain.status !== 'ACTIVE') {
-      throw new BadRequestException('El dominio seleccionado no está activo.');
     }
   }
 

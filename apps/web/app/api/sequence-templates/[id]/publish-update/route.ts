@@ -1,0 +1,27 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { ApiError, apiFetch } from '../../../../../lib/api';
+
+/** §12-17 — updates an already-PUBLISHED template; distinct from /publish (first publish of a DRAFT). */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } },
+): Promise<NextResponse> {
+  const idempotencyKey = request.headers.get('idempotency-key');
+  if (!idempotencyKey) {
+    return NextResponse.json({ error: 'El encabezado Idempotency-Key es obligatorio.' }, { status: 400 });
+  }
+  const body = await request.json().catch(() => ({}));
+  try {
+    const result = await apiFetch(`/me/sequence-templates/${params.id}/publish-update`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+}

@@ -100,6 +100,9 @@ export class InMemoryIntegrationCommandRepository implements IntegrationCommandR
       sentAt: null,
       acceptedAt: null,
       completedAt: null,
+      payloadHash: input.payloadHash ?? null,
+      resultSnapshot: input.resultSnapshot ?? null,
+      httpStatusCode: input.httpStatusCode ?? null,
     };
     this.store.integrationCommands.set(command.id, command);
     return command;

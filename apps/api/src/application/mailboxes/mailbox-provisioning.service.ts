@@ -1,16 +1,16 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { IntegrationCommand } from '../../domain/integration/integration-command.entity';
 import { IntegrationEvent } from '../../domain/integration/integration-event.entity';
 import { Mailbox } from '../../domain/mailbox/mailbox.entity';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
-import { AUDIT_LOG_REPOSITORY, MAILBOX_REPOSITORY } from '../../infrastructure/persistence/tokens';
+import { MAILBOX_REPOSITORY } from '../../infrastructure/persistence/tokens';
 import {
   MailboxProvisionScenario,
   SimulatedMailEngineAdapter,
 } from '../../infrastructure/mail-engine/simulated/simulated-mail-engine-adapter';
 import { IntegrationService } from '../integration/integration.service';
+import { MailboxProvisioningEventApplier } from './mailbox-provisioning-event-applier';
 
 /**
  * §8-12 — turns "Guardar cuenta" into a MAILBOX_PROVISION_REQUESTED command
@@ -18,14 +18,20 @@ import { IntegrationService } from '../integration/integration.service';
  * MailboxesService.testConnection (which stays exactly as it was — a
  * synchronous EngineClient call unrelated to this async flow); this service
  * owns only the new provisioning lifecycle riding on IntegrationService.
+ *
+ * Fase 2 — kept as the QA/legacy path (manual scenario-setting,
+ * step-by-step advance); event→state translation delegates to the shared
+ * `MailboxProvisioningEventApplier` so this never diverges from
+ * `ConfigureMailboxUseCase`/`UpdateMailboxConfigurationUseCase`'s own
+ * post-commit handling.
  */
 @Injectable()
 export class MailboxProvisioningService {
   constructor(
     @Inject(MAILBOX_REPOSITORY) private readonly mailboxes: MailboxRepository,
-    @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     private readonly integration: IntegrationService,
     private readonly simulatedAdapter: SimulatedMailEngineAdapter,
+    private readonly eventApplier: MailboxProvisioningEventApplier,
   ) {}
 
   async requestProvisioning(
@@ -35,6 +41,11 @@ export class MailboxProvisioningService {
     idempotencyKey?: string,
   ): Promise<{ mailbox: Mailbox; command: IntegrationCommand; duplicate: boolean }> {
     const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    if (!mailbox.imap || !mailbox.smtp) {
+      throw new ConflictException(
+        'Esta cuenta está vinculada por token del servidor motor; no admite aprovisionamiento manual de credenciales.',
+      );
+    }
     if (!mailbox.clientId || !mailbox.domainId) {
       throw new ConflictException(
         'La cuenta debe estar vinculada a un cliente y a un dominio antes de solicitar el aprovisionamiento.',
@@ -109,68 +120,10 @@ export class MailboxProvisioningService {
 
     const events = await this.integration.advance(organizationId, mailbox.lastProvisionCommandId, mode, actorId);
     for (const event of events) {
-      await this.applyEvent(organizationId, mailbox.id, event, actorId);
+      await this.eventApplier.apply(organizationId, mailbox, event, actorId);
     }
 
     return { mailbox: await this.getOwnedMailbox(organizationId, mailboxId), events };
-  }
-
-  /** Spec §8 — "cambios de estado informados por el motor" audited here, never the payload/credentials. */
-  private async applyEvent(
-    organizationId: string,
-    mailboxId: string,
-    event: IntegrationEvent,
-    actorId: string,
-  ): Promise<void> {
-    switch (event.eventType) {
-      case 'MAILBOX_PROVISION_STARTED':
-        await this.mailboxes.update(mailboxId, { provisioningStatus: 'PROVISIONING' });
-        await this.auditLogs.record({
-          organizationId,
-          actorId,
-          action: 'mailbox.provision_started',
-          entityType: 'Mailbox',
-          entityId: mailboxId,
-          metadata: { commandId: event.commandId },
-        });
-        break;
-      case 'MAILBOX_IMAP_VALIDATED':
-        await this.mailboxes.update(mailboxId, { connectionStatus: 'PARTIALLY_CONNECTED' });
-        break;
-      case 'MAILBOX_SMTP_VALIDATED':
-        await this.mailboxes.update(mailboxId, { connectionStatus: 'CONNECTED' });
-        break;
-      case 'MAILBOX_PROVISION_COMPLETED':
-        await this.mailboxes.update(mailboxId, {
-          provisioningStatus: 'PROVISIONED',
-          connectionStatus: 'CONNECTED',
-        });
-        await this.auditLogs.record({
-          organizationId,
-          actorId,
-          action: 'mailbox.provision_completed',
-          entityType: 'Mailbox',
-          entityId: mailboxId,
-          metadata: { commandId: event.commandId },
-        });
-        break;
-      case 'MAILBOX_PROVISION_FAILED':
-        await this.mailboxes.update(mailboxId, {
-          provisioningStatus: 'PROVISION_FAILED',
-          connectionStatus: 'CONNECTION_ERROR',
-        });
-        await this.auditLogs.record({
-          organizationId,
-          actorId,
-          action: 'mailbox.provision_failed',
-          entityType: 'Mailbox',
-          entityId: mailboxId,
-          metadata: { commandId: event.commandId },
-        });
-        break;
-      default:
-        break;
-    }
   }
 
   /** §10 — never the real secret, just a stable, obviously-fake vault reference. */

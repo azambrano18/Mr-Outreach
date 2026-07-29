@@ -15,7 +15,9 @@ import { ReplySimulationModule } from './modules/reply-simulation/reply-simulati
 import { RolesModule } from './modules/roles/roles.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { SequenceContactsModule } from './modules/sequence-contacts/sequence-contacts.module';
+import { SequenceExecutionsModule } from './modules/sequence-executions/sequence-executions.module';
 import { SequenceImportsModule } from './modules/sequence-imports/sequence-imports.module';
+import { SequenceTemplatesModule } from './modules/sequence-templates/sequence-templates.module';
 import { SequencesModule } from './modules/sequences/sequences.module';
 import { SignaturesModule } from './modules/signatures/signatures.module';
 import { TemplatesModule } from './modules/templates/templates.module';
@@ -54,6 +56,8 @@ const NODE_ENV = process.env.NODE_ENV ?? 'development';
     SequencesModule,
     SequenceImportsModule,
     SequenceContactsModule,
+    SequenceTemplatesModule,
+    SequenceExecutionsModule,
     ReplySimulationModule,
     ClientsModule,
     DomainsModule,

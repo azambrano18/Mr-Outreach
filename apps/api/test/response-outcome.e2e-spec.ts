@@ -133,6 +133,7 @@ describe('Response outcome from a conversation (e2e) — memory + simulated engi
     await request(app.getHttpServer())
       .post(`/me/sequences/${sequenceId}/publish`)
       .set('Authorization', `Bearer ${executiveToken}`)
+      .set('Idempotency-Key', `response-outcome-publish-${sequenceId}`)
       .send({});
 
     // Two contacts share "Empresa No Interesada" to prove the company-wide stop affects both.
@@ -152,14 +153,13 @@ describe('Response outcome from a conversation (e2e) — memory + simulated engi
       .post(`/me/sequence-imports/${importId}/mapping`)
       .set('Authorization', `Bearer ${executiveToken}`)
       .send({ email: 'email', firstName: 'firstName', company: 'company' });
+    // Fase 2, Caso B — confirm() is now a single, synchronous, atomic
+    // operation: no separate /advance call is needed to materialize.
     await request(app.getHttpServer())
       .post(`/me/sequence-imports/${importId}/confirm`)
       .set('Authorization', `Bearer ${executiveToken}`)
+      .set('Idempotency-Key', `response-outcome-confirm-${importId}`)
       .send({});
-    await request(app.getHttpServer())
-      .post(`/me/sequence-imports/${importId}/advance`)
-      .set('Authorization', `Bearer ${executiveToken}`)
-      .send({ mode: 'ALL' });
 
     // Batch + send step 1 for everyone, so each contact lands ACTIVE at step 2 (not COMPLETED).
     await request(app.getHttpServer())

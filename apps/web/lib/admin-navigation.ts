@@ -1,9 +1,10 @@
 import {
   Activity,
   Braces,
-  Building2,
+  FileText,
   Mail,
   ScrollText,
+  Send,
   Users,
   Workflow,
   type LucideIcon,
@@ -47,21 +48,21 @@ export type NavigationItem = {
  * every signatures endpoint/permission stay intact, just unlinked from the
  * sidebar (see app/dashboard/signatures).
  *
- * "Clientes" is the principal operative entry point (client-hierarchy
- * pivot) — placed first, per that pivot's explicit request. There is no
- * standalone "Centro de conversaciones"/"Bandeja de entrada" menu item —
- * conversations are reached exclusively from within a client's own profile
- * ("Todas las conversaciones del cliente",
- * `/dashboard/clients/[clientId]/conversations`), never a global
- * cross-client screen.
+ * "Clientes" is deliberately NOT a menu item anymore (interfaz simplification
+ * spec, §7/§14): cliente y dominio ya no se administran manualmente — solo
+ * existen como proyección de solo lectura derivada de la cuenta de correo
+ * vinculada por token, mostrada dentro del listado/detalle de cuentas. The
+ * routes under `/dashboard/clients/[clientId]` stay (Sequences' admin detail
+ * page links directly into `/dashboard/clients/:id/conversations`, and the
+ * executive's own "Mis clientes" is still reachable by direct link), just
+ * unlinked from the sidebar.
  *
- * "Cuentas de Correos" is executive-only now (admin-reorg follow-up spec,
- * section 1): admins configure mailboxes exclusively inside each client's
- * Cliente → Dominio → Cuenta hierarchy (`/dashboard/clients`) — there is no
- * standalone cross-client mailbox list anymore, so the item is gated only on
- * `mailboxes.read.assigned` and only ever forwards an executive to their own
- * assigned mailboxes (`/dashboard/mailboxes/mine`), never an admin-facing
- * global list.
+ * "Cuentas de Correos" now has two variants in this list: the admin one
+ * (below, `mailboxes.read.all`) points at the global token-linked listing
+ * (`/dashboard/mailboxes`, §12.1) with its own "Vincular cuenta" entry
+ * point; the executive one (`mailboxes.read.assigned`, excluded for admins)
+ * still forwards to their own assigned mailboxes
+ * (`/dashboard/mailboxes/mine`).
  *
  * "Secuencias" is a single entry for both roles, same alias-redirect trick
  * as "Cuentas de Correos": `/dashboard/sequences` forwards an admin
@@ -72,12 +73,6 @@ export type NavigationItem = {
  * `/dashboard/admin/*` prefix.
  */
 export const adminNavigation: NavigationItem[] = [
-  {
-    label: 'Clientes',
-    href: '/dashboard/clients',
-    icon: Building2,
-    permissions: ['clients.read.all'],
-  },
   {
     label: 'Ejecutivos',
     href: '/dashboard/executives',
@@ -96,11 +91,56 @@ export const adminNavigation: NavigationItem[] = [
     matchPrefixes: ['/dashboard/mailboxes'],
   },
   {
+    // Fase 2.1 §12.1 — admin-only, cross-client listing with filters
+    // (cliente/dominio/ejecutivo/estado/canSend/vinculada/sin principal).
+    // Deliberately a SEPARATE item from "Cuentas de Correos" above (which
+    // stays executive-only per the admin-reorg decision): the two never
+    // share a permission, an href, or a matchPrefix.
+    label: 'Cuentas de Correos',
+    href: '/dashboard/mailboxes',
+    icon: Mail,
+    permissions: ['mailboxes.read.all'],
+    matchPrefixes: ['/dashboard/mailboxes'],
+  },
+  {
+    // Admin-only from here on — the executive's self-service equivalent is
+    // "Plantillas"/"Gestiones" below. Deliberately no `sequences.manage.own`
+    // in this list anymore: that permission is still granted to executives
+    // (the old wizard's backend stays intact for admins), but the item must
+    // no longer surface to a plain executive.
     label: 'Secuencias',
     href: '/dashboard/sequences',
     icon: Workflow,
-    permissions: ['sequences.manage.own', 'sequences.read_all'],
+    permissions: ['sequences.read_all'],
     matchPrefixes: ['/dashboard/sequences'],
+  },
+  {
+    // Etapa "cuenta del ejecutivo" — Plantillas (contenido reutilizable de 3
+    // steps) separado de Gestiones (ejecuciones concretas). Deliberately
+    // never visible to admins: ADMIN_PERMISSION_KEYS excludes
+    // sequence_templates.read_own (see permission-catalog.ts), so no
+    // excludePermissions is needed here.
+    label: 'Plantillas',
+    href: '/dashboard/sequence-templates',
+    icon: FileText,
+    permissions: ['sequence_templates.read_own'],
+    matchPrefixes: ['/dashboard/sequence-templates'],
+  },
+  {
+    label: 'Gestiones',
+    href: '/dashboard/sequence-executions',
+    icon: Send,
+    permissions: ['sequence_executions.read_own'],
+    matchPrefixes: ['/dashboard/sequence-executions'],
+  },
+  {
+    // Admin-only, read-only monitor — §23. Separate href/permission from
+    // "Gestiones" above so the two items are never conflated.
+    label: 'Monitor de gestiones',
+    href: '/dashboard/admin/sequence-executions',
+    icon: Send,
+    permissions: ['sequence_executions.monitor_all'],
+    matchPrefixes: ['/dashboard/admin/sequence-executions'],
   },
   {
     label: 'Variables',

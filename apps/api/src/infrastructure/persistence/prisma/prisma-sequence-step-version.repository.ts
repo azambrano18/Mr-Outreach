@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { SequenceStepVersion as PrismaSequenceStepVersionRow } from '@prisma/client';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import {
   CreateSequenceStepVersionInput,
   SequenceStepVersion,
@@ -7,6 +8,7 @@ import {
 import { SequenceStepVersionRepository } from '../../../domain/sequence/sequence-step-version.repository';
 import { DelayUnit, StepSendMode } from '../../../domain/sequence/sequence-step.entity';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaSequenceStepVersionRow): SequenceStepVersion {
   return {
@@ -52,8 +54,9 @@ export class PrismaSequenceStepVersionRepository implements SequenceStepVersionR
     return toDomain(row);
   }
 
-  async findByStep(sequenceStepId: string): Promise<SequenceStepVersion[]> {
-    const rows = await this.prisma.sequenceStepVersion.findMany({
+  async findByStep(sequenceStepId: string, ctx?: TransactionContext): Promise<SequenceStepVersion[]> {
+    const client = resolveClient(this.prisma, ctx);
+    const rows = await client.sequenceStepVersion.findMany({
       where: { sequenceStepId },
       orderBy: { versionNumber: 'desc' },
     });

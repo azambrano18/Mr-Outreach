@@ -70,6 +70,26 @@ describe('envValidationSchema', () => {
     expect(error).toBeUndefined();
   });
 
+  it('accepts the default simulated MAILBOX_MOTOR_DRIVER without a MAILBOX_MOTOR_API_KEY', () => {
+    const { error } = envValidationSchema.validate(BASE_MEMORY_ENV);
+    expect(error).toBeUndefined();
+  });
+
+  it('requires MAILBOX_MOTOR_BASE_URL and MAILBOX_MOTOR_API_KEY when MAILBOX_MOTOR_DRIVER=http', () => {
+    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, MAILBOX_MOTOR_DRIVER: 'http' });
+    expect(error?.message).toMatch(/MAILBOX_MOTOR_BASE_URL/);
+  });
+
+  it('accepts http mailbox motor driver once base URL and API key are set', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      MAILBOX_MOTOR_DRIVER: 'http',
+      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+    });
+    expect(error).toBeUndefined();
+  });
+
   it('rejects a CREDENTIALS_ENCRYPTION_KEY that does not decode to exactly 32 bytes', () => {
     const { error } = envValidationSchema.validate({
       ...BASE_MEMORY_ENV,

@@ -1,8 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IntegrationService } from '../../application/integration/integration.service';
 import { AuthenticatedUser } from '../../application/auth/auth.types';
-import { SequencePublishService } from '../../application/sequences/sequence-publish.service';
+import { PublishSequenceUseCase } from '../../application/sequences/publish-sequence.use-case';
 import { SequencesService } from '../../application/sequences/sequences.service';
 import {
   SchedulePreview,
@@ -34,7 +34,7 @@ import { UpdateSequenceDto } from './dto/update-sequence.dto';
 export class MeSequencesController {
   constructor(
     private readonly sequencesService: SequencesService,
-    private readonly publishService: SequencePublishService,
+    private readonly publishSequence: PublishSequenceUseCase,
     private readonly integration: IntegrationService,
   ) {}
 
@@ -164,26 +164,30 @@ export class MeSequencesController {
     return this.sequencesService.remove(user.organizationId, id, user.id);
   }
 
-  /** §14-16 — generates SEQUENCE_PUBLISH_REQUESTED and drives it to completion. */
+  /** Fase 2, Caso C — generates SEQUENCE_PUBLISH_REQUESTED transactionally and drives it to completion. */
   @Post('sequences/:id/publish')
   @RequirePermissions('sequences.publish')
   async publish(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: PublishSequenceDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException('El header Idempotency-Key es obligatorio.');
+    }
     await this.sequencesService.requireOwnedByExecutive(user.organizationId, id, user.id);
-    const { sequence, command, duplicate } = await this.publishService.publish(
-      user.organizationId,
-      id,
-      user.id,
-      dto.idempotencyKey,
-      dto.scenario,
-    );
+    const { result } = await this.publishSequence.execute({
+      organizationId: user.organizationId,
+      sequenceId: id,
+      actorId: user.id,
+      idempotencyKey,
+      scenario: dto.scenario,
+    });
+    const command = await this.integration.getCommand(user.organizationId, result.commandId);
     return {
-      sequence: await this.sequencesService.getById(user.organizationId, sequence.id),
+      sequence: await this.sequencesService.getById(user.organizationId, result.sequenceId),
       command: { ...command, payload: this.integration.redact(command.payload) },
-      duplicate,
     };
   }
 

@@ -41,6 +41,9 @@ describe('IntegrationService', () => {
     sentAt: null,
     acceptedAt: null,
     completedAt: null,
+    payloadHash: null,
+    resultSnapshot: null,
+    httpStatusCode: null,
     ...overrides,
   });
 
