@@ -10,11 +10,11 @@ import { UpdateSequenceTemplateUseCase } from './update-sequence-template.use-ca
 
 describe('UpdateSequenceTemplateUseCase', () => {
   let templates: jest.Mocked<Pick<SequenceTemplateRepository, 'conditionalUpdateStatus' | 'update'>>;
-  let versions: jest.Mocked<Pick<SequenceTemplateVersionRepository, 'findLatestByTemplate' | 'create' | 'update'>>;
+  let versions: jest.Mocked<Pick<SequenceTemplateVersionRepository, 'findLatestAcceptedByTemplate' | 'create' | 'update'>>;
   let audit: jest.Mocked<Pick<AuditLogRepository, 'record'>>;
-  let motor: jest.Mocked<Pick<SequenceTemplateMotorPort, 'updateTemplate'>>;
+  let motor: jest.Mocked<Pick<SequenceTemplateMotorPort, 'publishTemplate'>>;
   let templatesService: jest.Mocked<
-    Pick<SequenceTemplatesService, 'requireOwned' | 'getStepsForPublish' | 'getSignatureHtmlForMailbox' | 'validateForPublish'>
+    Pick<SequenceTemplatesService, 'requireOwned' | 'getStepsForPublish' | 'validateForPublish'>
   >;
   let eligibility: jest.Mocked<Pick<ExecutiveMailboxEligibilityService, 'requireEligible'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
@@ -31,6 +31,7 @@ describe('UpdateSequenceTemplateUseCase', () => {
     mailboxId: 'mailbox_1',
     name: 'Plantilla - Empresa Demostración',
     subjectTemplate: 'Hola {contact_name}',
+    signatureHtml: '<p>Firma</p>',
     status: 'PUBLISHED',
     currentDraftVersion: 2,
     timezone: 'America/Santiago',
@@ -40,7 +41,7 @@ describe('UpdateSequenceTemplateUseCase', () => {
     id: 'version_1',
     versionNumber: 1,
     status: 'ACCEPTED',
-    serverTemplateId: 'tpl_server_1',
+    serverTemplateId: 'tplv_server_001',
   };
 
   function validStep(stepNumber: 1 | 2 | 3) {
@@ -87,26 +88,19 @@ describe('UpdateSequenceTemplateUseCase', () => {
       lastPublishCommandId: 'cmd_1',
       lastError: null,
       previousVersionNumber: 1,
-      effectiveScope: null,
-      affectedExecutions: null,
-      affectedPendingJobs: null,
-      unchangedSentJobs: null,
-      processingJobsNotChanged: null,
-      appliedAt: null,
       createdBy: actorId,
       createdAt: new Date(),
     };
     versions = {
-      findLatestByTemplate: jest.fn().mockResolvedValue(currentAcceptedVersion),
+      findLatestAcceptedByTemplate: jest.fn().mockResolvedValue(currentAcceptedVersion),
       create: jest.fn().mockResolvedValue(createdVersion),
       update: jest.fn().mockImplementation(async (id, input) => ({ ...createdVersion, id, ...input })),
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
-    motor = { updateTemplate: jest.fn() };
+    motor = { publishTemplate: jest.fn() };
     templatesService = {
       requireOwned: jest.fn().mockResolvedValue(publishedTemplate),
       getStepsForPublish: jest.fn().mockResolvedValue([validStep(1), validStep(2), validStep(3)]),
-      getSignatureHtmlForMailbox: jest.fn().mockResolvedValue('<p>Firma</p>'),
       validateForPublish: jest.fn().mockResolvedValue({ valid: true, errors: [] }),
     };
     eligibility = { requireEligible: jest.fn().mockResolvedValue(mailbox) };
@@ -126,71 +120,85 @@ describe('UpdateSequenceTemplateUseCase', () => {
   it('rejects updating a template that is not PUBLISHED', async () => {
     templatesService.requireOwned.mockResolvedValue({ ...publishedTemplate, status: 'DRAFT' } as any);
     await expect(useCase.execute(baseInput())).rejects.toBeInstanceOf(ConflictException);
-    expect(motor.updateTemplate).not.toHaveBeenCalled();
+    expect(motor.publishTemplate).not.toHaveBeenCalled();
   });
 
-  it('rejects when there is no ACCEPTED published version yet', async () => {
-    versions.findLatestByTemplate.mockResolvedValue({ ...currentAcceptedVersion, status: 'FAILED' } as any);
+  it('rejects when there is no ACCEPTED published version at all', async () => {
+    versions.findLatestAcceptedByTemplate.mockResolvedValue(null);
     await expect(useCase.execute(baseInput())).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('§5 — resolves the base version via findLatestAcceptedByTemplate, so a later FAILED attempt never blocks publishing a corrected version', async () => {
+    // v1 ACCEPTED, v2 FAILED: findLatestAcceptedByTemplate must skip v2 and still return v1.
+    motor.publishTemplate.mockResolvedValue({
+      accepted: true,
+      serverTemplateId: 'tplv_server_003',
+      templateToken: 'tpt_plaintext',
+      version: 2,
+      status: 'ACCEPTED',
+      acceptedAt: new Date(),
+      rejectionReason: null,
+    });
+    await useCase.execute(baseInput());
+    expect(versions.findLatestAcceptedByTemplate).toHaveBeenCalledWith(templateId);
   });
 
   it('rejects with validation errors when the content is not ready', async () => {
     templatesService.validateForPublish.mockResolvedValue({ valid: false, errors: ['Envío 2: el cuerpo del correo es obligatorio.'] });
     await expect(useCase.execute(baseInput())).rejects.toBeInstanceOf(BadRequestException);
-    expect(motor.updateTemplate).not.toHaveBeenCalled();
+    expect(motor.publishTemplate).not.toHaveBeenCalled();
   });
 
   it('rejects a concurrent update attempt (already PUBLISHING)', async () => {
     templates.conditionalUpdateStatus.mockResolvedValue(0);
     await expect(useCase.execute(baseInput())).rejects.toBeInstanceOf(ConflictException);
-    expect(motor.updateTemplate).not.toHaveBeenCalled();
+    expect(motor.publishTemplate).not.toHaveBeenCalled();
   });
 
-  it('applies successfully: creates a new version chained to the previous one, sends SEQUENCE_TEMPLATE_UPDATE, and keeps the template PUBLISHED', async () => {
-    motor.updateTemplate.mockResolvedValue({
+  it('applies successfully: creates a new version chained to the previous one, calls the SAME publishTemplate command with previousServerTemplateId, and keeps the template PUBLISHED', async () => {
+    motor.publishTemplate.mockResolvedValue({
       accepted: true,
-      serverTemplateId: 'tpl_server_1',
-      previousVersion: 1,
-      newVersion: 2,
+      serverTemplateId: 'tplv_server_002',
       templateToken: 'tpt_plaintext',
-      status: 'APPLIED',
-      effectiveScope: 'FUTURE_UNSENT_JOBS',
-      affectedExecutions: 3,
-      affectedPendingJobs: 12,
-      unchangedSentJobs: 40,
-      processingJobsNotChanged: 2,
-      appliedAt: new Date(),
+      version: 2,
+      status: 'ACCEPTED',
+      acceptedAt: new Date(),
       rejectionReason: null,
     });
 
     const result = await useCase.execute(baseInput());
 
     expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ previousVersionNumber: 1 }));
-    expect(motor.updateTemplate).toHaveBeenCalledWith(
-      expect.objectContaining({ currentVersion: 1, newVersion: 2, serverTemplateId: 'tpl_server_1', effectiveScope: 'FUTURE_UNSENT_JOBS' }),
+    expect(motor.publishTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 2, previousServerTemplateId: 'tplv_server_001' }),
     );
+    // Fase Firma — the new version can carry a signature different from the one it's replacing; it always comes straight from the template's current draft field.
+    expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: publishedTemplate.signatureHtml }));
+    expect(motor.publishTemplate).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: publishedTemplate.signatureHtml }));
+    // Fase Firma, §12 — immutability: the PREVIOUS (already-ACCEPTED) version's own row is never the one status/token-updated here — only the brand-new version's row ever is.
+    expect(versions.update).not.toHaveBeenCalledWith(currentAcceptedVersion.id, expect.anything());
+    expect(versions.update).toHaveBeenCalledWith('version_2', expect.anything());
+    // Never a distinct "update" command/field — no effectiveScope-shaped input at all.
+    expect(motor.publishTemplate).toHaveBeenCalledWith(expect.not.objectContaining({ effectiveScope: expect.anything() }));
     expect(templates.update).toHaveBeenCalledWith(templateId, { status: 'PUBLISHED' });
     expect(result.version.status).toBe('ACCEPTED');
-    expect(result.version.affectedExecutions).toBe(3);
+    expect(result.version.serverTemplateId).toBe('tplv_server_002');
+    expect(result.version.serverTemplateId).not.toBe(currentAcceptedVersion.serverTemplateId);
     expect(result.version.previousVersionNumber).toBe(1);
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'sequence_template.update_applied' }));
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'sequence_template.active_executions_affected' }));
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'sequence_template.update_applied', metadata: expect.objectContaining({ previousServerTemplateId: 'tplv_server_001' }) }),
+    );
+    expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'sequence_template.active_executions_affected' }));
   });
 
   it('keeps the template PUBLISHED (never PUBLISH_FAILED) and marks only the new version FAILED when the motor rejects the update', async () => {
-    motor.updateTemplate.mockResolvedValue({
+    motor.publishTemplate.mockResolvedValue({
       accepted: false,
       serverTemplateId: null,
-      previousVersion: 1,
-      newVersion: 2,
       templateToken: null,
+      version: 2,
       status: 'FAILED',
-      effectiveScope: 'FUTURE_UNSENT_JOBS',
-      affectedExecutions: null,
-      affectedPendingJobs: null,
-      unchangedSentJobs: null,
-      processingJobsNotChanged: null,
-      appliedAt: null,
+      acceptedAt: null,
       rejectionReason: 'Motor rejected the update.',
     });
 

@@ -161,8 +161,11 @@ export class SequenceExecutionsService {
       throw new ConflictException('Solo se pueden usar plantillas publicadas para iniciar una gestión.');
     }
 
-    const version = await this.templateVersions.findLatestByTemplate(template.id);
-    if (!version || version.status !== 'ACCEPTED') {
+    // §5 (consolidación contractual) — the latest ACCEPTED version, never merely the latest
+    // attempt: a later FAILED publish must never block starting a new Gestión against the
+    // still-active previously-accepted version.
+    const version = await this.templateVersions.findLatestAcceptedByTemplate(template.id);
+    if (!version) {
       throw new ConflictException('Esta plantilla no tiene una versión publicada aceptada por el servidor.');
     }
 

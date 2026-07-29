@@ -21,4 +21,10 @@ export class UpdateSequenceTemplateDto {
   @IsOptional()
   @IsString()
   subjectTemplate?: string;
+
+  /** Fase Firma — the Plantilla's own signature draft, sanitized server-side (see SequenceTemplatesService.update). */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  signatureHtml?: string;
 }

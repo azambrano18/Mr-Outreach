@@ -60,6 +60,57 @@ export const envValidationSchema = Joi.object({
   }),
   MAILBOX_MOTOR_TIMEOUT_MS: Joi.number().default(10_000),
 
+  // Consolidación contractual §8 — gates SequenceTemplateMotorPort/
+  // SequenceExecutionMotorPort (Plantilla publish + Gestión start), a THIRD
+  // external system distinct from both MAILBOX_MOTOR_* (account linking)
+  // and MAIL_ENGINE_MODE (the legacy simulated sequence engine). Same
+  // fail-closed shape as MAILBOX_MOTOR_*: URL/API key only required once
+  // SEQUENCE_MOTOR_MODE=http.
+  SEQUENCE_MOTOR_MODE: Joi.string().valid('simulated', 'http').default('simulated'),
+  SEQUENCE_MOTOR_BASE_URL: Joi.string().when('SEQUENCE_MOTOR_MODE', {
+    is: 'http',
+    then: Joi.string().uri().required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  SEQUENCE_MOTOR_API_KEY: Joi.string().when('SEQUENCE_MOTOR_MODE', {
+    is: 'http',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  SEQUENCE_MOTOR_TIMEOUT_MS: Joi.number().default(10_000),
+
+  // Fase Firma — gates SignatureAssetStoragePort (images embedded in a
+  // Plantilla's signature). Independent of STORAGE_DRIVER (the older,
+  // generic rich-text image port): when SIGNATURE_ASSET_STORAGE_MODE=r2,
+  // every R2_* variable below becomes required so the API refuses to boot
+  // with an incomplete Cloudflare R2 configuration.
+  SIGNATURE_ASSET_STORAGE_MODE: Joi.string().valid('simulated', 'r2').default('simulated'),
+  R2_ACCOUNT_ID: Joi.string().when('SIGNATURE_ASSET_STORAGE_MODE', {
+    is: 'r2',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  R2_ACCESS_KEY_ID: Joi.string().when('SIGNATURE_ASSET_STORAGE_MODE', {
+    is: 'r2',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  R2_SECRET_ACCESS_KEY: Joi.string().when('SIGNATURE_ASSET_STORAGE_MODE', {
+    is: 'r2',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  R2_BUCKET_NAME: Joi.string().when('SIGNATURE_ASSET_STORAGE_MODE', {
+    is: 'r2',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  // Required in every mode (not just r2): the simulated adapter's dev URLs
+  // are built from API_PUBLIC_URL instead, but the sanitizer always needs a
+  // real value here to know which host an <img src> is allowed to point at.
+  R2_PUBLIC_BASE_URL: Joi.string().uri().default('https://assets.mejoreferido.com'),
+  R2_SIGNATURE_PREFIX: Joi.string().allow('').default('signatures'),
+
   // External, read-only Neon CRM database (table maestro_clientes) — a
   // wholly separate driver from PERSISTENCE_DRIVER, since it's a different
   // database Mr Outreach doesn't own.

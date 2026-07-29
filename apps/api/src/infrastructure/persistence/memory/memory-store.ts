@@ -25,6 +25,7 @@ import { SequenceTemplateStep } from '../../../domain/sequence-template/sequence
 import { SequenceTemplateVersion } from '../../../domain/sequence-template/sequence-template-version.entity';
 import { SequenceTemplate } from '../../../domain/sequence-template/sequence-template.entity';
 import { SequenceContact } from '../../../domain/sequence-contact/sequence-contact.entity';
+import { SignatureAsset } from '../../../domain/signature-asset/signature-asset.entity';
 import { SequenceImport } from '../../../domain/sequence-import/sequence-import.entity';
 import { SequenceImportRow } from '../../../domain/sequence-import-row/sequence-import-row.entity';
 import { SequenceStepVersion } from '../../../domain/sequence/sequence-step-version.entity';
@@ -89,6 +90,7 @@ export class MemoryStore {
   readonly sequenceExecutions = new Map<string, SequenceExecution>();
   readonly prospectImports = new Map<string, ProspectImport>();
   readonly prospectImportRows = new Map<string, ProspectImportRow>();
+  readonly signatureAssets = new Map<string, SignatureAsset>();
 
   /** Used by tests to start each case from a clean slate. */
   reset(): void {
@@ -131,5 +133,6 @@ export class MemoryStore {
     this.sequenceExecutions.clear();
     this.prospectImports.clear();
     this.prospectImportRows.clear();
+    this.signatureAssets.clear();
   }
 }

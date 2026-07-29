@@ -38,6 +38,18 @@ export interface UpdateSequenceTemplateResultSummary {
  * left at PUBLISHED (briefly PUBLISHING while the motor call is in flight,
  * as a concurrency guard). The new version always carries
  * `previousVersionNumber` so history reads as an explicit chain.
+ *
+ * Consolidación contractual — this calls the exact same
+ * `motor.publishTemplate` a first publish uses (never a separate
+ * "update-in-place" command), passing `previousServerTemplateId` purely for
+ * Railway's own audit trail. The result is always a brand-new, independent
+ * `serverTemplateId`; nothing here ever asks the motor to modify jobs
+ * belonging to the previous version, and no active Gestión is ever
+ * referenced or touched. The base version to publish from is resolved via
+ * `findLatestAcceptedByTemplate` (never `findLatestByTemplate`), so a prior
+ * FAILED publish attempt can never block creating another corrected
+ * version — §5's mandatory case (v1 ACCEPTED, v2 FAILED → v3 still
+ * publishable from v1).
  */
 @Injectable()
 export class UpdateSequenceTemplateUseCase {
@@ -57,7 +69,7 @@ export class UpdateSequenceTemplateUseCase {
       throw new ConflictException('Solo una plantilla publicada puede actualizarse mediante este flujo.');
     }
 
-    const currentVersion = await this.versions.findLatestByTemplate(template.id);
+    const currentVersion = await this.versions.findLatestAcceptedByTemplate(template.id);
     if (!currentVersion || currentVersion.status !== 'ACCEPTED' || !currentVersion.serverTemplateId) {
       throw new ConflictException('Esta plantilla no tiene una versión publicada aceptada por el servidor.');
     }
@@ -76,7 +88,8 @@ export class UpdateSequenceTemplateUseCase {
       const mailbox = await this.eligibility.requireEligible(input.organizationId, input.actorId, template.mailboxId);
 
       const stepRows = (await this.templatesService.getStepsForPublish(template.id)).sort((a, b) => a.stepNumber - b.stepNumber);
-      const signatureHtml = await this.templatesService.getSignatureHtmlForMailbox(input.organizationId, template.mailboxId);
+      // Fase Firma — the template's own current signature draft; a new version can carry a different signature than the one it's replacing (§12).
+      const signatureHtml = template.signatureHtml;
 
       const variableKeys = [
         ...new Set([
@@ -136,23 +149,22 @@ export class UpdateSequenceTemplateUseCase {
         metadata: { templateVersionId: newVersion.id, previousVersion: currentVersion.versionNumber, newVersion: newVersion.versionNumber },
       });
 
-      const result = await this.motor.updateTemplate({
+      const result = await this.motor.publishTemplate({
         idempotencyKey: input.idempotencyKey,
         correlationId,
         organizationId: input.organizationId,
         executiveUserId: input.actorId,
         localTemplateId: template.id,
-        serverTemplateId: currentVersion.serverTemplateId,
+        // §7 — the prior ACCEPTED version's own id; informational for Railway's audit trail only, never a request to modify it.
+        previousServerTemplateId: currentVersion.serverTemplateId,
         serverMailboxId: mailbox.serverMailboxId ?? mailbox.id,
         mailboxEmail: mailbox.email,
         name: template.name,
-        currentVersion: currentVersion.versionNumber,
-        newVersion: newVersion.versionNumber,
+        version: newVersion.versionNumber,
         timezone: template.timezone,
         subjectTemplate: template.subjectTemplate,
         signatureHtml,
         variables,
-        effectiveScope: 'FUTURE_UNSENT_JOBS',
         steps: stepRows.map((step) => ({
           stepNumber: step.stepNumber,
           headerText: step.headerText,
@@ -173,14 +185,8 @@ export class UpdateSequenceTemplateUseCase {
         status: result.accepted ? 'ACCEPTED' : 'FAILED',
         serverTemplateId: result.serverTemplateId,
         templateTokenCiphertext: result.templateToken ? this.secrets.encrypt(result.templateToken) : null,
-        acceptedAt: result.appliedAt,
+        acceptedAt: result.acceptedAt,
         lastError: result.rejectionReason,
-        effectiveScope: result.effectiveScope,
-        affectedExecutions: result.affectedExecutions,
-        affectedPendingJobs: result.affectedPendingJobs,
-        unchangedSentJobs: result.unchangedSentJobs,
-        processingJobsNotChanged: result.processingJobsNotChanged,
-        appliedAt: result.appliedAt,
       });
 
       // §13/§17 — the template's own status always returns to PUBLISHED: on
@@ -200,26 +206,12 @@ export class UpdateSequenceTemplateUseCase {
           templateVersionId: newVersion.id,
           previousVersion: currentVersion.versionNumber,
           newVersion: newVersion.versionNumber,
+          previousServerTemplateId: currentVersion.serverTemplateId,
           serverTemplateId: result.serverTemplateId,
           correlationId,
-          affectedExecutions: result.affectedExecutions,
-          affectedPendingJobs: result.affectedPendingJobs,
-          unchangedSentJobs: result.unchangedSentJobs,
-          processingJobsNotChanged: result.processingJobsNotChanged,
           error: result.rejectionReason,
         },
       });
-
-      if (result.accepted && (result.affectedExecutions ?? 0) > 0) {
-        await this.audit.record({
-          organizationId: input.organizationId,
-          actorId: input.actorId,
-          action: 'sequence_template.active_executions_affected',
-          entityType: 'SequenceTemplate',
-          entityId: template.id,
-          metadata: { newVersion: newVersion.versionNumber, affectedExecutions: result.affectedExecutions },
-        });
-      }
 
       return {
         templateId: template.id,
@@ -235,12 +227,6 @@ export class UpdateSequenceTemplateUseCase {
           lastError: updatedVersion.lastError,
           createdAt: updatedVersion.createdAt.toISOString(),
           previousVersionNumber: updatedVersion.previousVersionNumber,
-          effectiveScope: updatedVersion.effectiveScope,
-          affectedExecutions: updatedVersion.affectedExecutions,
-          affectedPendingJobs: updatedVersion.affectedPendingJobs,
-          unchangedSentJobs: updatedVersion.unchangedSentJobs,
-          processingJobsNotChanged: updatedVersion.processingJobsNotChanged,
-          appliedAt: updatedVersion.appliedAt ? updatedVersion.appliedAt.toISOString() : null,
         },
       };
     } catch (error) {

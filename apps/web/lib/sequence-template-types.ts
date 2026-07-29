@@ -30,12 +30,6 @@ export interface SequenceTemplateVersionSummary {
   createdAt: string;
   /** §12-17 — populated only when this version came from "Editar plantilla publicada"; null for a first publish. */
   previousVersionNumber: number | null;
-  effectiveScope: 'FUTURE_UNSENT_JOBS' | null;
-  affectedExecutions: number | null;
-  affectedPendingJobs: number | null;
-  unchangedSentJobs: number | null;
-  processingJobsNotChanged: number | null;
-  appliedAt: string | null;
 }
 
 export interface SequenceTemplateSummary {

@@ -27,6 +27,11 @@ export class InMemorySequenceTemplateVersionRepository implements SequenceTempla
     return versions[0] ?? null;
   }
 
+  async findLatestAcceptedByTemplate(templateId: string): Promise<SequenceTemplateVersion | null> {
+    const versions = await this.findByTemplate(templateId);
+    return versions.find((v) => v.status === 'ACCEPTED') ?? null;
+  }
+
   async findByServerTemplateId(serverTemplateId: string): Promise<SequenceTemplateVersion | null> {
     return (
       [...this.store.sequenceTemplateVersions.values()].find((v) => v.serverTemplateId === serverTemplateId) ?? null
@@ -57,12 +62,6 @@ export class InMemorySequenceTemplateVersionRepository implements SequenceTempla
       lastPublishCommandId: input.lastPublishCommandId,
       lastError: null,
       previousVersionNumber: input.previousVersionNumber ?? null,
-      effectiveScope: null,
-      affectedExecutions: null,
-      affectedPendingJobs: null,
-      unchangedSentJobs: null,
-      processingJobsNotChanged: null,
-      appliedAt: null,
       createdBy: input.createdBy,
       createdAt: new Date(),
     };

@@ -41,6 +41,7 @@ export class InMemorySequenceTemplateRepository implements SequenceTemplateRepos
       description: input.description ?? null,
       subjectTemplate: '',
       headerText: null,
+      signatureHtml: input.signatureHtml,
       status: 'DRAFT',
       currentDraftVersion: 1,
       timezone: input.timezone,

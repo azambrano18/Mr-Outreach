@@ -1,21 +1,19 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import type {
-  AssigneeSummary,
-  AssignedMailboxSummary,
-  SignatureSummary,
-} from '@outreach/shared-types';
-import { ApiError, apiFetch } from '../../../../../../lib/api';
+import type { AssigneeSummary, AssignedMailboxSummary } from '@outreach/shared-types';
+import { apiFetch } from '../../../../../../lib/api';
 import { getCurrentUser } from '../../../../../../lib/session';
-import { SignatureSection } from '../../../../../../components/mailboxes/signature-section';
 
-type SettingsTab =
-  'general' | 'connection' | 'signature' | 'assignments' | 'limits' | 'sync' | 'diagnostics';
+/**
+ * Fase Firma — the signature no longer belongs to the mailbox: it moved
+ * into each Plantilla's own editor (§11 of the account-restructuring
+ * follow-up). This screen no longer shows a "Firma" tab at all.
+ */
+type SettingsTab = 'general' | 'connection' | 'assignments' | 'limits' | 'sync' | 'diagnostics';
 
 const TAB_LABEL: Record<SettingsTab, string> = {
   general: 'General',
   connection: 'Conexión',
-  signature: 'Firma',
   assignments: 'Asignaciones',
   limits: 'Límites de envío',
   sync: 'Sincronización',
@@ -76,21 +74,8 @@ export default async function MyMailboxSettingsPage({
     notFound();
   }
 
-  const canReadSignature = currentUser.permissions.includes('signatures.read');
   const tabParam = searchParams.tab as SettingsTab | undefined;
   const tab: SettingsTab = tabParam && tabParam in TAB_LABEL ? tabParam : 'general';
-
-  let signature: SignatureSummary | null = null;
-  if (canReadSignature && (tab === 'signature' || tab === 'diagnostics')) {
-    try {
-      signature = await apiFetch<SignatureSummary>(`/me/mailboxes/${params.id}/signature`);
-    } catch (error) {
-      if (!(error instanceof ApiError && error.status === 404)) {
-        throw error;
-      }
-      signature = null;
-    }
-  }
 
   let assignees: AssigneeSummary[] = [];
   if (tab === 'assignments' || tab === 'diagnostics') {
@@ -101,15 +86,7 @@ export default async function MyMailboxSettingsPage({
     }
   }
 
-  const visibleTabs: SettingsTab[] = [
-    'general',
-    'connection',
-    ...(canReadSignature ? (['signature'] as const) : []),
-    'assignments',
-    'limits',
-    'sync',
-    'diagnostics',
-  ];
+  const visibleTabs: SettingsTab[] = ['general', 'connection', 'assignments', 'limits', 'sync', 'diagnostics'];
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 py-4">
@@ -156,8 +133,7 @@ export default async function MyMailboxSettingsPage({
           <InfoField label="Zona horaria" value="No disponible en esta fase" />
           <p className="col-span-full text-xs text-slate-400">
             La edición de estos datos, límites de envío, sincronización y credenciales corresponde
-            al administrador — este perfil permite administrar la firma de esta cuenta y revisar el
-            resto de la configuración.
+            al administrador. La firma de tus correos se configura dentro de cada Plantilla, no aquí.
           </p>
         </div>
       )}
@@ -180,20 +156,6 @@ export default async function MyMailboxSettingsPage({
             permisos de administrador sobre la cuenta.
           </p>
         </div>
-      )}
-
-      {tab === 'signature' && canReadSignature && (
-        <SignatureSection
-          mailboxId={mailbox.id}
-          initialSignature={signature}
-          canCreate={false}
-          canUpdate={currentUser.permissions.includes('signatures.update')}
-          canActivate={false}
-          canArchive={false}
-          canPreview={currentUser.permissions.includes('signatures.preview')}
-          canTest={currentUser.permissions.includes('signatures.test')}
-          mine
-        />
       )}
 
       {tab === 'assignments' && (
@@ -238,10 +200,6 @@ export default async function MyMailboxSettingsPage({
             value={mailbox.status === 'ACTIVE' ? 'Operativa' : 'Inactiva'}
           />
           <InfoField label="IMAP / SMTP" value={CONNECTION_LABEL[mailbox.connectionStatus]} />
-          <InfoField
-            label="Firma"
-            value={signature?.activeVersion ? 'Configurada' : 'No configurada'}
-          />
           <InfoField
             label="Asignaciones"
             value={`${assignees.length} ejecutivo${assignees.length === 1 ? '' : 's'}`}

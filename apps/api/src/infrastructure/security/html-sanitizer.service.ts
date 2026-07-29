@@ -70,4 +70,48 @@ export class HtmlSanitizerService {
       // contents, for script) unconditionally.
     });
   }
+
+  /**
+   * Fase Firma, §9 — same base allowlist as `sanitize`, plus a hard
+   * restriction on `<img src>`: only `https://{allowedImageHost}/...`
+   * survives (or `http://{allowedImageHost}/...` when `allowInsecureHost`
+   * is set — the simulated dev/test adapter serves over plain HTTP on
+   * localhost, so the production HTTPS-only rule would otherwise make
+   * signature images impossible to test locally). Anything else —
+   * `data:`, `blob:`, another domain, plain HTTP against the real R2 host —
+   * is stripped, never merely re-written.
+   */
+  sanitizeSignatureHtml(html: string, allowedImageHost: string, allowInsecureHost = false): string {
+    return sanitizeHtml(html, {
+      allowedTags: ALLOWED_TAGS,
+      allowedAttributes: {
+        a: ['href', 'target', 'rel'],
+        img: ['src', 'alt', 'width', 'height', 'style'],
+        '*': ['style'],
+      },
+      allowedStyles: { '*': ALLOWED_STYLES },
+      allowedSchemes: ['http', 'https', 'mailto'],
+      allowProtocolRelative: false,
+      transformTags: {
+        a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }),
+      },
+      exclusiveFilter: (frame) => {
+        if (frame.tag !== 'img') return false;
+        return !isAllowedSignatureImageSrc(frame.attribs.src, allowedImageHost, allowInsecureHost);
+      },
+    });
+  }
+}
+
+function isAllowedSignatureImageSrc(src: string | undefined, allowedImageHost: string, allowInsecureHost: boolean): boolean {
+  if (!src) return false;
+  let url: URL;
+  try {
+    url = new URL(src);
+  } catch {
+    return false;
+  }
+  if (url.hostname !== allowedImageHost) return false;
+  if (url.protocol === 'https:') return true;
+  return allowInsecureHost && url.protocol === 'http:';
 }

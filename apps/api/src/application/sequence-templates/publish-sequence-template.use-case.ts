@@ -72,7 +72,8 @@ export class PublishSequenceTemplateUseCase {
       const mailbox = await this.eligibility.requireEligible(input.organizationId, input.actorId, template.mailboxId);
 
       const stepRows = (await this.templatesService.getStepsForPublish(template.id)).sort((a, b) => a.stepNumber - b.stepNumber);
-      const signatureHtml = await this.templatesService.getSignatureHtmlForMailbox(input.organizationId, template.mailboxId);
+      // Fase Firma — the template's own signature draft, authored in its editor; never re-read from the mailbox at publish time anymore.
+      const signatureHtml = template.signatureHtml;
 
       const variableKeys = [
         ...new Set([
@@ -128,6 +129,8 @@ export class PublishSequenceTemplateUseCase {
         organizationId: input.organizationId,
         executiveUserId: input.actorId,
         localTemplateId: template.id,
+        // §7 — null on a template's first-ever publish; only a later "editar plantilla publicada" carries a real prior id.
+        previousServerTemplateId: null,
         serverMailboxId: mailbox.serverMailboxId ?? mailbox.id,
         mailboxEmail: mailbox.email,
         name: template.name,
@@ -192,12 +195,6 @@ export class PublishSequenceTemplateUseCase {
           lastError: updatedVersion.lastError,
           createdAt: updatedVersion.createdAt.toISOString(),
           previousVersionNumber: updatedVersion.previousVersionNumber,
-          effectiveScope: updatedVersion.effectiveScope,
-          affectedExecutions: updatedVersion.affectedExecutions,
-          affectedPendingJobs: updatedVersion.affectedPendingJobs,
-          unchangedSentJobs: updatedVersion.unchangedSentJobs,
-          processingJobsNotChanged: updatedVersion.processingJobsNotChanged,
-          appliedAt: updatedVersion.appliedAt ? updatedVersion.appliedAt.toISOString() : null,
         },
       };
     } catch (error) {

@@ -3,10 +3,10 @@ import {
   Braces,
   FileText,
   Mail,
+  MessageSquare,
   ScrollText,
   Send,
   Users,
-  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -64,13 +64,22 @@ export type NavigationItem = {
  * still forwards to their own assigned mailboxes
  * (`/dashboard/mailboxes/mine`).
  *
- * "Secuencias" is a single entry for both roles, same alias-redirect trick
- * as "Cuentas de Correos": `/dashboard/sequences` forwards an admin
- * (`sequences.read_all`) to the global monitoring panel
- * (`/dashboard/sequences/all`, spec §4) and an executive
- * (`sequences.manage.own`) to their own wizard + borradores/programadas/en
- * ejecución/historial (`/dashboard/sequences/mine`) — never a shared
- * `/dashboard/admin/*` prefix.
+ * "Secuencias" is deliberately NOT a menu item for either role — the old
+ * Sequence/SequenceContact/ScheduledEmail wizard it fronted
+ * (`/dashboard/sequences*`) was replaced by Plantillas + Gestiones.
+ * `sequences.read_all`/`sequences.manage.own` and the underlying routes
+ * stay intact (legacy, frozen) in case another still-active feature
+ * (Conversaciones) depends on the tables underneath, but are never linked
+ * from either sidebar and never gain new capabilities.
+ *
+ * "Capacidades operativas del administrador" — the admin role now also
+ * holds every operational permission an executive has
+ * (`sequence_templates.*_own`, `sequence_executions.*_own`, see
+ * permission-catalog.ts). "Plantillas"/"Gestiones" below therefore become
+ * visible to admins too, through the exact same permission check as an
+ * executive — no admin-specific entry, no `excludePermissions`, no
+ * `/dashboard/admin/*` variant. The admin's own "Monitor de gestiones"
+ * (read-only, org-wide) stays a separate, additional item.
  */
 export const adminNavigation: NavigationItem[] = [
   {
@@ -78,6 +87,26 @@ export const adminNavigation: NavigationItem[] = [
     href: '/dashboard/executives',
     icon: Users,
     permissions: ['users.read'],
+  },
+  {
+    // Admin-operational-capabilities follow-up, §1/§4 — the admin operates
+    // as an executive when it comes to conversations: this reuses the EXACT
+    // same module the executive already has (AccountsWorkspace, /me/
+    // conversations, ConversationsService.listForExecutive), scoped only by
+    // the admin's own active MailboxAssignment — never all conversations of
+    // the organization just because they're admin. `/dashboard/conversations`
+    // is a pure redirect alias to the executive's own route (see
+    // app/dashboard/conversations/page.tsx). Listed BEFORE both "Cuentas de
+    // Correos" items below (`resolvePageTitle` takes the first array match,
+    // without checking visibility) so the topbar title resolves to
+    // "Conversaciones" while on `/dashboard/mailboxes/mine` — a prefix both
+    // other items' own broader `/dashboard/mailboxes` matchPrefix would
+    // otherwise also match.
+    label: 'Conversaciones',
+    href: '/dashboard/conversations',
+    icon: MessageSquare,
+    permissions: ['mailboxes.read.all'],
+    matchPrefixes: ['/dashboard/mailboxes/mine'],
   },
   {
     label: 'Cuentas de Correos',
@@ -103,23 +132,12 @@ export const adminNavigation: NavigationItem[] = [
     matchPrefixes: ['/dashboard/mailboxes'],
   },
   {
-    // Admin-only from here on — the executive's self-service equivalent is
-    // "Plantillas"/"Gestiones" below. Deliberately no `sequences.manage.own`
-    // in this list anymore: that permission is still granted to executives
-    // (the old wizard's backend stays intact for admins), but the item must
-    // no longer surface to a plain executive.
-    label: 'Secuencias',
-    href: '/dashboard/sequences',
-    icon: Workflow,
-    permissions: ['sequences.read_all'],
-    matchPrefixes: ['/dashboard/sequences'],
-  },
-  {
     // Etapa "cuenta del ejecutivo" — Plantillas (contenido reutilizable de 3
-    // steps) separado de Gestiones (ejecuciones concretas). Deliberately
-    // never visible to admins: ADMIN_PERMISSION_KEYS excludes
-    // sequence_templates.read_own (see permission-catalog.ts), so no
-    // excludePermissions is needed here.
+    // steps) separado de Gestiones (ejecuciones concretas). "Capacidades
+    // operativas del administrador" — ADMIN_PERMISSION_KEYS now includes
+    // sequence_templates.read_own (see permission-catalog.ts), so this item
+    // is visible to both the executive and the admin, each scoped to their
+    // own Plantillas by ownerUserId.
     label: 'Plantillas',
     href: '/dashboard/sequence-templates',
     icon: FileText,

@@ -1,10 +1,9 @@
 import { notFound, redirect } from 'next/navigation';
-import type { MailboxSummary, SignatureSummary, UserSummary } from '@outreach/shared-types';
+import type { MailboxSummary, UserSummary } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../../../lib/api';
 import { getCurrentUser } from '../../../../../lib/session';
 import { LegacyMailboxPanel } from './legacy-mailbox-panel';
 import { ServerLinkedMailboxPanel } from './server-linked-mailbox-panel';
-import { SignatureSection } from '../../../../../components/mailboxes/signature-section';
 
 export default async function EditMailboxPage({ params }: { params: { id: string } }) {
   const currentUser = await getCurrentUser();
@@ -23,19 +22,6 @@ export default async function EditMailboxPage({ params }: { params: { id: string
       notFound();
     }
     throw error;
-  }
-
-  let signature: SignatureSummary | null = null;
-  const canReadSignature = currentUser.permissions.includes('signatures.read');
-  if (canReadSignature) {
-    try {
-      signature = await apiFetch<SignatureSummary>(`/mailboxes/${params.id}/signature`);
-    } catch (error) {
-      if (!(error instanceof ApiError && error.status === 404)) {
-        throw error;
-      }
-      signature = null;
-    }
   }
 
   let executives: UserSummary[] = [];
@@ -61,9 +47,11 @@ export default async function EditMailboxPage({ params }: { params: { id: string
         <ServerLinkedMailboxPanel
           mailbox={mailbox}
           executives={executives}
+          currentUserId={currentUser.id}
           canReassign={currentUser.permissions.includes('mailboxes.assign')}
           canUnlink={currentUser.permissions.includes('mailboxes.unlink')}
           canViewAudit={currentUser.permissions.includes('audit.read')}
+          canViewConversations={currentUser.permissions.includes('mailboxes.read.assigned')}
         />
       ) : (
         <LegacyMailboxPanel
@@ -71,22 +59,6 @@ export default async function EditMailboxPage({ params }: { params: { id: string
           executives={executives}
           canReassign={currentUser.permissions.includes('mailboxes.assign')}
         />
-      )}
-
-      {canReadSignature && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Firma</h2>
-          <SignatureSection
-            mailboxId={mailbox.id}
-            initialSignature={signature}
-            canCreate={currentUser.permissions.includes('signatures.create')}
-            canUpdate={currentUser.permissions.includes('signatures.update')}
-            canActivate={currentUser.permissions.includes('signatures.activate')}
-            canArchive={currentUser.permissions.includes('signatures.archive')}
-            canPreview={currentUser.permissions.includes('signatures.preview')}
-            canTest={currentUser.permissions.includes('signatures.test')}
-          />
-        </section>
       )}
     </div>
   );

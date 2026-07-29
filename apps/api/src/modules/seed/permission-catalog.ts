@@ -221,13 +221,21 @@ export const PERMISSION_CATALOG: Permission[] = [
 ];
 
 /**
- * §26 — deliberately excluded from ADMIN_PERMISSION_KEYS below: the admin
- * role must never be able to create/edit/publish a Plantilla or create/
- * start a Gestión, even via a direct API call bypassing the UI. Only
- * `sequence_executions.monitor_all`/`.refresh_status_all` (admin-specific,
- * read-only) stay in the admin grant.
+ * "Capacidades operativas del administrador" — the admin role now also
+ * operates as an executive (same permissions, same use cases, same
+ * ownership-scoped rows) on top of its own administrative/monitoring
+ * permissions. §26's original exclusion from ADMIN_PERMISSION_KEYS is
+ * retired: this list is kept as one named source shared between
+ * ADMIN_PERMISSION_KEYS (below, no longer filtered out) and
+ * EXECUTIVE_PERMISSION_KEYS (spread in further down), purely so both role
+ * definitions stay in sync. Access is governed entirely by these
+ * permission keys plus row ownership (`ownerUserId`/`executiveId` = the
+ * caller's own `user.id`, checked in SequenceTemplatesService/
+ * SequenceExecutionsService) — never by a `role === 'EXECUTIVE'`
+ * comparison, which does not exist anywhere in this codebase (see
+ * PermissionsGuard; there is no RolesGuard at all).
  */
-const EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS: string[] = [
+const TEMPLATE_AND_EXECUTION_OPERATIONAL_KEYS: string[] = [
   'sequence_templates.create_own',
   'sequence_templates.read_own',
   'sequence_templates.update_own',
@@ -243,9 +251,8 @@ const EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS: string[] = [
   'sequence_executions.refresh_status_own',
 ];
 
-export const ADMIN_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key).filter(
-  (key) => !EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS.includes(key),
-);
+/** Every permission in the catalog — the admin retains all administrative/monitoring permissions AND every operational one an executive has (see TEMPLATE_AND_EXECUTION_OPERATIONAL_KEYS's doc comment). */
+export const ADMIN_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
 
 export const EXECUTIVE_PERMISSION_KEYS: string[] = [
   'mailboxes.read.assigned',
@@ -278,5 +285,5 @@ export const EXECUTIVE_PERMISSION_KEYS: string[] = [
   'sequence_contacts.read',
   'sequence_contacts.remove',
   'sequence_contacts.suppress',
-  ...EXECUTIVE_ONLY_TEMPLATE_AND_EXECUTION_KEYS,
+  ...TEMPLATE_AND_EXECUTION_OPERATIONAL_KEYS,
 ];

@@ -68,5 +68,12 @@ describe('MailboxExecutiveAssignmentValidator', () => {
       await validator.validate({ organizationId: orgId, clientId, primaryExecutiveId: 'exec_1' }, ctx);
       expect(users.findById).toHaveBeenCalledWith('exec_1', ctx);
     });
+
+    it('"Capacidades operativas del administrador" — accepts an admin user assigning themselves, using only org membership + active status as criteria (the `User` entity carries no role field at all; system role is resolved via UserRole, never checked here)', async () => {
+      users.findById.mockResolvedValue({ id: 'admin_1', organizationId: orgId, status: 'ACTIVE' } as never);
+      await expect(
+        validator.validate({ organizationId: orgId, clientId, primaryExecutiveId: 'admin_1', secondaryExecutiveIds: [] }),
+      ).resolves.toBeUndefined();
+    });
   });
 });

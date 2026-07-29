@@ -55,6 +55,7 @@ model Organization {
   scheduledEmails     ScheduledEmail[]
   sequenceTemplates   SequenceTemplate[]
   sequenceExecutions  SequenceExecution[]
+  signatureAssets     SignatureAsset[]
 
   @@map("organizations")
 }
@@ -86,6 +87,7 @@ model User {
   clientExecutiveAssignments ClientExecutiveAssignment[]
   ownedSequenceTemplates     SequenceTemplate[]
   sequenceExecutions         SequenceExecution[]
+  signatureAssets            SignatureAsset[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -426,6 +428,38 @@ model SignatureVersion {
   @@unique([signatureId, versionNumber])
   @@index([signatureId])
   @@map("signature_versions")
+}
+
+enum SignatureAssetStatus {
+  AVAILABLE
+  REFERENCED
+  ORPHANED
+  DELETED
+}
+
+/// Fase Firma — one row per uploaded signature image; never the binary itself (see SignatureAssetStoragePort).
+model SignatureAsset {
+  id               String               @id @default(uuid())
+  organizationId   String
+  ownerUserId      String
+  objectKey        String               @unique
+  publicUrl        String
+  contentType      String
+  originalFileName String
+  sizeBytes        Int
+  width            Int
+  height           Int
+  sha256           String
+  status           SignatureAssetStatus @default(AVAILABLE)
+  createdAt        DateTime             @default(now())
+  deletedAt        DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  owner        User         @relation(fields: [ownerUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("signature_assets")
 }
 
 enum SequenceStatus {
@@ -1137,6 +1171,8 @@ model SequenceTemplate {
   /// column is vestigial, kept only so no destructive migration is needed.
   subjectTemplate     String                 @default("")
   headerText          String?
+  /// Fase Firma — the Plantilla's own editable signature draft (see SequenceTemplateVersion.signatureHtml for the frozen per-version snapshot).
+  signatureHtml       String                 @default("")
   status              SequenceTemplateStatus @default(DRAFT)
   currentDraftVersion Int                    @default(1)
   timezone            String                 @default("America/Santiago")
@@ -1231,14 +1267,8 @@ model SequenceTemplateVersion {
   acceptedAt              DateTime?
   lastPublishCommandId    String?
   lastError               String?
-  /// §12-17 — populated only when this version resulted from "Editar plantilla publicada" (a SEQUENCE_TEMPLATE_UPDATE), never on the first publish.
+  /// §12-17 — populated only when this version resulted from "Editar plantilla publicada" (a new TEMPLATE_VERSION_PUBLISH carrying previousServerTemplateId), never on the first publish.
   previousVersionNumber     Int?
-  effectiveScope            String?
-  affectedExecutions        Int?
-  affectedPendingJobs       Int?
-  unchangedSentJobs         Int?
-  processingJobsNotChanged  Int?
-  appliedAt                 DateTime?
   createdBy               String
   createdAt               DateTime                      @default(now())
 

@@ -16,6 +16,7 @@ import { ConversationRepository } from '../../domain/conversation/conversation.r
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { Mailbox } from '../../domain/mailbox/mailbox.entity';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
+import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { ScheduledEmailRepository } from '../../domain/scheduled-email/scheduled-email.repository';
 import { SequenceContactRepository } from '../../domain/sequence-contact/sequence-contact.repository';
 import { SequenceStepRepository } from '../../domain/sequence/sequence-step.repository';
@@ -32,6 +33,7 @@ import {
   CONVERSATION_REPOSITORY,
   CONVERSATION_TAG_REPOSITORY,
   DOMAIN_REPOSITORY,
+  MAILBOX_ASSIGNMENT_REPOSITORY,
   MAILBOX_REPOSITORY,
   MANAGED_CLIENT_REPOSITORY,
   SCHEDULED_EMAIL_REPOSITORY,
@@ -72,6 +74,8 @@ export class ConversationsService {
     @Inject(DOMAIN_REPOSITORY) private readonly domains: DomainRepository,
     @Inject(CLIENT_EXECUTIVE_ASSIGNMENT_REPOSITORY)
     private readonly clientAssignments: ClientExecutiveAssignmentRepository,
+    @Inject(MAILBOX_ASSIGNMENT_REPOSITORY)
+    private readonly mailboxAssignments: MailboxAssignmentRepository,
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     @Inject(COMPANY_REPOSITORY) private readonly companies: CompanyRepository,
@@ -224,8 +228,14 @@ export class ConversationsService {
   /**
    * Self-service listing — "Mis clientes" scoping applied here, not just
    * hidden in the UI. Visible conversations are those belonging to a
-   * client assigned to this executive, OR directly assigned to them
-   * (e.g. by a supervisor, even outside their usual client scope).
+   * client assigned to this executive, directly assigned to them (e.g. by
+   * a supervisor, even outside their usual client scope), OR belonging to
+   * a mailbox where they hold an active MailboxAssignment (PRIMARY or
+   * SECONDARY) — the same assignment used to gate Plantillas/Gestiones
+   * (§2 of the admin-operational-capabilities follow-up). This is a pure
+   * union of two independent assignment mechanisms, never a role check:
+   * an admin operating as an executive reaches this exact same method,
+   * scoped only by their own MailboxAssignment rows.
    */
   async listForExecutive(
     organizationId: string,
@@ -234,20 +244,27 @@ export class ConversationsService {
     actorId: string,
   ): Promise<ConversationSummary[]> {
     const assignedClientIds = await this.assignedClientIdSet(userId);
+    const assignedMailboxIds = await this.assignedMailboxIdSet(userId);
     if (filter.clientId && !assignedClientIds.has(filter.clientId)) {
       return [];
     }
 
     const allMailboxes = await this.mailboxes.findAll(organizationId);
     const mailboxIdsInScope = allMailboxes
-      .filter((mailbox) => mailbox.clientId && assignedClientIds.has(mailbox.clientId))
+      .filter(
+        (mailbox) =>
+          (mailbox.clientId && assignedClientIds.has(mailbox.clientId)) ||
+          assignedMailboxIds.has(mailbox.id),
+      )
       .map((mailbox) => mailbox.id);
     await this.syncMailboxes(organizationId, mailboxIdsInScope, actorId);
 
     const rows = await this.conversations.findAll(organizationId, filter);
     const visible = rows.filter(
       (row) =>
-        (row.clientId && assignedClientIds.has(row.clientId)) || row.assignedExecutiveId === userId,
+        (row.clientId && assignedClientIds.has(row.clientId)) ||
+        row.assignedExecutiveId === userId ||
+        assignedMailboxIds.has(row.mailboxId),
     );
     return Promise.all(visible.map((row) => this.toSummary(row)));
   }
@@ -271,9 +288,14 @@ export class ConversationsService {
   /**
    * "Cuentas de correos" — the executive workspace's Cliente → Dominio →
    * Cuenta tree, each node carrying its own aggregated unread count (sum of
-   * its children's). Scoped the same way `listForExecutive` already is
-   * (client-level `ClientExecutiveAssignment`), so this never leaks a
-   * client/domain/mailbox the executive isn't assigned to.
+   * its children's). Scoped by the union of `listForExecutive`'s two
+   * assignment mechanisms: a `ClientExecutiveAssignment` grants full access
+   * to every mailbox under that client (existing behavior, unchanged); a
+   * `MailboxAssignment` (PRIMARY/SECONDARY) grants access to just that one
+   * mailbox even when its client isn't otherwise assigned to this user —
+   * needed so a mailbox self-assigned via "Cuentas de Correos" (§4 of the
+   * admin-operational-capabilities follow-up) actually surfaces here. Either
+   * way this never leaks a client/domain/mailbox the user isn't assigned to.
    */
   async getConversationTreeForExecutive(
     organizationId: string,
@@ -281,26 +303,41 @@ export class ConversationsService {
     actorId: string,
   ): Promise<ConversationTreeClientNode[]> {
     const clientAssignmentRows = await this.clientAssignments.findByUser(userId);
+    const fullAccessClientIds = new Set(clientAssignmentRows.map((a) => a.clientId));
+    const assignedMailboxIds = await this.assignedMailboxIdSet(userId);
     const allMailboxes = await this.mailboxes.findAll(organizationId);
 
     const mailboxIdsInScope = allMailboxes
       .filter(
         (mailbox) =>
-          mailbox.clientId && clientAssignmentRows.some((a) => a.clientId === mailbox.clientId),
+          (mailbox.clientId && fullAccessClientIds.has(mailbox.clientId)) ||
+          assignedMailboxIds.has(mailbox.id),
       )
       .map((mailbox) => mailbox.id);
     await this.syncMailboxes(organizationId, mailboxIdsInScope, actorId);
 
+    const clientIdsFromMailboxAssignment = new Set(
+      allMailboxes
+        .filter((mailbox) => assignedMailboxIds.has(mailbox.id) && mailbox.clientId)
+        .map((mailbox) => mailbox.clientId as string),
+    );
+    const allClientIds = new Set([...fullAccessClientIds, ...clientIdsFromMailboxAssignment]);
+
     const tree: ConversationTreeClientNode[] = [];
-    for (const assignment of clientAssignmentRows) {
-      const client = await this.clients.findById(assignment.clientId);
+    for (const clientId of allClientIds) {
+      const client = await this.clients.findById(clientId);
       if (!client || client.organizationId !== organizationId) continue;
+      const hasFullClientAccess = fullAccessClientIds.has(clientId);
 
       const domains = await this.domains.findByClient(organizationId, client.id);
       let clientUnread = 0;
       const domainNodes = await Promise.all(
         domains.map(async (domain) => {
-          const mailboxesInDomain = allMailboxes.filter((mailbox) => mailbox.domainId === domain.id);
+          const mailboxesInDomain = allMailboxes.filter(
+            (mailbox) =>
+              mailbox.domainId === domain.id &&
+              (hasFullClientAccess || assignedMailboxIds.has(mailbox.id)),
+          );
           let domainUnread = 0;
           const mailboxNodes = await Promise.all(
             mailboxesInDomain.map(async (mailbox) => {
@@ -314,8 +351,17 @@ export class ConversationsService {
           return { id: domain.id, domainName: domain.domainName, unreadCount: domainUnread, mailboxes: mailboxNodes };
         }),
       );
+      // A client reached only THROUGH a mailbox-assignment (never a full
+      // ClientExecutiveAssignment) must never show its other, unassigned
+      // domains/mailboxes as empty folders — prune those here. A client with
+      // full access keeps every domain exactly as before this change, even
+      // an empty one, since that was already the pre-existing behavior.
+      const domainsToShow = hasFullClientAccess
+        ? domainNodes
+        : domainNodes.filter((domain) => domain.mailboxes.length > 0);
+      if (domainsToShow.length === 0) continue;
 
-      tree.push({ id: client.id, name: client.name, unreadCount: clientUnread, domains: domainNodes });
+      tree.push({ id: client.id, name: client.name, unreadCount: clientUnread, domains: domainsToShow });
     }
     return tree;
   }
@@ -374,7 +420,12 @@ export class ConversationsService {
     return this.getById(organizationId, conversationId, { markAsRead: true, actorId: userId });
   }
 
-  /** 404s (never 403) for a conversation outside this executive's reach. */
+  /**
+   * 404s (never 403) for a conversation outside this executive's reach. The
+   * backend is always the one revalidating this — a deep link/query-string
+   * carrying a `mailboxId` the caller isn't assigned to can never surface
+   * that mailbox's conversations, no matter what the frontend requested.
+   */
   async requireAccessibleConversation(
     organizationId: string,
     userId: string,
@@ -386,12 +437,20 @@ export class ConversationsService {
       const assignedClientIds = await this.assignedClientIdSet(userId);
       if (assignedClientIds.has(conversation.clientId)) return conversation;
     }
+    const assignedMailboxIds = await this.assignedMailboxIdSet(userId);
+    if (assignedMailboxIds.has(conversation.mailboxId)) return conversation;
     throw new NotFoundException('Conversation not found.');
   }
 
   private async assignedClientIdSet(userId: string): Promise<Set<string>> {
     const clientAssignments = await this.clientAssignments.findByUser(userId);
     return new Set(clientAssignments.map((assignment) => assignment.clientId));
+  }
+
+  /** §2 — active MailboxAssignment (PRIMARY or SECONDARY; both are always "active", there is no separate revocation flag on this row — removal is a hard delete, see MailboxAssignmentRepository.remove) on a mailbox, independent of any client-level assignment. */
+  private async assignedMailboxIdSet(userId: string): Promise<Set<string>> {
+    const mailboxAssignments = await this.mailboxAssignments.findByUser(userId);
+    return new Set(mailboxAssignments.map((assignment) => assignment.mailboxId));
   }
 
   // --- Self-service wrappers — each checks requireAccessibleConversation

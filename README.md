@@ -1815,6 +1815,41 @@ MAIL_ENGINE_MODE=simulation   # valor por defecto — motor simulado, ver Fase 1
 # MAIL_ENGINE_MODE=remote     # adaptador preparado pero no implementado todavía (ver Fase 12).
 ```
 
+**`SEQUENCE_MOTOR_MODE` (Consolidación contractual) es una CUARTA variable, independiente de
+las anteriores** — gobierna `SequenceTemplateMotorPort`/`SequenceExecutionMotorPort`: el motor
+Railway que acepta una versión publicada de Plantilla y arranca una Gestión. Ver
+`docs/railway-integration-contract-v1.md` para el contrato completo (payloads reales,
+respuestas, idempotencia, reglas de versionado inmutable).
+
+```env
+SEQUENCE_MOTOR_MODE=simulated        # valor por defecto — SimulatedSequenceTemplate/ExecutionMotorAdapter.
+# SEQUENCE_MOTOR_MODE=http           # requiere SEQUENCE_MOTOR_BASE_URL y SEQUENCE_MOTOR_API_KEY (la API
+                                      # rechaza arrancar si falta cualquiera de las dos).
+SEQUENCE_MOTOR_BASE_URL=
+SEQUENCE_MOTOR_API_KEY=
+SEQUENCE_MOTOR_TIMEOUT_MS=10000
+```
+
+**`SIGNATURE_ASSET_STORAGE_MODE` (Fase Firma) es independiente de las anteriores** — gobierna
+`SignatureAssetStoragePort`: dónde se guardan las imágenes que un ejecutivo (o el administrador
+operando como tal) inserta en la firma de una Plantilla. Distinto de `STORAGE_DRIVER` (el puerto
+genérico de imágenes de texto enriquecido, más antiguo). Ver `docs/signature-assets-r2-setup.md`
+para los pasos externos de Cloudflare R2.
+
+```env
+SIGNATURE_ASSET_STORAGE_MODE=simulated   # valor por defecto — SimulatedSignatureAssetStorageAdapter,
+                                          # escribe en apps/api/uploads/signatures/ (mismo mount /uploads/*).
+# SIGNATURE_ASSET_STORAGE_MODE=r2        # requiere las 4 variables R2_* de abajo (la API rechaza
+                                          # arrancar si falta cualquiera).
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET_NAME=
+R2_PUBLIC_BASE_URL=https://assets.mejoreferido.com   # siempre requerida — el sanitizador de la
+                                                       # firma solo permite <img> apuntando a este host.
+R2_SIGNATURE_PREFIX=signatures
+```
+
 Ningún servicio de negocio conoce cuál de las dos está activa: todos dependen de **interfaces**
 (`UserRepository`, `RoleRepository`, `EngineClient`, etc.), nunca de Prisma, `pg`, Axios/fetch o
 el motor externo directamente. Ver "Arquitectura: puertos y adaptadores" más abajo.
@@ -1923,6 +1958,20 @@ DIRECT_URL=                   # solo la usan `prisma migrate`/`db` — mismo val
                                # salvo que sea una conexión pooled (Neon "-pooler", PgBouncer)
 ENGINE_BASE_URL=              # obligatoria solo si ENGINE_DRIVER=http
 ENGINE_API_KEY=
+
+SEQUENCE_MOTOR_MODE=simulated # simulated | http — motor Railway de Plantillas/Gestiones
+SEQUENCE_MOTOR_BASE_URL=      # obligatoria solo si SEQUENCE_MOTOR_MODE=http
+SEQUENCE_MOTOR_API_KEY=       # obligatoria solo si SEQUENCE_MOTOR_MODE=http
+SEQUENCE_MOTOR_TIMEOUT_MS=10000
+
+SIGNATURE_ASSET_STORAGE_MODE=simulated  # simulated | r2 — imágenes embebidas en la firma de una Plantilla
+R2_ACCOUNT_ID=                # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
+R2_ACCESS_KEY_ID=              # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
+R2_SECRET_ACCESS_KEY=          # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
+R2_BUCKET_NAME=                # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
+R2_PUBLIC_BASE_URL=https://assets.mejoreferido.com  # siempre requerida (con valor por defecto)
+R2_SIGNATURE_PREFIX=signatures
+
 API_PUBLIC_URL=               # opcional; base para las URLs públicas de /uploads (default http://localhost:<PORT>)
 
 AUTH_SECRET=replace_with_a_secure_value   # siempre obligatoria — firma los JWT de sesión

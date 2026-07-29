@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { extractTemplateVariables } from '@outreach/validation';
 import { RichTextEditor } from '../../../../components/rich-text-editor/rich-text-editor';
 import { VariableInsertMenu } from '../../../../components/rich-text-editor/variable-insert-menu';
@@ -86,7 +86,12 @@ export function SequenceTemplateEditor({
   const [template, setTemplate] = useState(initialTemplate);
 
   const [subjectTemplate, setSubjectTemplate] = useState(template.subjectTemplate);
+  const [signatureHtml, setSignatureHtml] = useState(template.signatureHtml);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
   const generalSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signatureSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signatureImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const [activeEnvio, setActiveEnvio] = useState<1 | 2 | 3>(1);
   const [drafts, setDrafts] = useState<Record<1 | 2 | 3, EnvioDraft>>(() => {
@@ -124,6 +129,12 @@ export function SequenceTemplateEditor({
   const isPublished = template.status === 'PUBLISHED';
   const isLocked = isArchived || (isPublished && !editingUnlocked);
   const currentDraft = drafts[activeEnvio];
+
+  // Consolidación contractual — derived from the full version history, never
+  // "latestPublishedVersion + 1": if a previous update attempt FAILED,
+  // latestPublishedVersion still correctly points at the last ACCEPTED
+  // version, so a naive "+1" would understate the real next version number.
+  const nextDraftVersionNumber = template.versions.reduce((max, v) => Math.max(max, v.versionNumber), 0) + 1;
 
   useEffect(() => {
     if (template.status !== 'PUBLISHED') {
@@ -195,9 +206,28 @@ export function SequenceTemplateEditor({
     }, AUTOSAVE_DELAY_MS);
   }
 
+  // §11 (Fase Firma) — the signature is now the template's own draft field,
+  // saved the exact same debounced way as the subject: no visible "Guardar"
+  // button, editing it never touches an already-published version.
+  function scheduleSignatureSave(next: string): void {
+    if (signatureSaveTimer.current) clearTimeout(signatureSaveTimer.current);
+    signatureSaveTimer.current = setTimeout(async () => {
+      const response = await fetch(`/api/sequence-templates/${template.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signatureHtml: next }),
+      });
+      if (response.ok) {
+        const body = await response.json();
+        setTemplate(body);
+      }
+    }, AUTOSAVE_DELAY_MS);
+  }
+
   useEffect(() => {
     return () => {
       if (generalSaveTimer.current) clearTimeout(generalSaveTimer.current);
+      if (signatureSaveTimer.current) clearTimeout(signatureSaveTimer.current);
       Object.values(envioSaveTimers.current).forEach((t) => t && clearTimeout(t));
     };
   }, []);
@@ -205,6 +235,35 @@ export function SequenceTemplateEditor({
   function updateSubject(value: string): void {
     setSubjectTemplate(value);
     scheduleGeneralSave({ subjectTemplate: value });
+  }
+  function updateSignature(value: string): void {
+    setSignatureHtml(value);
+    scheduleSignatureSave(value);
+  }
+
+  /** Fase Firma, §8 — uploads through the dedicated /signature-assets endpoint (never a pasted external URL), then inserts a fixed, safe <img> into the current draft. */
+  async function handleSignatureImageSelected(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImageUploadError(null);
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      const response = await fetch('/api/signature-assets', { method: 'POST', body: formData });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setImageUploadError(body.error ?? 'No se pudo subir la imagen.');
+        return;
+      }
+      const imgHtml = `<img src="${body.publicUrl}" alt="Logo" width="240" style="display:block;max-width:100%;height:auto;border:0;">`;
+      updateSignature(`${signatureHtml}${imgHtml}`);
+    } catch {
+      setImageUploadError('No se pudo contactar la API. Intenta nuevamente.');
+    } finally {
+      setUploadingImage(false);
+    }
   }
   function updateEnvio(patch: Partial<EnvioDraft>): void {
     setDrafts((current) => {
@@ -395,7 +454,7 @@ export function SequenceTemplateEditor({
                 <>
                   {' · '}
                   <span className="font-medium text-amber-700">
-                    Versión {template.latestPublishedVersion.versionNumber + 1}: borrador en edición
+                    Versión {nextDraftVersionNumber}: borrador en edición
                   </span>
                 </>
               )}
@@ -531,7 +590,7 @@ export function SequenceTemplateEditor({
             </div>
             <iframe
               title={`Vista previa Envío ${activeEnvio}`}
-              srcDoc={buildPreviewDocument(currentDraft.headerText ?? '', currentDraft.bodyHtml, template.signatureHtml, variablesForEditor)}
+              srcDoc={buildPreviewDocument(currentDraft.headerText ?? '', currentDraft.bodyHtml, signatureHtml, variablesForEditor)}
               sandbox="allow-same-origin"
               className="h-96 w-full border-0"
             />
@@ -567,6 +626,44 @@ export function SequenceTemplateEditor({
             {template.steps.find((s) => s.stepNumber === activeEnvio)?.scheduleDescription}
           </p>
         </fieldset>
+      </div>
+
+      {/* §11 (Fase Firma) — signature belongs to this Plantilla, not to the mailbox: authored here, frozen into each publish/version, never edited from the account's own screen anymore. */}
+      <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-slate-700">Firma</span>
+          {canUpdate && !isLocked && (
+            <>
+              <input
+                ref={signatureImageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif"
+                className="hidden"
+                onChange={handleSignatureImageSelected}
+              />
+              <button
+                type="button"
+                onClick={() => signatureImageInputRef.current?.click()}
+                disabled={uploadingImage}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+              >
+                {uploadingImage ? 'Subiendo…' : 'Agregar imagen'}
+              </button>
+            </>
+          )}
+        </div>
+        <span className="text-xs text-slate-500">
+          Se incluye en los 3 envíos de esta plantilla. Al publicar una nueva versión, la firma queda
+          fija junto con el resto del contenido — las Gestiones ya iniciadas conservan la firma de su
+          propia versión. Imágenes: PNG, JPG o GIF, hasta 1200x500 px y 1 MB.
+        </span>
+        {imageUploadError && <p className="text-xs text-red-600">{imageUploadError}</p>}
+        <RichTextEditor
+          value={signatureHtml}
+          onChange={updateSignature}
+          editable={canUpdate && !isLocked}
+          placeholder="Nombre, cargo, empresa, teléfono…"
+        />
       </div>
 
       {canPublish && !isLocked && (
@@ -682,7 +779,7 @@ export function SequenceTemplateEditor({
           mailboxEmail={template.mailboxEmail}
           templateName={template.name}
           subjectTemplate={subjectTemplate}
-          signatureHtml={template.signatureHtml}
+          signatureHtml={signatureHtml}
           timezone={template.timezone}
           envios={([1, 2, 3] as const).map((stepNumber) => ({
             stepNumber,

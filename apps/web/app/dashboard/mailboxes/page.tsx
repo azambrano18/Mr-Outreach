@@ -4,6 +4,7 @@ import type { MailboxAdminOverviewItem } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { getCurrentUser } from '../../../lib/session';
 import { AccessDenied } from '../access-denied';
+import { MailboxRow } from './mailbox-row';
 
 const LOCAL_STATUS_LABEL: Record<MailboxAdminOverviewItem['status'], string> = {
   ACTIVE: 'Activa',
@@ -236,18 +237,17 @@ export default async function MailboxesOverviewPage({
                     <th className="px-4 py-3">Puede enviar</th>
                     <th className="px-4 py-3">Estado local</th>
                     <th className="px-4 py-3">Última sync.</th>
-                    <th className="px-4 py-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((item) => (
-                    <tr key={item.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                    <MailboxRow key={item.id} href={`/dashboard/mailboxes/${item.id}/edit`} label={item.email}>
                       <td className="px-4 py-3 text-slate-700">{item.clientName ?? '— Sin clasificar —'}</td>
                       <td className="px-4 py-3 text-slate-700">{item.domainName ?? '—'}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
-                          <span className="font-medium text-slate-900">{item.name}</span>
-                          <span className="text-xs text-slate-500">{item.email}</span>
+                          <span className="font-medium text-slate-900">{item.email}</span>
+                          <span className="text-xs text-slate-500">{item.name}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -292,19 +292,11 @@ export default async function MailboxesOverviewPage({
                           ? new Date(item.serverStatusCheckedAt).toLocaleString('es-CL')
                           : 'Nunca'}
                       </td>
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/dashboard/mailboxes/${item.id}/edit`}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
-                        >
-                          Ver detalle
-                        </Link>
-                      </td>
-                    </tr>
+                    </MailboxRow>
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="px-4 py-6 text-center text-slate-500">
+                      <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
                         Ninguna cuenta coincide con los filtros seleccionados.
                       </td>
                     </tr>

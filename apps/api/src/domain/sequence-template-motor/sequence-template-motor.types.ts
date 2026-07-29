@@ -37,12 +37,23 @@ export interface SequenceTemplateMotorStepInput {
   };
 }
 
+/**
+ * Consolidación contractual — the ONE publish shape, used identically for a
+ * template's first publish (`previousServerTemplateId: null`) and for every
+ * later version (`previousServerTemplateId` = the prior ACCEPTED version's
+ * own serverTemplateId, purely informational for Railway's own audit trail
+ * — never a request to modify anything tied to that previous id). Every
+ * call always produces a brand-new, independent `serverTemplateId`; there
+ * is no "update in place" variant.
+ */
 export interface PublishSequenceTemplateInput {
   idempotencyKey: string;
   correlationId: string;
   organizationId: string;
   executiveUserId: string;
   localTemplateId: string;
+  /** null for a template's first publish; otherwise the immediately-prior ACCEPTED version's serverTemplateId. */
+  previousServerTemplateId: string | null;
   serverMailboxId: string;
   mailboxEmail: string;
   name: string;
@@ -75,49 +86,3 @@ export interface SequenceTemplateStatusSnapshot {
   checkedAt: Date;
 }
 
-/**
- * §12-17 — a distinct command from `publishTemplate`: this one updates an
- * ALREADY-published template (the server already has `serverTemplateId`/
- * `currentVersion`). Railway must apply it only to future, not-yet-executed
- * jobs (`effectiveScope`) — already-sent envíos and in-flight jobs keep the
- * previous version untouched.
- */
-export interface UpdateSequenceTemplateInput {
-  idempotencyKey: string;
-  correlationId: string;
-  organizationId: string;
-  executiveUserId: string;
-  localTemplateId: string;
-  serverTemplateId: string;
-  serverMailboxId: string;
-  mailboxEmail: string;
-  name: string;
-  currentVersion: number;
-  newVersion: number;
-  timezone: string;
-  subjectTemplate: string;
-  signatureHtml: string;
-  variables: Array<{ key: string; required: boolean }>;
-  steps: SequenceTemplateMotorStepInput[];
-  effectiveScope: 'FUTURE_UNSENT_JOBS';
-}
-
-export type SequenceTemplateUpdateStatus = 'APPLIED' | 'FAILED';
-
-/** Never thrown for a well-formed request — APPLIED/FAILED are both legitimate business outcomes. The affected/unchanged job counts are authoritative only once `accepted` — Railway is the only party that actually knows its own job queue. */
-export interface UpdateSequenceTemplateResult {
-  accepted: boolean;
-  serverTemplateId: string | null;
-  previousVersion: number;
-  newVersion: number;
-  /** Kept in memory only by the caller until encrypted. */
-  templateToken: string | null;
-  status: SequenceTemplateUpdateStatus;
-  effectiveScope: 'FUTURE_UNSENT_JOBS';
-  affectedExecutions: number | null;
-  affectedPendingJobs: number | null;
-  unchangedSentJobs: number | null;
-  processingJobsNotChanged: number | null;
-  appliedAt: Date | null;
-  rejectionReason: string | null;
-}

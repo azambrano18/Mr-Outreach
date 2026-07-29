@@ -14,7 +14,7 @@ describe('PublishSequenceTemplateUseCase', () => {
   let audit: jest.Mocked<Pick<AuditLogRepository, 'record'>>;
   let motor: jest.Mocked<Pick<SequenceTemplateMotorPort, 'publishTemplate'>>;
   let templatesService: jest.Mocked<
-    Pick<SequenceTemplatesService, 'requireOwned' | 'getStepsForPublish' | 'getSignatureHtmlForMailbox' | 'validateForPublish'>
+    Pick<SequenceTemplatesService, 'requireOwned' | 'getStepsForPublish' | 'validateForPublish'>
   >;
   let eligibility: jest.Mocked<Pick<ExecutiveMailboxEligibilityService, 'requireEligible'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
@@ -32,6 +32,7 @@ describe('PublishSequenceTemplateUseCase', () => {
     name: 'Plantilla - Empresa Demostración',
     subjectTemplate: 'Hola {contact_name}',
     headerText: null,
+    signatureHtml: '<p>Firma</p>',
     status: 'DRAFT',
     currentDraftVersion: 1,
     timezone: 'America/Santiago',
@@ -100,7 +101,6 @@ describe('PublishSequenceTemplateUseCase', () => {
     templatesService = {
       requireOwned: jest.fn().mockResolvedValue(template),
       getStepsForPublish: jest.fn().mockResolvedValue([validStep(1), validStep(2), validStep(3)]),
-      getSignatureHtmlForMailbox: jest.fn().mockResolvedValue('<p>Firma</p>'),
       validateForPublish: jest.fn().mockResolvedValue({ valid: true, errors: [] }),
     };
     eligibility = { requireEligible: jest.fn().mockResolvedValue(mailbox) };
@@ -148,6 +148,9 @@ describe('PublishSequenceTemplateUseCase', () => {
     expect(secrets.encrypt).toHaveBeenCalledWith('tpt_plaintext');
     expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ subjectTemplate: template.subjectTemplate }));
     expect(motor.publishTemplate).toHaveBeenCalledWith(expect.objectContaining({ subjectTemplate: template.subjectTemplate }));
+    // Fase Firma — the signature comes straight from the template's own draft field, never re-read from the mailbox at publish time.
+    expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: template.signatureHtml }));
+    expect(motor.publishTemplate).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: template.signatureHtml }));
     // Header is per-envío again — never a root-level field on either the version snapshot or the motor payload.
     const versionCall = versions.create.mock.calls[0][0];
     expect(versionCall).not.toHaveProperty('headerText');

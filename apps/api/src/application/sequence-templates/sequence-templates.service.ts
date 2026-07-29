@@ -15,6 +15,7 @@ import {
   SEQUENCE_TEMPLATE_STEP_REPOSITORY,
   SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { htmlToPlainText } from '../../infrastructure/security/html-to-plain-text';
 import { MailboxesService } from '../mailboxes/mailboxes.service';
@@ -63,11 +64,12 @@ export interface CreateSequenceTemplateInput {
   description?: string | null;
 }
 
-/** §1/§5 (Fase 1.7) — `name` is now user-editable (see validateTemplateName); subject stays shared across the 3 envíos. Header is per-envío again (see UpdateSequenceTemplateStepInput). */
+/** §1/§5 (Fase 1.7) — `name` is now user-editable (see validateTemplateName); subject stays shared across the 3 envíos. Header is per-envío again (see UpdateSequenceTemplateStepInput). Fase Firma — `signatureHtml` is the template's own editable signature draft, sanitized here exactly like a step's `bodyHtml`. */
 export interface UpdateSequenceTemplateInput {
   name?: string;
   description?: string | null;
   subjectTemplate?: string;
+  signatureHtml?: string;
 }
 
 /**
@@ -129,11 +131,19 @@ export class SequenceTemplatesService {
     private readonly mailboxesService: MailboxesService,
     private readonly signatures: SignaturesService,
     private readonly sanitizer: HtmlSanitizerService,
+    private readonly config: AppConfigService,
   ) {}
 
   async create(organizationId: string, ownerUserId: string, input: CreateSequenceTemplateInput): Promise<SequenceTemplateDetail> {
     const mailbox = await this.eligibility.requireEligible(organizationId, ownerUserId, input.mailboxId);
     const name = await this.validateTemplateName(organizationId, ownerUserId, mailbox.id, input.name);
+
+    // Fase Firma, §14 — one-time migration snapshot: a brand-new Plantilla
+    // starts from whatever this mailbox's legacy signature currently holds
+    // (if any), so nothing is silently lost now that the mailbox's own
+    // signature screen is gone. From here on the template's signatureHtml
+    // is fully independent and never re-synced from the mailbox again.
+    const signatureHtml = await this.getSignatureHtmlForMailbox(organizationId, mailbox.id);
 
     const template = await this.templates.create({
       organizationId,
@@ -142,6 +152,7 @@ export class SequenceTemplatesService {
       name,
       description: input.description ?? null,
       timezone: 'America/Santiago',
+      signatureHtml,
     });
 
     for (const stepNumber of [1, 2, 3] as const) {
@@ -224,14 +235,12 @@ export class SequenceTemplatesService {
       ]),
     ];
 
-    const signatureHtml = await this.getSignatureHtmlForMailbox(organizationId, template.mailboxId);
-
     return {
       ...summary,
       steps: stepSummaries,
       variablesUsed,
       versions: versionRows.map((v) => this.toVersionSummary(v)),
-      signatureHtml,
+      signatureHtml: template.signatureHtml,
     };
   }
 
@@ -253,10 +262,20 @@ export class SequenceTemplatesService {
         ? await this.validateTemplateName(organizationId, ownerUserId, template.mailboxId, input.name, id)
         : undefined;
 
+    const signatureHtml =
+      input.signatureHtml !== undefined
+        ? this.sanitizer.sanitizeSignatureHtml(
+            input.signatureHtml,
+            this.config.signatureAssetAllowedImageHost,
+            this.config.signatureAssetAllowInsecureImageHost,
+          )
+        : undefined;
+
     await this.templates.update(id, {
       name,
       description: input.description,
       subjectTemplate: input.subjectTemplate,
+      signatureHtml,
       currentDraftVersion: template.currentDraftVersion + 1,
     });
     await this.audit.record({
@@ -384,7 +403,7 @@ export class SequenceTemplatesService {
   /** §14 — Mr Outreach's own local estimate for the "Confirmar actualización de plantilla" modal, computed before ever contacting the motor; the authoritative affected/unchanged job counts only exist once the motor itself responds (see UpdateSequenceTemplateUseCase). */
   async getUpdateImpact(organizationId: string, ownerUserId: string, id: string): Promise<TemplateUpdateImpact> {
     const template = await this.requireOwned(organizationId, ownerUserId, id);
-    const latest = await this.versions.findLatestByTemplate(id);
+    const latest = await this.versions.findLatestAcceptedByTemplate(id);
     const executions = await this.executions.findByExecutive(organizationId, ownerUserId);
     const activeExecutionsCount = executions.filter(
       (e) => e.templateId === template.id && (ACTIVE_EXECUTION_STATUSES as readonly string[]).includes(e.status),
@@ -551,18 +570,12 @@ export class SequenceTemplatesService {
       lastError: version.lastError,
       createdAt: version.createdAt.toISOString(),
       previousVersionNumber: version.previousVersionNumber,
-      effectiveScope: version.effectiveScope,
-      affectedExecutions: version.affectedExecutions,
-      affectedPendingJobs: version.affectedPendingJobs,
-      unchangedSentJobs: version.unchangedSentJobs,
-      processingJobsNotChanged: version.processingJobsNotChanged,
-      appliedAt: version.appliedAt ? version.appliedAt.toISOString() : null,
     };
   }
 
   private async toSummary(template: SequenceTemplate): Promise<SequenceTemplateSummary> {
     const mailbox = await this.mailboxesService.getById(template.organizationId, template.mailboxId).catch(() => null);
-    const latest = await this.versions.findLatestByTemplate(template.id);
+    const latest = await this.versions.findLatestAcceptedByTemplate(template.id);
     const activeExecutionsCount =
       template.status === 'PUBLISHED' ? await this.countActiveExecutionsForDelete(template.organizationId, template.id) : 0;
     return {

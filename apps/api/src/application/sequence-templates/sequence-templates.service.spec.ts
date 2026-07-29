@@ -1,4 +1,5 @@
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import { SequenceTemplateRepository } from '../../domain/sequence-template/sequence-template.repository';
 import { SequenceTemplateStepRepository } from '../../domain/sequence-template/sequence-template-step.repository';
@@ -14,13 +15,16 @@ describe('SequenceTemplatesService', () => {
     Pick<SequenceTemplateRepository, 'findById' | 'findByOwner' | 'findByMailbox' | 'create' | 'update' | 'delete' | 'conditionalUpdateStatus'>
   >;
   let steps: jest.Mocked<Pick<SequenceTemplateStepRepository, 'findByTemplate' | 'findById' | 'create' | 'update' | 'deleteByTemplate'>>;
-  let versions: jest.Mocked<Pick<SequenceTemplateVersionRepository, 'findByTemplate' | 'findLatestByTemplate' | 'findByServerTemplateId' | 'create' | 'update'>>;
+  let versions: jest.Mocked<
+    Pick<SequenceTemplateVersionRepository, 'findByTemplate' | 'findLatestByTemplate' | 'findLatestAcceptedByTemplate' | 'findByServerTemplateId' | 'create' | 'update'>
+  >;
   let executions: jest.Mocked<Pick<SequenceExecutionRepository, 'findByExecutive' | 'findAllByOrganization'>>;
   let audit: jest.Mocked<Pick<AuditLogRepository, 'record'>>;
   let eligibility: jest.Mocked<Pick<ExecutiveMailboxEligibilityService, 'requireEligible'>>;
   let mailboxesService: jest.Mocked<Pick<MailboxesService, 'getById'>>;
   let signatures: jest.Mocked<Pick<SignaturesService, 'getByMailbox'>>;
   let sanitizer: HtmlSanitizerService;
+  let config: Pick<AppConfigService, 'signatureAssetAllowedImageHost' | 'signatureAssetAllowInsecureImageHost'>;
   let service: SequenceTemplatesService;
 
   const orgId = 'org_1';
@@ -38,13 +42,21 @@ describe('SequenceTemplatesService', () => {
       conditionalUpdateStatus: jest.fn(),
     };
     steps = { findByTemplate: jest.fn().mockResolvedValue([]), findById: jest.fn(), create: jest.fn(), update: jest.fn(), deleteByTemplate: jest.fn() };
-    versions = { findByTemplate: jest.fn().mockResolvedValue([]), findLatestByTemplate: jest.fn().mockResolvedValue(null), findByServerTemplateId: jest.fn(), create: jest.fn(), update: jest.fn() };
+    versions = {
+      findByTemplate: jest.fn().mockResolvedValue([]),
+      findLatestByTemplate: jest.fn().mockResolvedValue(null),
+      findLatestAcceptedByTemplate: jest.fn().mockResolvedValue(null),
+      findByServerTemplateId: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    };
     executions = { findByExecutive: jest.fn().mockResolvedValue([]), findAllByOrganization: jest.fn().mockResolvedValue([]) };
     audit = { record: jest.fn() };
     eligibility = { requireEligible: jest.fn().mockResolvedValue({ id: mailboxId, serverMailboxId: 'srv_1', email: 'ventas@empresa.cl' }) };
     mailboxesService = { getById: jest.fn().mockResolvedValue({ email: 'ventas@empresa.cl', clientName: 'Empresa Demostración', domainName: 'empresa.cl' }) };
     signatures = { getByMailbox: jest.fn().mockResolvedValue({ activeVersion: { htmlContent: '<p>Firma</p>' } }) };
     sanitizer = new HtmlSanitizerService();
+    config = { signatureAssetAllowedImageHost: 'localhost', signatureAssetAllowInsecureImageHost: true };
 
     service = new SequenceTemplatesService(
       templates as unknown as SequenceTemplateRepository,
@@ -56,6 +68,7 @@ describe('SequenceTemplatesService', () => {
       mailboxesService as unknown as MailboxesService,
       signatures as unknown as SignaturesService,
       sanitizer,
+      config as unknown as AppConfigService,
     );
 
     templates.create.mockImplementation(async (input) => ({
@@ -67,6 +80,7 @@ describe('SequenceTemplatesService', () => {
       description: input.description ?? null,
       subjectTemplate: '',
       headerText: null,
+      signatureHtml: input.signatureHtml,
       status: 'DRAFT',
       currentDraftVersion: 1,
       timezone: input.timezone,
@@ -140,12 +154,99 @@ describe('SequenceTemplatesService', () => {
       await expect(service.create(orgId, executiveId, { mailboxId, name: 'Prospección Gerentes de RRHH' })).resolves.toBeDefined();
     });
 
+    it('"Capacidades operativas del administrador" — an admin acting as ownerUserId creates a Plantilla identically to an executive (same method, no special-casing); it is scoped by ownerUserId like any other', async () => {
+      templates.findByMailbox.mockResolvedValue([]);
+      const adminActorId = 'admin_1';
+      const detail = await service.create(orgId, adminActorId, { mailboxId, name: 'Plantilla del administrador' });
+      expect(templates.create).toHaveBeenCalledWith(expect.objectContaining({ ownerUserId: adminActorId }));
+      expect(detail.ownerUserId).toBe(adminActorId);
+    });
+
     it('creates exactly 3 envíos automatically', async () => {
       await service.create(orgId, executiveId, { mailboxId, name: 'Prospección Gerentes de RRHH' });
       expect(steps.create).toHaveBeenCalledTimes(3);
       expect(steps.create).toHaveBeenCalledWith(expect.objectContaining({ stepNumber: 1 }));
       expect(steps.create).toHaveBeenCalledWith(expect.objectContaining({ stepNumber: 2 }));
       expect(steps.create).toHaveBeenCalledWith(expect.objectContaining({ stepNumber: 3 }));
+    });
+
+    it('Fase Firma, §14 — snapshots the mailbox\'s current legacy signature into the new template\'s own signatureHtml draft, exactly once', async () => {
+      await service.create(orgId, executiveId, { mailboxId, name: 'Prospección Gerentes de RRHH' });
+      expect(signatures.getByMailbox).toHaveBeenCalledWith(orgId, mailboxId);
+      expect(templates.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: '<p>Firma</p>' }));
+    });
+
+    it('Fase Firma — a mailbox with no legacy signature yields an empty (never undefined/null) signatureHtml draft', async () => {
+      signatures.getByMailbox.mockRejectedValue(new Error('not found'));
+      await service.create(orgId, executiveId, { mailboxId, name: 'Prospección Gerentes de RRHH' });
+      expect(templates.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: '' }));
+    });
+  });
+
+  describe('update — Fase Firma, §11-13 the template owns its own editable signature draft', () => {
+    const existingTemplate = {
+      id: 'tpl_1',
+      organizationId: orgId,
+      ownerUserId: executiveId,
+      mailboxId,
+      name: 'Prospección Gerentes de RRHH',
+      subjectTemplate: 'Hola {contact_name}',
+      signatureHtml: '<p>Firma anterior</p>',
+      status: 'DRAFT',
+      currentDraftVersion: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      archivedAt: null,
+    };
+
+    beforeEach(() => {
+      templates.findById.mockResolvedValue(existingTemplate as any);
+      templates.update.mockResolvedValue(existingTemplate as any);
+    });
+
+    it('sanitizes signatureHtml the same way a step body is sanitized, and persists it', async () => {
+      await service.update(orgId, executiveId, 'tpl_1', {
+        signatureHtml: '<p onclick="alert(1)">Firma <script>evil()</script>nueva</p>',
+      });
+      expect(templates.update).toHaveBeenCalledWith(
+        'tpl_1',
+        expect.objectContaining({ signatureHtml: '<p>Firma nueva</p>' }),
+      );
+    });
+
+    it('Fase Firma, §9 — keeps an <img> pointing at the configured allowed asset host, over HTTP, since the mocked config allows insecure (simulated dev mode)', async () => {
+      await service.update(orgId, executiveId, 'tpl_1', {
+        signatureHtml: '<img src="http://localhost/uploads/signatures/org_1/exec_1/asset_1.png" alt="Logo">',
+      });
+      expect(templates.update).toHaveBeenCalledWith(
+        'tpl_1',
+        expect.objectContaining({ signatureHtml: expect.stringContaining('http://localhost/uploads/signatures/org_1/exec_1/asset_1.png') }),
+      );
+    });
+
+    it('Fase Firma, §9 — strips an <img> pointing at any other host (never trusts an arbitrary external URL)', async () => {
+      await service.update(orgId, executiveId, 'tpl_1', {
+        signatureHtml: '<img src="https://evil.example.com/logo.png" alt="Logo">',
+      });
+      expect(templates.update).toHaveBeenCalledWith('tpl_1', expect.objectContaining({ signatureHtml: '' }));
+    });
+
+    it('Fase Firma, §9 — strips a data: URL image (never embeds binary content inline)', async () => {
+      await service.update(orgId, executiveId, 'tpl_1', {
+        signatureHtml: '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Logo">',
+      });
+      expect(templates.update).toHaveBeenCalledWith('tpl_1', expect.objectContaining({ signatureHtml: '' }));
+    });
+
+    it('leaves signatureHtml untouched when the caller does not send it', async () => {
+      await service.update(orgId, executiveId, 'tpl_1', { subjectTemplate: 'Nuevo asunto' });
+      expect(templates.update).toHaveBeenCalledWith('tpl_1', expect.objectContaining({ signatureHtml: undefined }));
+    });
+
+    it('getDetail returns the template\'s own signatureHtml field directly, never re-querying the mailbox\'s legacy signature', async () => {
+      const detail = await service.getDetail(orgId, executiveId, 'tpl_1');
+      expect(detail.signatureHtml).toBe('<p>Firma anterior</p>');
+      expect(signatures.getByMailbox).not.toHaveBeenCalled();
     });
   });
 
@@ -157,6 +258,7 @@ describe('SequenceTemplatesService', () => {
       mailboxId,
       name: 'Prospección Gerentes de RRHH',
       subjectTemplate: 'Hola {contact_name}',
+      signatureHtml: '<p>Firma existente</p>',
       status: 'DRAFT',
       currentDraftVersion: 1,
       createdAt: new Date(),

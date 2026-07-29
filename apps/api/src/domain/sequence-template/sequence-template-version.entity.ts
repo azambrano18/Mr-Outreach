@@ -30,11 +30,20 @@ export interface SequenceTemplateVersionVariable {
 /**
  * §5 — one immutable row per publish. Never updated once created (only
  * `status`/`serverTemplateId`/`templateTokenCiphertext`/`acceptedAt`/
- * `lastError`/the update-tracking fields below transition from REQUESTED to
- * a terminal ACCEPTED/FAILED right after the motor call — the content
- * snapshot fields themselves never change). A Gestión started against this
- * version keeps working even if the template later gets a new draft and a
- * new version.
+ * `lastError` transition from REQUESTED to a terminal ACCEPTED/FAILED right
+ * after the motor call — the content snapshot fields themselves never
+ * change). A Gestión started against this version keeps working even if the
+ * template later gets a new draft and a new version.
+ *
+ * Consolidación contractual — editing a published template always produces
+ * a brand-new, independently-`serverTemplateId`'d version via the same
+ * `publishTemplate` motor call as a first publish (see
+ * UpdateSequenceTemplateUseCase); there is no "update in place" concept and
+ * therefore no per-version impact/scope bookkeeping (`effectiveScope`,
+ * `affectedExecutions`, `affectedPendingJobs`, `unchangedSentJobs`,
+ * `processingJobsNotChanged`, `appliedAt`) — a new version can never affect
+ * an existing Gestión's already-immutable version, so there is nothing for
+ * those fields to report.
  */
 export interface SequenceTemplateVersion {
   id: string;
@@ -60,14 +69,8 @@ export interface SequenceTemplateVersion {
   lastPublishCommandId: string | null;
   lastError: string | null;
 
-  /** §12-17 — populated only when this version came from "Editar plantilla publicada" (a SEQUENCE_TEMPLATE_UPDATE); null for a template's first publish. */
+  /** §12-17 — populated only when this version came from "Editar plantilla publicada" (a new TEMPLATE_VERSION_PUBLISH carrying `previousServerTemplateId`); null for a template's first publish. */
   previousVersionNumber: number | null;
-  effectiveScope: 'FUTURE_UNSENT_JOBS' | null;
-  affectedExecutions: number | null;
-  affectedPendingJobs: number | null;
-  unchangedSentJobs: number | null;
-  processingJobsNotChanged: number | null;
-  appliedAt: Date | null;
 
   createdBy: string;
   createdAt: Date;
@@ -94,10 +97,4 @@ export interface UpdateSequenceTemplateVersionInput {
   templateTokenCiphertext?: string | null;
   acceptedAt?: Date | null;
   lastError?: string | null;
-  effectiveScope?: 'FUTURE_UNSENT_JOBS' | null;
-  affectedExecutions?: number | null;
-  affectedPendingJobs?: number | null;
-  unchangedSentJobs?: number | null;
-  processingJobsNotChanged?: number | null;
-  appliedAt?: Date | null;
 }

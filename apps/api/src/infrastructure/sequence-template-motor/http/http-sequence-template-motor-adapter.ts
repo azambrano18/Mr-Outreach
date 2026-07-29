@@ -5,11 +5,9 @@ import { SequenceTemplateMotorPort } from '../../../domain/sequence-template-mot
 import {
   PublishSequenceTemplateInput,
   PublishSequenceTemplateResult,
+  SequenceTemplateMotorStepInput,
   SequenceTemplatePublishStatus,
   SequenceTemplateStatusSnapshot,
-  SequenceTemplateUpdateStatus,
-  UpdateSequenceTemplateInput,
-  UpdateSequenceTemplateResult,
 } from '../../../domain/sequence-template-motor/sequence-template-motor.types';
 
 interface WirePublishResponse {
@@ -22,26 +20,28 @@ interface WirePublishResponse {
   rejectionReason?: string | null;
 }
 
-interface WireUpdateResponse {
-  accepted: boolean;
-  serverTemplateId: string | null;
-  previousVersion: number;
-  newVersion: number;
-  templateToken: string | null;
-  status: SequenceTemplateUpdateStatus;
-  effectiveScope: 'FUTURE_UNSENT_JOBS';
-  affectedExecutions: number | null;
-  affectedPendingJobs: number | null;
-  unchangedSentJobs: number | null;
-  processingJobsNotChanged: number | null;
-  appliedAt: string | null;
-  rejectionReason?: string | null;
-}
-
 interface WireStatusResponse {
   serverTemplateId: string;
   status: SequenceTemplatePublishStatus;
   checkedAt: string;
+}
+
+/** Envío 1 never carries a wait — it runs from the Gestión's own start until the fixed 19:00 cutoff, so the wire schedule marks it with a `type` instead of a `delayValue`/`delayUnit` pair (docs/railway-integration-contract-v1.md §Contrato de publicación). */
+function buildWireSchedule(step: SequenceTemplateMotorStepInput): Record<string, unknown> {
+  if (step.stepNumber === 1) {
+    return {
+      type: 'EXECUTION_START_UNTIL_19',
+      allowedWeekdays: step.schedule.allowedWeekdays,
+      sendWindowEnd: step.schedule.sendWindowEnd,
+    };
+  }
+  return {
+    delayValue: step.schedule.delayValue,
+    delayUnit: step.schedule.delayUnit,
+    allowedWeekdays: step.schedule.allowedWeekdays,
+    sendWindowStart: step.schedule.sendWindowStart,
+    sendWindowEnd: step.schedule.sendWindowEnd,
+  };
 }
 
 /**
@@ -50,6 +50,10 @@ interface WireStatusResponse {
  * Only ever constructed when SEQUENCE_MOTOR_MODE=http. No HTTP detail leaks
  * past this class — every method returns/throws exactly what
  * SequenceTemplateMotorPort's own doc comment promises.
+ *
+ * Consolidación contractual — ONE command (`TEMPLATE_VERSION_PUBLISH`) for
+ * both a first publish and every later version; see
+ * docs/railway-integration-contract-v1.md for the full wire contract.
  */
 @Injectable()
 export class HttpSequenceTemplateMotorAdapter implements SequenceTemplateMotorPort {
@@ -64,27 +68,29 @@ export class HttpSequenceTemplateMotorAdapter implements SequenceTemplateMotorPo
         method: 'POST',
         body: JSON.stringify({
           schemaVersion: '1.0',
-          commandType: 'SEQUENCE_TEMPLATE_PUBLISH',
+          commandType: 'TEMPLATE_VERSION_PUBLISH',
           commandId: randomUUID(),
           idempotencyKey: input.idempotencyKey,
           correlationId: input.correlationId,
-          organization: { organizationId: input.organizationId },
-          executive: { userId: input.executiveUserId },
-          mailbox: { localMailboxId: input.localTemplateId, serverMailboxId: input.serverMailboxId, email: input.mailboxEmail },
+          organizationId: input.organizationId,
+          executiveUserId: input.executiveUserId,
           template: {
             localTemplateId: input.localTemplateId,
+            previousServerTemplateId: input.previousServerTemplateId,
             name: input.name,
             version: input.version,
+            serverMailboxId: input.serverMailboxId,
+            mailboxEmail: input.mailboxEmail,
             timezone: input.timezone,
             subjectTemplate: input.subjectTemplate,
             signatureHtml: input.signatureHtml,
             variables: input.variables,
-            steps: input.steps.map((step) => ({
-              stepNumber: step.stepNumber,
+            sends: input.steps.map((step) => ({
+              sendNumber: step.stepNumber,
               headerText: step.headerText,
               bodyHtml: step.bodyHtml,
               bodyText: step.bodyText,
-              schedule: step.schedule,
+              schedule: buildWireSchedule(step),
             })),
           },
         }),
@@ -99,62 +105,6 @@ export class HttpSequenceTemplateMotorAdapter implements SequenceTemplateMotorPo
       version: body.version,
       status: body.status,
       acceptedAt: body.acceptedAt ? new Date(body.acceptedAt) : null,
-      rejectionReason: body.rejectionReason ?? null,
-    };
-  }
-
-  /** §12-17 — a distinct command (`SEQUENCE_TEMPLATE_UPDATE`) from `publishTemplate`'s `SEQUENCE_TEMPLATE_PUBLISH`; never reuse the initial-publish command when the server needs to tell create and update apart. */
-  async updateTemplate(input: UpdateSequenceTemplateInput): Promise<UpdateSequenceTemplateResult> {
-    const response = await this.request(
-      '/v1/sequence-templates/update',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          schemaVersion: '1.0',
-          commandType: 'SEQUENCE_TEMPLATE_UPDATE',
-          commandId: randomUUID(),
-          idempotencyKey: input.idempotencyKey,
-          correlationId: input.correlationId,
-          organization: { organizationId: input.organizationId },
-          executive: { userId: input.executiveUserId },
-          mailbox: { serverMailboxId: input.serverMailboxId, email: input.mailboxEmail },
-          template: {
-            localTemplateId: input.localTemplateId,
-            serverTemplateId: input.serverTemplateId,
-            name: input.name,
-            currentVersion: input.currentVersion,
-            newVersion: input.newVersion,
-            timezone: input.timezone,
-            subjectTemplate: input.subjectTemplate,
-            signatureHtml: input.signatureHtml,
-            variables: input.variables,
-            effectiveScope: input.effectiveScope,
-            steps: input.steps.map((step) => ({
-              stepNumber: step.stepNumber,
-              headerText: step.headerText,
-              bodyHtml: step.bodyHtml,
-              bodyText: step.bodyText,
-              schedule: step.schedule,
-            })),
-          },
-        }),
-      },
-      { idempotencyKey: input.idempotencyKey, correlationId: input.correlationId },
-    );
-    const body = await this.parseJson<WireUpdateResponse>(response);
-    return {
-      accepted: body.accepted,
-      serverTemplateId: body.serverTemplateId,
-      previousVersion: body.previousVersion,
-      newVersion: body.newVersion,
-      templateToken: body.templateToken,
-      status: body.status,
-      effectiveScope: body.effectiveScope,
-      affectedExecutions: body.affectedExecutions,
-      affectedPendingJobs: body.affectedPendingJobs,
-      unchangedSentJobs: body.unchangedSentJobs,
-      processingJobsNotChanged: body.processingJobsNotChanged,
-      appliedAt: body.appliedAt ? new Date(body.appliedAt) : null,
       rejectionReason: body.rejectionReason ?? null,
     };
   }

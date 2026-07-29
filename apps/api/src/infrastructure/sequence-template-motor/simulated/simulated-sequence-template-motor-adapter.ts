@@ -5,8 +5,6 @@ import {
   PublishSequenceTemplateInput,
   PublishSequenceTemplateResult,
   SequenceTemplateStatusSnapshot,
-  UpdateSequenceTemplateInput,
-  UpdateSequenceTemplateResult,
 } from '../../../domain/sequence-template-motor/sequence-template-motor.types';
 
 interface PublishedTemplateRecord {
@@ -19,15 +17,18 @@ interface PublishedTemplateRecord {
  * validation. No network call happens anywhere in this class; scenarios
  * are chosen explicitly via `setNextPublishOutcome`/`setMotorUnavailable`,
  * mirroring `SimulatedMailboxMotorAdapter`'s simulation philosophy.
+ *
+ * Consolidación contractual — every accepted call generates a fresh,
+ * unique `serverTemplateId` via `randomUUID()`, whether it's a template's
+ * first publish or a later version (`input.previousServerTemplateId` set).
+ * There is no "update in place" path that could ever reuse a prior id.
  */
 @Injectable()
 export class SimulatedSequenceTemplateMotorAdapter implements SequenceTemplateMotorPort {
   private readonly publishedByIdempotencyKey = new Map<string, PublishSequenceTemplateResult>();
-  private readonly updatedByIdempotencyKey = new Map<string, UpdateSequenceTemplateResult>();
   private readonly registry = new Map<string, PublishedTemplateRecord>();
   private motorUnavailable = false;
   private nextOutcome: 'ACCEPTED' | 'FAILED' = 'ACCEPTED';
-  private nextUpdateOutcome: 'APPLIED' | 'FAILED' = 'APPLIED';
 
   setMotorUnavailable(unavailable: boolean): void {
     this.motorUnavailable = unavailable;
@@ -36,11 +37,6 @@ export class SimulatedSequenceTemplateMotorAdapter implements SequenceTemplateMo
   /** Fixture control — the next `publishTemplate` call (only) will simulate this outcome. Resets to ACCEPTED after use. */
   setNextPublishOutcome(outcome: 'ACCEPTED' | 'FAILED'): void {
     this.nextOutcome = outcome;
-  }
-
-  /** Fixture control — the next `updateTemplate` call (only) will simulate this outcome. Resets to APPLIED after use. */
-  setNextUpdateOutcome(outcome: 'APPLIED' | 'FAILED'): void {
-    this.nextUpdateOutcome = outcome;
   }
 
   async publishTemplate(input: PublishSequenceTemplateInput): Promise<PublishSequenceTemplateResult> {
@@ -58,7 +54,8 @@ export class SimulatedSequenceTemplateMotorAdapter implements SequenceTemplateMo
       outcome === 'ACCEPTED'
         ? {
             accepted: true,
-            serverTemplateId: `tpl_${randomUUID()}`,
+            // Unique per call — never derived from input.previousServerTemplateId.
+            serverTemplateId: `tplv_${randomUUID()}`,
             templateToken: `tpt_${randomUUID()}`,
             version: input.version,
             status: 'ACCEPTED',
@@ -79,63 +76,6 @@ export class SimulatedSequenceTemplateMotorAdapter implements SequenceTemplateMo
     if (result.accepted && result.serverTemplateId) {
       this.registry.set(result.serverTemplateId, { serverTemplateId: result.serverTemplateId, status: 'ACCEPTED' });
     }
-    return result;
-  }
-
-  /**
-   * §12-17 — simulated: this adapter has no real Railway job queue to
-   * inspect, so `affectedPendingJobs`/`unchangedSentJobs`/
-   * `processingJobsNotChanged` are always 0 here (a real Railway would
-   * compute them from its own scheduler state, not from anything Mr
-   * Outreach sends). `affectedExecutions` mirrors the caller's own
-   * count so the confirmation modal's estimate and the persisted result
-   * agree in this simulation.
-   */
-  async updateTemplate(input: UpdateSequenceTemplateInput): Promise<UpdateSequenceTemplateResult> {
-    if (this.motorUnavailable) {
-      throw new ServiceUnavailableException('El servidor motor no está disponible.');
-    }
-
-    const existing = this.updatedByIdempotencyKey.get(input.idempotencyKey);
-    if (existing) return existing;
-
-    const outcome = this.nextUpdateOutcome;
-    this.nextUpdateOutcome = 'APPLIED';
-
-    const result: UpdateSequenceTemplateResult =
-      outcome === 'APPLIED'
-        ? {
-            accepted: true,
-            serverTemplateId: input.serverTemplateId,
-            previousVersion: input.currentVersion,
-            newVersion: input.newVersion,
-            templateToken: `tpt_${randomUUID()}`,
-            status: 'APPLIED',
-            effectiveScope: 'FUTURE_UNSENT_JOBS',
-            affectedExecutions: null,
-            affectedPendingJobs: 0,
-            unchangedSentJobs: 0,
-            processingJobsNotChanged: 0,
-            appliedAt: new Date(),
-            rejectionReason: null,
-          }
-        : {
-            accepted: false,
-            serverTemplateId: null,
-            previousVersion: input.currentVersion,
-            newVersion: input.newVersion,
-            templateToken: null,
-            status: 'FAILED',
-            effectiveScope: 'FUTURE_UNSENT_JOBS',
-            affectedExecutions: null,
-            affectedPendingJobs: null,
-            unchangedSentJobs: null,
-            processingJobsNotChanged: null,
-            appliedAt: null,
-            rejectionReason: 'Simulación: el motor rechazó la actualización.',
-          };
-
-    this.updatedByIdempotencyKey.set(input.idempotencyKey, result);
     return result;
   }
 

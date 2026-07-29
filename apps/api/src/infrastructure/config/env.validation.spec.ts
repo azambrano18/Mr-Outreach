@@ -90,6 +90,81 @@ describe('envValidationSchema', () => {
     expect(error).toBeUndefined();
   });
 
+  it('accepts the default simulated SEQUENCE_MOTOR_MODE without a SEQUENCE_MOTOR_API_KEY', () => {
+    const { error, value } = envValidationSchema.validate(BASE_MEMORY_ENV);
+    expect(error).toBeUndefined();
+    expect(value.SEQUENCE_MOTOR_MODE).toBe('simulated');
+  });
+
+  it('rejects SEQUENCE_MOTOR_MODE=http missing both SEQUENCE_MOTOR_BASE_URL and SEQUENCE_MOTOR_API_KEY', () => {
+    const { error } = envValidationSchema.validate(
+      { ...BASE_MEMORY_ENV, SEQUENCE_MOTOR_MODE: 'http' },
+      { abortEarly: false },
+    );
+    expect(error?.message).toMatch(/SEQUENCE_MOTOR_BASE_URL/);
+    expect(error?.message).toMatch(/SEQUENCE_MOTOR_API_KEY/);
+  });
+
+  it('rejects SEQUENCE_MOTOR_MODE=http with a base URL but no API key', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      SEQUENCE_MOTOR_MODE: 'http',
+      SEQUENCE_MOTOR_BASE_URL: 'https://sequence-motor.internal',
+    });
+    expect(error?.message).toMatch(/SEQUENCE_MOTOR_API_KEY/);
+  });
+
+  it('accepts http sequence motor mode once base URL and API key are both set', () => {
+    const { error, value } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      SEQUENCE_MOTOR_MODE: 'http',
+      SEQUENCE_MOTOR_BASE_URL: 'https://sequence-motor.internal',
+      SEQUENCE_MOTOR_API_KEY: 'a-real-key',
+    });
+    expect(error).toBeUndefined();
+    expect(value.SEQUENCE_MOTOR_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it('rejects a non-numeric SEQUENCE_MOTOR_TIMEOUT_MS', () => {
+    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, SEQUENCE_MOTOR_TIMEOUT_MS: 'soon' });
+    expect(error?.message).toMatch(/SEQUENCE_MOTOR_TIMEOUT_MS/);
+  });
+
+  it('Fase Firma — accepts the default simulated SIGNATURE_ASSET_STORAGE_MODE without any R2_* variable', () => {
+    const { error, value } = envValidationSchema.validate(BASE_MEMORY_ENV);
+    expect(error).toBeUndefined();
+    expect(value.SIGNATURE_ASSET_STORAGE_MODE).toBe('simulated');
+    expect(value.R2_PUBLIC_BASE_URL).toBe('https://assets.mejoreferido.com');
+  });
+
+  it('Fase Firma — rejects SIGNATURE_ASSET_STORAGE_MODE=r2 missing every R2_* variable', () => {
+    const { error } = envValidationSchema.validate(
+      { ...BASE_MEMORY_ENV, SIGNATURE_ASSET_STORAGE_MODE: 'r2' },
+      { abortEarly: false },
+    );
+    expect(error?.message).toMatch(/R2_ACCOUNT_ID/);
+    expect(error?.message).toMatch(/R2_ACCESS_KEY_ID/);
+    expect(error?.message).toMatch(/R2_SECRET_ACCESS_KEY/);
+    expect(error?.message).toMatch(/R2_BUCKET_NAME/);
+  });
+
+  it('Fase Firma — accepts SIGNATURE_ASSET_STORAGE_MODE=r2 once every R2_* variable is set', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      SIGNATURE_ASSET_STORAGE_MODE: 'r2',
+      R2_ACCOUNT_ID: 'acct_123',
+      R2_ACCESS_KEY_ID: 'key_123',
+      R2_SECRET_ACCESS_KEY: 'secret_123',
+      R2_BUCKET_NAME: 'mr-outreach-assets',
+    });
+    expect(error).toBeUndefined();
+  });
+
+  it('Fase Firma — rejects an unknown SIGNATURE_ASSET_STORAGE_MODE value', () => {
+    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, SIGNATURE_ASSET_STORAGE_MODE: 'gcs' });
+    expect(error?.message).toMatch(/SIGNATURE_ASSET_STORAGE_MODE/);
+  });
+
   it('rejects a CREDENTIALS_ENCRYPTION_KEY that does not decode to exactly 32 bytes', () => {
     const { error } = envValidationSchema.validate({
       ...BASE_MEMORY_ENV,

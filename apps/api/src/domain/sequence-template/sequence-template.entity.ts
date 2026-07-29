@@ -21,6 +21,16 @@ export interface SequenceTemplate {
   subjectTemplate: string;
   /** Vestigial — header moved back to per-envío (SequenceTemplateStep.headerText). Never read/written. */
   headerText: string | null;
+  /**
+   * Fase Firma — the Plantilla's own editable signature draft, authored
+   * inside this template's editor (never the mailbox's). Sanitized HTML,
+   * frozen into `SequenceTemplateVersion.signatureHtml` at publish time;
+   * editing it afterward never touches an already-published version. See
+   * SequenceTemplatesService.create() for the one-time migration snapshot
+   * taken from the mailbox's legacy Signature, for templates that predate
+   * this field.
+   */
+  signatureHtml: string;
   status: SequenceTemplateStatus;
   /** Bumped every time a publish-relevant field changes on the template or its steps since the last publish attempt. */
   currentDraftVersion: number;
@@ -39,12 +49,14 @@ export interface CreateSequenceTemplateInput {
   name: string;
   description?: string | null;
   timezone: string;
+  signatureHtml: string;
 }
 
 export interface UpdateSequenceTemplateInput {
   name?: string;
   description?: string | null;
   subjectTemplate?: string;
+  signatureHtml?: string;
   status?: SequenceTemplateStatus;
   currentDraftVersion?: number;
   archivedAt?: Date | null;

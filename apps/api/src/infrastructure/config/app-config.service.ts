@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 export type PersistenceDriver = 'memory' | 'postgres';
 export type EngineDriver = 'mock' | 'http';
 export type StorageDriver = 'local' | 's3';
+/** Fase Firma — gates `SignatureAssetStoragePort` (signature-embedded images), independent of `StorageDriver` above (the older, generic rich-text image port). */
+export type SignatureAssetStorageMode = 'simulated' | 'r2';
 /**
  * Independent of `PersistenceDriver`: the app's own database can be
  * memory/postgres while the CRM read is separately mock/postgres, since
@@ -113,6 +115,45 @@ export class AppConfigService {
   /** Base URL this process is reachable at — used to build public image URLs. */
   get apiPublicUrl(): string {
     return this.config.get<string>('API_PUBLIC_URL', `http://localhost:${this.port}`);
+  }
+
+  get signatureAssetStorageMode(): SignatureAssetStorageMode {
+    return this.config.get<SignatureAssetStorageMode>('SIGNATURE_ASSET_STORAGE_MODE', 'simulated');
+  }
+
+  get r2AccountId(): string | undefined {
+    return this.config.get<string>('R2_ACCOUNT_ID') || undefined;
+  }
+
+  get r2AccessKeyId(): string | undefined {
+    return this.config.get<string>('R2_ACCESS_KEY_ID') || undefined;
+  }
+
+  get r2SecretAccessKey(): string | undefined {
+    return this.config.get<string>('R2_SECRET_ACCESS_KEY') || undefined;
+  }
+
+  get r2BucketName(): string | undefined {
+    return this.config.get<string>('R2_BUCKET_NAME') || undefined;
+  }
+
+  get r2PublicBaseUrl(): string {
+    return this.config.get<string>('R2_PUBLIC_BASE_URL', 'https://assets.mejoreferido.com');
+  }
+
+  get r2SignaturePrefix(): string {
+    return this.config.get<string>('R2_SIGNATURE_PREFIX', 'signatures');
+  }
+
+  /** The one host a signature's `<img src>` is ever allowed to point at — see HtmlSanitizerService.sanitizeSignatureHtml. */
+  get signatureAssetAllowedImageHost(): string {
+    const base = this.signatureAssetStorageMode === 'r2' ? this.r2PublicBaseUrl : this.apiPublicUrl;
+    return new URL(base).hostname;
+  }
+
+  /** True only in `simulated` mode — the dev/test adapter serves over plain HTTP on localhost; the real R2 host must always be HTTPS. */
+  get signatureAssetAllowInsecureImageHost(): boolean {
+    return this.signatureAssetStorageMode === 'simulated';
   }
 
   get isIntegratedMode(): boolean {

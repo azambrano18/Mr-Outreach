@@ -18,6 +18,7 @@ describe('InMemorySequenceTemplateRepository', () => {
       name: 'Prospección Gerentes de RRHH',
       description: 'Descripción original',
       timezone: 'America/Santiago',
+      signatureHtml: '',
     });
 
     // Mirrors a subject-only PATCH: `name`/`description` are present as keys but `undefined`.
@@ -39,6 +40,7 @@ describe('InMemorySequenceTemplateRepository', () => {
       mailboxId: 'mailbox-1',
       name: 'Prospección Gerentes de RRHH',
       timezone: 'America/Santiago',
+      signatureHtml: '',
     });
     await repo.update(template.id, { status: 'ARCHIVED', archivedAt: new Date() });
 

@@ -1,27 +1,49 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { AssigneeSummary, AuditLogEntry, MailboxSummary, UserSummary } from '@outreach/shared-types';
+import { SecondaryExecutivesSelect } from './secondary-executives-select';
+
+const LINK_SOURCE_LABEL: Record<MailboxSummary['linkSource'], string> = {
+  SERVER_TOKEN: 'Vinculada por token',
+  LEGACY_LOCAL: 'Cuenta heredada',
+};
+
+const ASSIGNMENT_ROLE_LABEL: Record<AssigneeSummary['role'], string> = {
+  PRIMARY: 'Ejecutivo principal',
+  SECONDARY: 'Ejecutivo secundario',
+};
 
 /**
  * Fase 2.1, §17 — the screen for a SERVER_TOKEN mailbox. Deliberately never
  * shows IMAP/SMTP host/port/user/password, "Probar conexión", "Provision"/
- * "Advance", or a signature editor for the admin — all of that belongs
- * only to the legacy IMAP/SMTP screen (edit-mailbox-form.tsx), never here.
+ * "Advance", or a signature editor for the admin — the signature now lives
+ * inside each Plantilla's own editor instead (§10-11 of the account-
+ * restructuring follow-up).
+ *
+ * §6 — sections always render in this fixed order: A. Información de la
+ * cuenta, B. Asignaciones, C. Estado y sincronización, D. Conversaciones,
+ * E. Auditoría, F. Zona de desvinculación (always last).
  */
 export function ServerLinkedMailboxPanel({
   mailbox,
   executives,
+  currentUserId,
   canReassign,
   canUnlink,
   canViewAudit,
+  canViewConversations,
 }: {
   mailbox: MailboxSummary;
   executives: UserSummary[];
+  currentUserId: string;
   canReassign: boolean;
   canUnlink: boolean;
   canViewAudit: boolean;
+  /** Holds `mailboxes.read.assigned` — the same permission that gates the Conversaciones module itself; final visibility still requires an actual assignment on THIS mailbox (checked from `assignees` below). */
+  canViewConversations: boolean;
 }) {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
@@ -93,13 +115,8 @@ export function ServerLinkedMailboxPanel({
     };
   }, [mailbox.id]);
 
-  function toggleSecondary(executiveId: string): void {
-    setSelectedSecondaryIds((current) =>
-      current.includes(executiveId) ? current.filter((id) => id !== executiveId) : [...current, executiveId],
-    );
-  }
-
-  async function handleSaveSecondaries(): Promise<void> {
+  async function handleSaveSecondaries(nextSelection: string[]): Promise<void> {
+    setSelectedSecondaryIds(nextSelection);
     setSecondariesError(null);
     setSavingSecondaries(true);
     try {
@@ -109,7 +126,7 @@ export function ServerLinkedMailboxPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           primaryUserId: currentPrimaryId,
-          secondaryUserIds: selectedSecondaryIds,
+          secondaryUserIds: nextSelection,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -193,9 +210,12 @@ export function ServerLinkedMailboxPanel({
     }
   }
 
+  const myAssignment = assignees?.find((a) => a.id === currentUserId) ?? null;
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5 sm:grid-cols-2">
+      {/* A. Información de la cuenta — solo lectura. */}
+      <section className="grid grid-cols-1 gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5 sm:grid-cols-2">
         <div>
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Cliente</span>
           <p className="text-sm text-slate-800">{mailbox.clientName ?? '— Sin clasificar —'}</p>
@@ -213,106 +233,173 @@ export function ServerLinkedMailboxPanel({
           <p className="text-sm text-slate-800">{mailbox.fromName}</p>
         </div>
         <div>
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado del vínculo</span>
-          <p className="text-sm text-slate-800">{mailbox.linkStatus}</p>
-        </div>
-        <div>
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado técnico del servidor</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado técnico</span>
           <p className="text-sm text-slate-800">{mailbox.serverStatusSnapshot ?? 'UNKNOWN'}</p>
         </div>
         <div>
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Última verificación</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Puede enviar</span>
           <p className="text-sm text-slate-800">
-            {mailbox.serverStatusCheckedAt ? new Date(mailbox.serverStatusCheckedAt).toLocaleString('es-CL') : 'Nunca'}
+            {mailbox.serverCanSendSnapshot === null ? '—' : mailbox.serverCanSendSnapshot ? 'Sí' : 'No'}
           </p>
         </div>
         <div>
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Vinculada el</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Origen</span>
+          <p className="text-sm text-slate-800">{LINK_SOURCE_LABEL[mailbox.linkSource]}</p>
+        </div>
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Identificadores externos</span>
+          <p className="font-mono text-sm text-slate-800">{mailbox.serverMailboxId ?? '—'}</p>
+        </div>
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Fecha de vinculación</span>
           <p className="text-sm text-slate-800">
             {mailbox.linkedAt ? new Date(mailbox.linkedAt).toLocaleString('es-CL') : '—'}
           </p>
         </div>
-      </div>
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Última sincronización</span>
+          <p className="text-sm text-slate-800">
+            {mailbox.serverStatusCheckedAt ? new Date(mailbox.serverStatusCheckedAt).toLocaleString('es-CL') : 'Nunca'}
+          </p>
+        </div>
+      </section>
 
-      {refreshError && <p className="text-sm text-red-600">{refreshError}</p>}
-      <button
-        type="button"
-        onClick={handleRefresh}
-        disabled={refreshing}
-        className="self-start rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
-      >
-        {refreshing ? 'Actualizando…' : 'Refrescar estado'}
-      </button>
-
+      {/* B. Asignaciones. */}
       {canReassign && (
-        <fieldset className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
-          <legend className="px-1 text-sm font-medium text-slate-700">Reasignar ejecutivo principal</legend>
-          <select
-            value={primaryExecutiveId}
-            onChange={(event) => setPrimaryExecutiveId(event.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">Selecciona un ejecutivo</option>
-            {executives.map((executive) => (
-              <option key={executive.id} value={executive.id}>
-                {executive.name}
-              </option>
-            ))}
-          </select>
-          {reassignError && <p className="text-sm text-red-600">{reassignError}</p>}
-          <button
-            type="button"
-            onClick={handleReassign}
-            disabled={reassigning || !primaryExecutiveId}
-            className="self-start rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
-          >
-            {reassigning ? 'Reasignando…' : 'Reasignar'}
-          </button>
-        </fieldset>
-      )}
+        <section className="flex flex-col gap-4 rounded-md border border-slate-200 p-4">
+          <h2 className="text-sm font-medium text-slate-700">Asignaciones</h2>
 
-      {canReassign && (
-        <fieldset className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
-          <legend className="px-1 text-sm font-medium text-slate-700">Ejecutivos secundarios</legend>
-          {assigneesError && <p className="text-sm text-red-600">{assigneesError}</p>}
-          {assignees === null && !assigneesError ? (
-            <p className="text-sm text-slate-500">Cargando ejecutivos…</p>
-          ) : (
-            <div className="flex flex-col gap-1">
-              {executives
-                .filter((executive) => executive.id !== assignees?.find((a) => a.role === 'PRIMARY')?.id)
-                .map((executive) => (
-                  <label key={executive.id} className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={selectedSecondaryIds.includes(executive.id)}
-                      onChange={() => toggleSecondary(executive.id)}
-                    />
-                    {executive.name}
-                  </label>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="px-0 text-xs font-medium uppercase tracking-wide text-slate-500">Ejecutivo principal</legend>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={primaryExecutiveId}
+                onChange={(event) => setPrimaryExecutiveId(event.target.value)}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">Selecciona un ejecutivo</option>
+                {executives.map((executive) => (
+                  <option key={executive.id} value={executive.id}>
+                    {executive.name} · {executive.email}
+                  </option>
                 ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleReassign}
+                disabled={reassigning || !primaryExecutiveId}
+                className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+              >
+                {reassigning ? 'Reasignando…' : 'Reasignar'}
+              </button>
             </div>
-          )}
-          {secondariesError && <p className="text-sm text-red-600">{secondariesError}</p>}
-          <button
-            type="button"
-            onClick={handleSaveSecondaries}
-            disabled={savingSecondaries || assignees === null}
-            className="self-start rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
-          >
-            {savingSecondaries ? 'Guardando…' : 'Guardar secundarios'}
-          </button>
-        </fieldset>
+            {reassignError && <p className="text-sm text-red-600">{reassignError}</p>}
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="px-0 text-xs font-medium uppercase tracking-wide text-slate-500">Ejecutivos secundarios</legend>
+            {assigneesError && <p className="text-sm text-red-600">{assigneesError}</p>}
+            {assignees === null && !assigneesError ? (
+              <p className="text-sm text-slate-500">Cargando ejecutivos…</p>
+            ) : (
+              <SecondaryExecutivesSelect
+                candidates={executives.filter((executive) => executive.id !== assignees?.find((a) => a.role === 'PRIMARY')?.id)}
+                selectedIds={selectedSecondaryIds}
+                onChange={handleSaveSecondaries}
+                disabled={assignees === null || savingSecondaries}
+              />
+            )}
+            {savingSecondaries && <p className="text-xs text-slate-500">Guardando…</p>}
+            {secondariesError && <p className="text-sm text-red-600">{secondariesError}</p>}
+          </fieldset>
+        </section>
       )}
 
+      {/* C. Estado y sincronización. */}
+      <section className="flex flex-col gap-3 rounded-md border border-slate-200 p-4">
+        <h2 className="text-sm font-medium text-slate-700">Estado y sincronización</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado local</span>
+            <p className="text-sm text-slate-800">{mailbox.status === 'ACTIVE' ? 'Activa' : 'Inactiva'}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado del servidor</span>
+            <p className="text-sm text-slate-800">{mailbox.serverStatusSnapshot ?? 'UNKNOWN'}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Última verificación</span>
+            <p className="text-sm text-slate-800">
+              {mailbox.serverStatusCheckedAt ? new Date(mailbox.serverStatusCheckedAt).toLocaleString('es-CL') : 'Nunca'}
+            </p>
+          </div>
+        </div>
+        {refreshError && <p className="text-sm text-red-600">{refreshError}</p>}
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="self-start rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+        >
+          {refreshing ? 'Actualizando…' : 'Actualizar estado'}
+        </button>
+      </section>
+
+      {/* D. Conversaciones — visible únicamente con asignación activa propia (revalidado por el backend, nunca solo aquí). */}
+      {canViewConversations && (
+        <section className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
+          <h2 className="text-sm font-medium text-slate-700">Conversaciones</h2>
+          {myAssignment ? (
+            <>
+              <p className="text-sm text-slate-600">
+                Rol de asignación actual: <span className="font-medium">{ASSIGNMENT_ROLE_LABEL[myAssignment.role]}</span>
+              </p>
+              <Link
+                href={`/dashboard/conversations?mailboxId=${mailbox.id}`}
+                className="self-start rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
+              >
+                Ver conversaciones
+              </Link>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">
+              Debes estar asignado a esta cuenta para acceder a sus conversaciones.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* E. Auditoría. */}
+      {canViewAudit && (
+        <section className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
+          <h2 className="text-sm font-medium text-slate-700">Auditoría</h2>
+          {auditError && <p className="text-sm text-red-600">{auditError}</p>}
+          {auditEntries === null && !auditError ? (
+            <p className="text-sm text-slate-500">Cargando auditoría…</p>
+          ) : auditEntries && auditEntries.length === 0 ? (
+            <p className="text-sm text-slate-500">Sin eventos registrados todavía.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {auditEntries?.map((entry) => (
+                <li key={entry.id} className="text-sm text-slate-700">
+                  <span className="font-medium">{entry.action}</span>
+                  {' — '}
+                  {new Date(entry.createdAt).toLocaleString('es-CL')}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {/* F. Zona de desvinculación — siempre al final. */}
       {canUnlink && mailbox.linkStatus !== 'REVOKED' && (
         <fieldset className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-4">
           <legend className="px-1 text-sm font-medium text-red-800">Desvincular cuenta</legend>
           <p className="text-sm text-red-800">
-            Esta acción bloqueará el uso operativo de la cuenta dentro de Mr Outreach: dejará de aparecer
-            disponible para enviar o recibir. <strong>No se elimina físicamente en el servidor motor</strong> —
-            la cuenta sigue existiendo ahí y puede volver a vincularse más adelante con un nuevo token. Esta
-            acción queda registrada en auditoría.
+            Esta acción revocará el uso de la cuenta dentro de Mr Outreach. La cuenta no será
+            eliminada físicamente del servidor. Puede volver a vincularse más adelante con un nuevo
+            token. Esta acción queda registrada en auditoría.
           </p>
           {!confirmingUnlink ? (
             <button
@@ -355,28 +442,6 @@ export function ServerLinkedMailboxPanel({
             </>
           )}
         </fieldset>
-      )}
-
-      {canViewAudit && (
-        <section className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
-          <h2 className="text-sm font-medium text-slate-700">Auditoría</h2>
-          {auditError && <p className="text-sm text-red-600">{auditError}</p>}
-          {auditEntries === null && !auditError ? (
-            <p className="text-sm text-slate-500">Cargando auditoría…</p>
-          ) : auditEntries && auditEntries.length === 0 ? (
-            <p className="text-sm text-slate-500">Sin eventos registrados todavía.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {auditEntries?.map((entry) => (
-                <li key={entry.id} className="text-sm text-slate-700">
-                  <span className="font-medium">{entry.action}</span>
-                  {' — '}
-                  {new Date(entry.createdAt).toLocaleString('es-CL')}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       )}
     </div>
   );

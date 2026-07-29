@@ -22,6 +22,7 @@ import { SequencesModule } from './modules/sequences/sequences.module';
 import { SignaturesModule } from './modules/signatures/signatures.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { SignatureAssetsModule } from './modules/signature-assets/signature-assets.module';
 import { UsersModule } from './modules/users/users.module';
 import { VariablesModule } from './modules/variables/variables.module';
 
@@ -53,6 +54,7 @@ const NODE_ENV = process.env.NODE_ENV ?? 'development';
     VariablesModule,
     SignaturesModule,
     UploadsModule,
+    SignatureAssetsModule,
     SequencesModule,
     SequenceImportsModule,
     SequenceContactsModule,

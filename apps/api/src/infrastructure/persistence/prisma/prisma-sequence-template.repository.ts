@@ -21,6 +21,7 @@ function toDomain(row: PrismaSequenceTemplateRow): SequenceTemplate {
     description: row.description,
     subjectTemplate: row.subjectTemplate,
     headerText: row.headerText,
+    signatureHtml: row.signatureHtml,
     status: row.status as SequenceTemplateStatus,
     currentDraftVersion: row.currentDraftVersion,
     timezone: row.timezone,
@@ -60,6 +61,7 @@ export class PrismaSequenceTemplateRepository implements SequenceTemplateReposit
         name: input.name,
         description: input.description ?? null,
         timezone: input.timezone,
+        signatureHtml: input.signatureHtml,
       },
     });
     return toDomain(row);
@@ -73,6 +75,7 @@ export class PrismaSequenceTemplateRepository implements SequenceTemplateReposit
         name: input.name,
         description: input.description,
         subjectTemplate: input.subjectTemplate,
+        signatureHtml: input.signatureHtml,
         status: input.status,
         currentDraftVersion: input.currentDraftVersion,
         archivedAt: input.archivedAt,

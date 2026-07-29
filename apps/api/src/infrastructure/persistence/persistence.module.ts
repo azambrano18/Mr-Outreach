@@ -35,6 +35,7 @@ import {
   SEQUENCE_TEMPLATE_REPOSITORY,
   SEQUENCE_TEMPLATE_STEP_REPOSITORY,
   SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
+  SIGNATURE_ASSET_REPOSITORY,
   SIGNATURE_REPOSITORY,
   SIGNATURE_VERSION_REPOSITORY,
   TEMPLATE_REPOSITORY,
@@ -79,6 +80,7 @@ import { InMemorySequenceTemplateVersionRepository } from './memory/in-memory-se
 import { InMemorySequenceExecutionRepository } from './memory/in-memory-sequence-execution.repository';
 import { InMemoryProspectImportRepository } from './memory/in-memory-prospect-import.repository';
 import { InMemoryProspectImportRowRepository } from './memory/in-memory-prospect-import-row.repository';
+import { InMemorySignatureAssetRepository } from './memory/in-memory-signature-asset.repository';
 import { InMemoryUserRepository } from './memory/in-memory-user.repository';
 import { InMemoryUserRoleRepository } from './memory/in-memory-user-role.repository';
 import { InMemoryVariableRepository } from './memory/in-memory-variable.repository';
@@ -116,6 +118,7 @@ import { PrismaSequenceTemplateVersionRepository } from './prisma/prisma-sequenc
 import { PrismaSequenceExecutionRepository } from './prisma/prisma-sequence-execution.repository';
 import { PrismaProspectImportRepository } from './prisma/prisma-prospect-import.repository';
 import { PrismaProspectImportRowRepository } from './prisma/prisma-prospect-import-row.repository';
+import { PrismaSignatureAssetRepository } from './prisma/prisma-signature-asset.repository';
 import { MockCrmClientRepository } from './crm/mock-crm-client.repository';
 import { PostgresCrmClientRepository } from './crm/postgres-crm-client.repository';
 import { assertCrmDriverAllowedInTests } from './crm/crm-test-guard';
@@ -438,6 +441,14 @@ const repositoryProviders: Provider[] = [
     inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   {
+    provide: SIGNATURE_ASSET_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaSignatureAssetRepository(prisma!)
+        : new InMemorySignatureAssetRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
     // Independent of PERSISTENCE_DRIVER — gated by its own CRM_DRIVER, since
     // this is a wholly separate external database, never the app's own.
     provide: CRM_CLIENT_REPOSITORY,
@@ -501,6 +512,7 @@ const repositoryProviders: Provider[] = [
     SEQUENCE_EXECUTION_REPOSITORY,
     PROSPECT_IMPORT_REPOSITORY,
     PROSPECT_IMPORT_ROW_REPOSITORY,
+    SIGNATURE_ASSET_REPOSITORY,
     CRM_CLIENT_REPOSITORY,
     PersistenceHealthIndicator,
   ],

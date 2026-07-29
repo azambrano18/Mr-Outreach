@@ -31,12 +31,6 @@ function toDomain(row: PrismaVersionRow): SequenceTemplateVersion {
     lastPublishCommandId: row.lastPublishCommandId,
     lastError: row.lastError,
     previousVersionNumber: row.previousVersionNumber,
-    effectiveScope: row.effectiveScope as 'FUTURE_UNSENT_JOBS' | null,
-    affectedExecutions: row.affectedExecutions,
-    affectedPendingJobs: row.affectedPendingJobs,
-    unchangedSentJobs: row.unchangedSentJobs,
-    processingJobsNotChanged: row.processingJobsNotChanged,
-    appliedAt: row.appliedAt,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
   };
@@ -62,6 +56,14 @@ export class PrismaSequenceTemplateVersionRepository implements SequenceTemplate
   async findLatestByTemplate(templateId: string): Promise<SequenceTemplateVersion | null> {
     const row = await this.prisma.sequenceTemplateVersion.findFirst({
       where: { templateId },
+      orderBy: { versionNumber: 'desc' },
+    });
+    return row ? toDomain(row) : null;
+  }
+
+  async findLatestAcceptedByTemplate(templateId: string): Promise<SequenceTemplateVersion | null> {
+    const row = await this.prisma.sequenceTemplateVersion.findFirst({
+      where: { templateId, status: 'ACCEPTED' },
       orderBy: { versionNumber: 'desc' },
     });
     return row ? toDomain(row) : null;
@@ -102,12 +104,6 @@ export class PrismaSequenceTemplateVersionRepository implements SequenceTemplate
         templateTokenCiphertext: input.templateTokenCiphertext,
         acceptedAt: input.acceptedAt,
         lastError: input.lastError,
-        effectiveScope: input.effectiveScope,
-        affectedExecutions: input.affectedExecutions,
-        affectedPendingJobs: input.affectedPendingJobs,
-        unchangedSentJobs: input.unchangedSentJobs,
-        processingJobsNotChanged: input.processingJobsNotChanged,
-        appliedAt: input.appliedAt,
       },
     });
     return toDomain(row);
