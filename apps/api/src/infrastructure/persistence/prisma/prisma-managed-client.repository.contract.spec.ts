@@ -20,16 +20,16 @@ describeIfDatabaseAvailable('PrismaManagedClientRepository (contract)', () => {
   afterAll(async () => {
     // Scoped delete: fx_client_1/fx_client_2/fx_client_org2 are shared
     // fixtures other Fase 1 contract specs depend on (Company/Contact/
-    // SequenceImport family) — only this file's own crmClientId range
-    // (501/502) is ours to clean up.
-    await prisma.managedClient.deleteMany({ where: { crmClientId: { in: [501, 502] } } });
+    // SequenceImport family) — only this file's own serverClientId range
+    // (srv_501/srv_502) is ours to clean up.
+    await prisma.managedClient.deleteMany({ where: { serverClientId: { in: ['srv_501', 'srv_502'] } } });
     await prisma.$disconnect();
   });
 
   runManagedClientRepositoryContractTests(
     () => repo,
     async () => {
-      await prisma.managedClient.deleteMany({ where: { crmClientId: { in: [501, 502] } } });
+      await prisma.managedClient.deleteMany({ where: { serverClientId: { in: ['srv_501', 'srv_502'] } } });
       await seedFixtureOrganizations(prisma);
       repo = new PrismaManagedClientRepository(prisma);
     },

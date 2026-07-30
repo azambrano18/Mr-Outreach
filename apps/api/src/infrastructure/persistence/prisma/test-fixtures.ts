@@ -77,9 +77,9 @@ export async function seedFixtureOrganizations(prisma: PrismaService): Promise<v
 export async function seedManagedClients(prisma: PrismaService): Promise<void> {
   await prisma.managedClient.createMany({
     data: [
-      { id: 'fx_client_1', organizationId: 'fx_org_1', crmClientId: 101, name: 'Fixture Client 1', createdBy: 'seed', updatedBy: 'seed' },
-      { id: 'fx_client_2', organizationId: 'fx_org_1', crmClientId: 102, name: 'Fixture Client 2', createdBy: 'seed', updatedBy: 'seed' },
-      { id: 'fx_client_org2', organizationId: 'fx_org_2', crmClientId: 103, name: 'Fixture Client Org2', createdBy: 'seed', updatedBy: 'seed' },
+      { id: 'fx_client_1', organizationId: 'fx_org_1', serverClientId: 'srv_fx_101', name: 'Fixture Client 1', createdBy: 'seed', updatedBy: 'seed' },
+      { id: 'fx_client_2', organizationId: 'fx_org_1', serverClientId: 'srv_fx_102', name: 'Fixture Client 2', createdBy: 'seed', updatedBy: 'seed' },
+      { id: 'fx_client_org2', organizationId: 'fx_org_2', serverClientId: 'srv_fx_103', name: 'Fixture Client Org2', createdBy: 'seed', updatedBy: 'seed' },
     ],
     skipDuplicates: true,
   });

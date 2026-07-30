@@ -616,51 +616,44 @@ enum ManagedClientStatus {
 
 enum ManagedClientSource {
   SERVER
-  LEGACY_CRM
   MANUAL
 }
 
-// The customer whose outbound campaigns are operated from Mr Outreach —
-// linked to the external Neon CRM's master row via crmClientId (see
-// domain/crm-client/). Mr Outreach never writes back to maestro_clientes;
-// this table only holds Mr Outreach's own operational configuration.
-//
-// Fase 2.1 — crmClientId is nullable: a client whose source is SERVER
-// (created from a Railway mailbox-link redemption with no CRM linkage
-// reported) never gets one fabricated. serverClientId is the external
-// identity key for that case, mirroring crmClientId's role for LEGACY_CRM
-// rows. Every pre-existing row keeps source = LEGACY_CRM (the migration's
-// column default) and its non-null crmClientId untouched.
+// The customer whose outbound campaigns are operated from Mr Outreach.
+// Identity is resolved from the payload the external server hands over when
+// a mailbox-link token is redeemed (source = SERVER) — Mr Outreach no longer
+// reads any external CRM/portal database. This table only holds Mr
+// Outreach's own operational configuration plus a local snapshot of the
+// externally-reported identity fields.
 model ManagedClient {
-  id                 String              @id @default(uuid())
-  organizationId     String
-  crmClientId        Int?
-  /// Fase 2.1 — which system is authoritative for this client's identity/name. SERVER: from a Railway redemption, may have no CRM linkage. LEGACY_CRM: pre-Fase-2.1 flow, always has crmClientId. MANUAL: reserved, not created by any flow yet.
-  source             ManagedClientSource @default(LEGACY_CRM)
-  /// Fase 2.1 — external Railway client id (serverClientId), set only when source = SERVER. Unique so repeated redemptions for the same Railway client upsert instead of duplicating.
-  serverClientId     String?             @unique
-  /// Fase 1.5 — snapshot local del nombre corporativo (maestro_clientes.empresa). Ya no editable a mano; lo escribe el upsert.
-  name               String
-  legalName          String?
-  internalCode       String?
-  /// Fase 1.5 — snapshot local del rubro corporativo (maestro_clientes.rubro). Ya no editable a mano; lo escribe el upsert.
-  industry           String?
-  status             ManagedClientStatus @default(ACTIVE)
-  logoUrl            String?
-  startDate          DateTime?
-  supervisorUserId   String?
-  notes              String?
-  /// Fase 1.5 — último RUT conocido del CRM (maestro_clientes.rut). Nuevo, aditivo.
-  crmRutSnapshot     String?
-  /// Fase 1.5 — último status normalizado conocido del CRM (TRIM+UPPER de maestro_clientes.status). Distinto de `status` (operativo de Mr Outreach).
-  crmStatusSnapshot  String?
-  /// Fase 1.5 — fecha/hora de la última verificación exitosa contra el CRM. Nunca se usa para autorizar operaciones nuevas cuando el CRM no responde.
-  crmStatusCheckedAt DateTime?
-  createdBy          String
-  updatedBy          String
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  deletedAt          DateTime?
+  id                     String              @id @default(uuid())
+  organizationId         String
+  /// Which system is authoritative for this client's identity/name. SERVER: from a mailbox-link token redemption. MANUAL: reserved, not created by any flow yet.
+  source                 ManagedClientSource @default(SERVER)
+  /// External server client id, set when source = SERVER. Unique so repeated redemptions for the same external client upsert instead of duplicating.
+  serverClientId         String?             @unique
+  /// Snapshot local del nombre corporativo reportado por el servidor externo. Ya no editable a mano; lo escribe el upsert.
+  name                   String
+  legalName              String?
+  internalCode           String?
+  /// Snapshot local del rubro corporativo reportado por el servidor externo. Ya no editable a mano; lo escribe el upsert.
+  industry               String?
+  status                 ManagedClientStatus @default(ACTIVE)
+  logoUrl                String?
+  startDate              DateTime?
+  supervisorUserId       String?
+  notes                  String?
+  /// Último RUT conocido, reportado por el servidor externo al redimir el token.
+  clientRutSnapshot      String?
+  /// Último status normalizado conocido del servidor externo (TRIM+UPPER). Distinto de `status` (operativo de Mr Outreach).
+  externalStatusSnapshot String?
+  /// Fecha/hora de la última verificación exitosa contra el servidor externo. Nunca se usa para autorizar operaciones nuevas cuando el servidor no responde.
+  externalStatusCheckedAt DateTime?
+  createdBy              String
+  updatedBy              String
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  deletedAt              DateTime?
 
   organization               Organization                @relation(fields: [organizationId], references: [id])
   domains                    Domain[]
@@ -670,7 +663,6 @@ model ManagedClient {
   contacts                   Contact[]
   sequenceImports            SequenceImport[]
 
-  @@unique([organizationId, crmClientId])
   @@index([organizationId])
   @@map("managed_clients")
 }
