@@ -12,7 +12,7 @@ interface IntrospectResult {
   expiresAt: string;
   mailbox: { serverMailboxId: string; email: string; displayName: string; status: string; canSend: boolean };
   domain: { serverDomainId: string; name: string };
-  client: { serverClientId: string; crmClientId: number | null; name: string };
+  client: { serverClientId: string; name: string };
 }
 
 const STATUS_MESSAGES: Record<TokenStatus, string> = {

@@ -14,8 +14,10 @@ export default async function SequencesAliasPage() {
     redirect('/login');
   }
 
+  // /dashboard/sequences/all was retired along with the CRM-backed client
+  // overview it depended on — its modern equivalent is "Monitor de gestiones".
   if (currentUser.permissions.includes('sequences.read_all')) {
-    redirect('/dashboard/sequences/all');
+    redirect('/dashboard/admin/sequence-executions');
   }
   // Etapa "cuenta del ejecutivo" — el módulo "Secuencias" quedó retirado de
   // la experiencia del ejecutivo; su equivalente seguro es "Plantillas".
