@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox } from './fixtures';
 
 /**
  * Spec §7 — the admin's "Todas las conversaciones" tree
@@ -12,6 +12,7 @@ import { createReadyExecutive } from './fixtures';
 describe('Admin conversations tree (e2e) — memory + mock', () => {
   let app: INestApplication;
   let adminToken: string;
+  let adminUserId: string;
   let executiveRoleId: string;
   const stamp = Date.now();
 
@@ -25,6 +26,8 @@ describe('Admin conversations tree (e2e) — memory + mock', () => {
     adminToken = await loginAs(process.env.DEV_ADMIN_EMAIL as string, process.env.DEV_ADMIN_PASSWORD as string);
     const roles = await request(app.getHttpServer()).get('/roles').set('Authorization', `Bearer ${adminToken}`);
     executiveRoleId = roles.body.find((role: { name: string }) => role.name === 'EXECUTIVE').id;
+    const me = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${adminToken}`);
+    adminUserId = me.body.id;
   });
 
   afterAll(async () => {
@@ -32,11 +35,7 @@ describe('Admin conversations tree (e2e) — memory + mock', () => {
   });
 
   it("returns the client's domains/mailboxes regardless of executive assignment", async () => {
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2010 });
-    const clientId = client.body.id;
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
 
     const domain = await request(app.getHttpServer())
       .post(`/clients/${clientId}/domains`)
@@ -92,13 +91,10 @@ describe('Admin conversations tree (e2e) — memory + mock', () => {
       email: `admin-conversations-perm.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2011 });
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
 
     const response = await request(app.getHttpServer())
-      .get(`/clients/${client.body.id}/conversations/tree`)
+      .get(`/clients/${clientId}/conversations/tree`)
       .set('Authorization', `Bearer ${executive.token}`);
 
     expect(response.status).toBe(403);

@@ -21,7 +21,6 @@ export interface IssueLinkTokenInput {
   displayName: string;
   domainName: string;
   clientName: string;
-  crmClientId?: number | null;
   mailboxStatus?: MailboxTechnicalStatus;
   canSend?: boolean;
   /** Defaults to a normal, valid, freshly-issued token. */
@@ -98,7 +97,6 @@ export class SimulatedMailboxMotorAdapter implements MailboxMotorPort {
     const domain: MailboxMotorDomainInfo = { serverDomainId: `dom_${randomUUID()}`, name: input.domainName };
     const client: MailboxMotorClientInfo = {
       serverClientId: `client_${randomUUID()}`,
-      crmClientId: input.crmClientId ?? null,
       name: input.clientName,
     };
 

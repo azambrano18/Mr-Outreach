@@ -1,7 +1,7 @@
-import { Body, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AdminClientsService } from '../../application/admin-clients/admin-clients.service';
-import { AdminClientOverview, AdminClientsListResult } from '../../application/admin-clients/admin-clients.types';
+import { AdminClientsListResult } from '../../application/admin-clients/admin-clients.types';
 import { AuthenticatedUser } from '../../application/auth/auth.types';
 import {
   ClientAssigneeSummary,
@@ -15,7 +15,6 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { ActivateClientDto } from './dto/activate-client.dto';
 import { SetClientAssigneesDto } from './dto/set-client-assignees.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
@@ -37,32 +36,14 @@ export class ClientsController {
   }
 
   // Must be declared before ':id' below, or Nest/Express would try to
-  // match "crm-overview" as an :id param instead.
-  @Get('crm-overview')
+  // match "overview" as an :id param instead.
+  @Get('overview')
   @RequirePermissions('clients.read.all')
-  crmOverview(
+  overview(
     @CurrentUser() user: AuthenticatedUser,
     @Query('search') search?: string,
   ): Promise<AdminClientsListResult> {
     return this.adminClientsService.list(user.organizationId, search);
-  }
-
-  @Get('crm-overview/:crmClientId')
-  @RequirePermissions('clients.read.all')
-  crmOverviewDetail(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('crmClientId', ParseIntPipe) crmClientId: number,
-  ): Promise<AdminClientOverview> {
-    return this.adminClientsService.getByCrmClientId(user.organizationId, crmClientId);
-  }
-
-  @Post()
-  @RequirePermissions('clients.create')
-  create(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ActivateClientDto,
-  ): Promise<ManagedClientSummary> {
-    return this.clientsService.create(user.organizationId, dto, user.id);
   }
 
   @Get(':id')

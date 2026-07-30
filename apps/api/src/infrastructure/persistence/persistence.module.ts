@@ -10,7 +10,6 @@ import {
   CONVERSATION_NOTE_REPOSITORY,
   CONVERSATION_REPOSITORY,
   CONVERSATION_TAG_REPOSITORY,
-  CRM_CLIENT_REPOSITORY,
   DOMAIN_REPOSITORY,
   INTEGRATION_COMMAND_REPOSITORY,
   INTEGRATION_EVENT_REPOSITORY,
@@ -119,9 +118,6 @@ import { PrismaSequenceExecutionRepository } from './prisma/prisma-sequence-exec
 import { PrismaProspectImportRepository } from './prisma/prisma-prospect-import.repository';
 import { PrismaProspectImportRowRepository } from './prisma/prisma-prospect-import-row.repository';
 import { PrismaSignatureAssetRepository } from './prisma/prisma-signature-asset.repository';
-import { MockCrmClientRepository } from './crm/mock-crm-client.repository';
-import { PostgresCrmClientRepository } from './crm/postgres-crm-client.repository';
-import { assertCrmDriverAllowedInTests } from './crm/crm-test-guard';
 import { PrismaTransactionManager } from './prisma/prisma-transaction-manager';
 import { InMemoryTransactionManager } from './memory/in-memory-transaction-manager';
 
@@ -448,19 +444,6 @@ const repositoryProviders: Provider[] = [
         : new InMemorySignatureAssetRepository(store),
     inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
-  {
-    // Independent of PERSISTENCE_DRIVER — gated by its own CRM_DRIVER, since
-    // this is a wholly separate external database, never the app's own.
-    provide: CRM_CLIENT_REPOSITORY,
-    useFactory: (config: AppConfigService) => {
-      if (config.crmDriver === 'postgres') {
-        assertCrmDriverAllowedInTests(config.crmDriver);
-        return new PostgresCrmClientRepository(config);
-      }
-      return new MockCrmClientRepository();
-    },
-    inject: [AppConfigService],
-  },
 ];
 
 @Module({
@@ -513,7 +496,6 @@ const repositoryProviders: Provider[] = [
     PROSPECT_IMPORT_REPOSITORY,
     PROSPECT_IMPORT_ROW_REPOSITORY,
     SIGNATURE_ASSET_REPOSITORY,
-    CRM_CLIENT_REPOSITORY,
     PersistenceHealthIndicator,
   ],
 })

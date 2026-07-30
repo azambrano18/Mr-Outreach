@@ -5,9 +5,9 @@ import { ManagedClientStatus } from '../../../domain/client/managed-client.entit
 const STATUSES: ManagedClientStatus[] = ['ACTIVE', 'INACTIVE', 'SUSPENDED', 'ARCHIVED'];
 
 /**
- * Fase 1.5 — `name`/`industry` removed: they are CRM snapshots now, only
- * ever written by ClientsService.upsertFromVerifiedCrmClient /
- * assertClientCrmEligible, never by an administrator directly.
+ * `name`/`industry` are not here: they are snapshots reported by the
+ * external server on token redemption, only ever written by
+ * ClientsService.upsertFromServerPayload, never by an administrator directly.
  */
 export class UpdateClientDto {
   @ApiPropertyOptional()

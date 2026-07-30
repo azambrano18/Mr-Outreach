@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox, ReadyExecutive } from './fixtures';
 
 /**
  * Spec §3 — the admin can create a sequence and assign it to any ACTIVE
@@ -16,6 +16,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
   let app: INestApplication;
   let adminToken: string;
   let executiveRoleId: string;
+  let seedExecutive: ReadyExecutive;
   const stamp = Date.now();
 
   async function loginAs(email: string, password: string): Promise<string> {
@@ -23,14 +24,13 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
     return response.body.accessToken as string;
   }
 
-  // Fase 1.5 — `name` is no longer sent (always CRM-derived); the param
-  // stays for call-site readability (e.g. createClient(2020, 'Vertex')).
-  async function createClient(crmClientId: number, _name: string): Promise<string> {
-    const response = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId });
-    return response.body.id;
+  // A ManagedClient only exists via mailbox-link token redemption now — this
+  // wraps that flow with a throwaway `seedExecutive` as primaryExecutiveId
+  // (never the test's own executive) so it never pollutes the specific
+  // client/mailbox assignments each test actually exercises.
+  async function createClient(name: string): Promise<string> {
+    const { clientId } = await linkClientMailbox(app, adminToken, seedExecutive.id, { clientName: name });
+    return clientId;
   }
 
   async function assignExecutiveToClient(clientId: string, executiveId: string): Promise<void> {
@@ -109,6 +109,12 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
 
     const roles = await request(app.getHttpServer()).get('/roles').set('Authorization', `Bearer ${adminToken}`);
     executiveRoleId = roles.body.find((role: { name: string }) => role.name === 'EXECUTIVE').id;
+
+    seedExecutive = await createReadyExecutive(app, adminToken, {
+      name: 'Ejecutiva Semilla Fixture',
+      email: `admin-seq-seed.${stamp}@mejoreferido.cl`,
+      roleId: executiveRoleId,
+    });
   });
 
   afterAll(async () => {
@@ -121,7 +127,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-a.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2040, 'Cliente Admin Wizard A E2E');
+    const clientId = await createClient('Cliente Admin Wizard A E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -153,7 +159,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-b.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2041, 'Cliente Admin Wizard B E2E');
+    const clientId = await createClient('Cliente Admin Wizard B E2E');
     // Deliberately never assigned to the client.
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -175,7 +181,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-c.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2042, 'Cliente Admin Wizard C E2E');
+    const clientId = await createClient('Cliente Admin Wizard C E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -208,7 +214,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-d.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2043, 'Cliente Admin Wizard D E2E');
+    const clientId = await createClient('Cliente Admin Wizard D E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -234,7 +240,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-f.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2048, 'Cliente Admin Wizard F E2E');
+    const clientId = await createClient('Cliente Admin Wizard F E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -261,7 +267,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-g.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2049, 'Cliente Admin Wizard G E2E');
+    const clientId = await createClient('Cliente Admin Wizard G E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -288,7 +294,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-h.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2050, 'Cliente Admin Wizard H E2E');
+    const clientId = await createClient('Cliente Admin Wizard H E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId } = await createMailboxForClient(
       clientId,
@@ -316,7 +322,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-i.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2039, 'Cliente Admin Wizard I E2E');
+    const clientId = await createClient('Cliente Admin Wizard I E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const domainName = `admin-wizard-i-${stamp}.test`;
     const domain = await request(app.getHttpServer())
@@ -373,7 +379,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
       email: `admin-seq-e.${stamp}@mejoreferido.cl`,
       roleId: executiveRoleId,
     });
-    const clientId = await createClient(2044, 'Cliente Admin Wizard E E2E');
+    const clientId = await createClient('Cliente Admin Wizard E E2E');
     await assignExecutiveToClient(clientId, executive.id);
     const { mailboxId, domainId } = await createMailboxForClient(
       clientId,
@@ -402,7 +408,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
         email: `admin-reassign-b.${stamp}@mejoreferido.cl`,
         roleId: executiveRoleId,
       });
-      const clientId = await createClient(2045, 'Cliente Reasignacion E2E');
+      const clientId = await createClient('Cliente Reasignacion E2E');
       await request(app.getHttpServer())
         .put(`/clients/${clientId}/assignees`)
         .set('Authorization', `Bearer ${adminToken}`)
@@ -453,7 +459,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
         email: `admin-reassign-d.${stamp}@mejoreferido.cl`,
         roleId: executiveRoleId,
       });
-      const clientId = await createClient(2046, 'Cliente Reasignacion Rechazo E2E');
+      const clientId = await createClient('Cliente Reasignacion Rechazo E2E');
       await assignExecutiveToClient(clientId, originalExecutive.id);
       const { mailboxId, domainId } = await createMailboxForClient(
         clientId,
@@ -481,7 +487,7 @@ describe('Admin sequence creation + reassignment (e2e) — memory + mock', () =>
         email: `admin-reassign-e.${stamp}@mejoreferido.cl`,
         roleId: executiveRoleId,
       });
-      const clientId = await createClient(2047, 'Cliente Reasignacion Permiso E2E');
+      const clientId = await createClient('Cliente Reasignacion Permiso E2E');
       await assignExecutiveToClient(clientId, originalExecutive.id);
       const { mailboxId, domainId } = await createMailboxForClient(
         clientId,

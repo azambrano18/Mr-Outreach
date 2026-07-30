@@ -110,7 +110,8 @@ export const PERMISSION_CATALOG: Permission[] = [
   // ManagedClient (the customer whose campaigns are operated here) — see
   // domain/client/managed-client.entity.ts. Same admin/self-service read
   // split already established for mailboxes (.read.all / .read.assigned).
-  { key: 'clients.create', description: 'Register a managed client.' },
+  // A ManagedClient is only ever created via LinkMailboxUseCase (mailbox-link
+  // token redemption) — there is no manual "create client" permission.
   { key: 'clients.read.all', description: 'View every managed client in the organization.' },
   { key: 'clients.read.assigned', description: 'View only managed clients assigned to oneself.' },
   { key: 'clients.update', description: 'Edit a managed client.' },
@@ -125,11 +126,6 @@ export const PERMISSION_CATALOG: Permission[] = [
   { key: 'domains.read', description: 'View a domain and its accounts.' },
   { key: 'domains.update', description: 'Edit a domain.' },
   { key: 'domains.delete', description: 'Soft-delete (archive) a domain.' },
-
-  {
-    key: 'crm_clients.read',
-    description: 'View the CRM master client list (Neon maestro_clientes), read-only.',
-  },
 
   // Centro de conversaciones — replaces the old "bandeja" concept.
   { key: 'conversations.read.all', description: 'View every conversation in the organization.' },

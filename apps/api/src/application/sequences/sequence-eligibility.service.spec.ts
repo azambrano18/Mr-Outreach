@@ -5,7 +5,7 @@ import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { UserRepository } from '../../domain/user/user.repository';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { SequenceEligibilityService } from './sequence-eligibility.service';
 
 describe('SequenceEligibilityService', () => {
@@ -16,20 +16,20 @@ describe('SequenceEligibilityService', () => {
   let mailboxAssignments: jest.Mocked<MailboxAssignmentRepository>;
   let clientAssignments: jest.Mocked<ClientExecutiveAssignmentRepository>;
   let users: jest.Mocked<UserRepository>;
-  let crmEligibility: jest.Mocked<Pick<CrmClientEligibilityService, 'getVerifiedActiveClient'>>;
+  let eligibility: jest.Mocked<Pick<ClientEligibilityService, 'assertEligibleForPublish'>>;
   let service: SequenceEligibilityService;
 
   beforeEach(() => {
-    managedClients = { findById: jest.fn(), findAll: jest.fn(), create: jest.fn(), update: jest.fn(), findByCrmClientId: jest.fn(), findByServerClientId: jest.fn() };
+    managedClients = { findById: jest.fn(), findAll: jest.fn(), create: jest.fn(), update: jest.fn(), findByServerClientId: jest.fn() };
     domains = { findById: jest.fn(), findByClient: jest.fn(), findByName: jest.fn(), findAll: jest.fn(), create: jest.fn(), update: jest.fn() };
     mailboxes = { findById: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn(), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
     mailboxAssignments = { upsert: jest.fn(), remove: jest.fn(), findByMailbox: jest.fn().mockResolvedValue([]), findByUser: jest.fn(), findAllByOrganization: jest.fn().mockResolvedValue([]) };
     clientAssignments = { upsert: jest.fn(), remove: jest.fn(), findByClient: jest.fn(), findByUser: jest.fn().mockResolvedValue([{ clientId: 'client_1' }]) } as never;
     users = { findById: jest.fn(), findAll: jest.fn(), create: jest.fn(), update: jest.fn(), findByEmail: jest.fn() } as never;
-    crmEligibility = { getVerifiedActiveClient: jest.fn().mockResolvedValue({ crmClientId: 7, status: 'ACTIVO' }) };
+    eligibility = { assertEligibleForPublish: jest.fn().mockResolvedValue(undefined) };
 
     users.findById.mockResolvedValue({ id: 'exec_1', organizationId: orgId, status: 'ACTIVE' } as never);
-    managedClients.findById.mockResolvedValue({ id: 'client_1', organizationId: orgId, crmClientId: 7, status: 'ACTIVE' } as never);
+    managedClients.findById.mockResolvedValue({ id: 'client_1', organizationId: orgId, status: 'ACTIVE', externalStatusSnapshot: null } as never);
     domains.findById.mockResolvedValue({ id: 'domain_1', organizationId: orgId, clientId: 'client_1', status: 'ACTIVE' } as never);
     mailboxes.findById.mockResolvedValue({
       id: 'mailbox_1',
@@ -48,7 +48,7 @@ describe('SequenceEligibilityService', () => {
       mailboxAssignments,
       clientAssignments,
       users,
-      crmEligibility as unknown as CrmClientEligibilityService,
+      eligibility as unknown as ClientEligibilityService,
     );
   });
 
@@ -82,13 +82,13 @@ describe('SequenceEligibilityService', () => {
   });
 
   it('rejects an operationally inactive ManagedClient', async () => {
-    managedClients.findById.mockResolvedValue({ id: 'client_1', organizationId: orgId, crmClientId: 7, status: 'INACTIVE' } as never);
+    managedClients.findById.mockResolvedValue({ id: 'client_1', organizationId: orgId, status: 'INACTIVE', externalStatusSnapshot: null } as never);
     await expect(service.verify(input())).rejects.toThrow(BadRequestException);
   });
 
-  it('propagates the CRM eligibility check as-is (e.g. 409 inactive-in-CRM)', async () => {
+  it('propagates the eligibility check as-is (e.g. 409 inactive)', async () => {
     const { ConflictException: CE } = await import('@nestjs/common');
-    crmEligibility.getVerifiedActiveClient.mockRejectedValue(new CE('inactive'));
+    eligibility.assertEligibleForPublish.mockRejectedValue(new CE('inactive'));
     await expect(service.verify(input())).rejects.toThrow(ConflictException);
   });
 

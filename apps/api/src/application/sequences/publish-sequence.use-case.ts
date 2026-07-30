@@ -31,7 +31,7 @@ import {
 } from '../../infrastructure/persistence/tokens';
 import { isUniqueConstraintViolation } from '../../infrastructure/persistence/prisma/prisma-transaction-manager';
 import { PublishScenario, SimulatedMailEngineAdapter } from '../../infrastructure/mail-engine/simulated/simulated-mail-engine-adapter';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IDEMPOTENCY_SCOPE, IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { hashLogicalPayload } from '../idempotency/payload-canonicalizer';
 import { IntegrationService } from '../integration/integration.service';
@@ -112,7 +112,7 @@ export class PublishSequenceUseCase {
     @Inject(COMPANY_REPOSITORY) private readonly companies: CompanyRepository,
     @Inject(MANAGED_CLIENT_REPOSITORY) private readonly managedClients: ManagedClientRepository,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
-    private readonly crmEligibility: CrmClientEligibilityService,
+    private readonly eligibility: ClientEligibilityService,
     private readonly idempotency: IdempotentOperationService,
     private readonly integration: IntegrationService,
     private readonly simulatedAdapter: SimulatedMailEngineAdapter,
@@ -188,15 +188,13 @@ export class PublishSequenceUseCase {
       };
     }
 
-    // §"El CRM se consulta antes de abrir la transacción local" — never
-    // inside $transaction. Only gated when the sender mailbox is actually
-    // linked to a client — a mailbox "Pendiente de clasificación" (no
-    // clientId) publishes without a client-eligibility check, same as the
-    // old code's `if (sequence.clientId)` guard.
+    // Only gated when the sender mailbox is actually linked to a client — a
+    // mailbox "Pendiente de clasificación" (no clientId) publishes without a
+    // client-eligibility check, same as the old code's `if (sequence.clientId)` guard.
     if (mailbox.clientId) {
       const managedClient = await this.managedClients.findById(mailbox.clientId);
-      if (managedClient && managedClient.crmClientId !== null) {
-        await this.crmEligibility.getVerifiedActiveClient(managedClient.crmClientId);
+      if (managedClient) {
+        await this.eligibility.assertEligibleForPublish(managedClient);
       }
     }
 

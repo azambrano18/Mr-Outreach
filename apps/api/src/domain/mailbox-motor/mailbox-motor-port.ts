@@ -20,10 +20,9 @@ import {
  *
  * Callers must never persist the raw token value anywhere (log, database,
  * audit, idempotent result) — only `tokenId`/`redemptionId`/a fingerprint.
- * Implementations throw the same typed Nest exceptions
- * `CrmClientEligibilityService` already established for an external-system
- * port (`NotFoundException`/`ConflictException`/`GoneException`/
- * `ServiceUnavailableException`), so callers never need their own
+ * Implementations throw the same typed Nest exceptions already established
+ * for an external-system port (`NotFoundException`/`ConflictException`/
+ * `GoneException`/`ServiceUnavailableException`), so callers never need their own
  * try/catch translation layer.
  */
 export interface MailboxMotorPort {

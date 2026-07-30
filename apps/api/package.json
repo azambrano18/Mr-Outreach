@@ -13,8 +13,7 @@
     "test:watch": "cross-env NODE_ENV=test jest --watch",
     "test:cov": "cross-env NODE_ENV=test jest --coverage",
     "test:e2e": "cross-env NODE_ENV=test jest --config ./test/jest-e2e.json",
-    "test:integration": "cross-env NODE_ENV=test DATABASE_ENVIRONMENT=test PERSISTENCE_DRIVER=postgres CRM_DRIVER=mock jest --runInBand --testPathPattern=\"prisma-.*\\.contract\\.spec\\.ts$|restart-durability|\\.integration\\.spec\\.ts$\"",
-    "test:crm-integration": "cross-env NODE_ENV=test CRM_DRIVER=postgres ALLOW_REAL_CRM_IN_TESTS=true jest --testPathPattern=\"\\.crm-integration\\.spec\\.ts$\""
+    "test:integration": "cross-env NODE_ENV=test DATABASE_ENVIRONMENT=test PERSISTENCE_DRIVER=postgres jest --runInBand --testPathPattern=\"prisma-.*\\.contract\\.spec\\.ts$|restart-durability|\\.integration\\.spec\\.ts$\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",

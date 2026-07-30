@@ -13,8 +13,8 @@ import { MailboxMotorModule } from '../../infrastructure/mailbox-motor/mailbox-m
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { SecurityModule } from '../../infrastructure/security/security.module';
 import { AuthModule } from '../auth/auth.module';
+import { ClientEligibilityModule } from '../clients/client-eligibility.module';
 import { ClientsModule } from '../clients/clients.module';
-import { CrmClientsModule } from '../crm-clients/crm-clients.module';
 import { IntegrationModule } from '../integration/integration.module';
 import { MeSequenceStepsController } from './me-sequence-steps.controller';
 import { MeSequencesController } from './me-sequences.controller';
@@ -31,7 +31,7 @@ import { SequencesController } from './sequences.controller';
     AppConfigModule,
     MailEngineModule,
     ClientsModule,
-    CrmClientsModule,
+    ClientEligibilityModule,
     IdempotencyModule,
     MailboxMotorModule,
   ],

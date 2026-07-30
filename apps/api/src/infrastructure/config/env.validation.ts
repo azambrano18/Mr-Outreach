@@ -131,17 +131,6 @@ export const envValidationSchema = Joi.object({
     .pattern(/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/)
     .default('signatures'),
 
-  // External, read-only Neon CRM database (table maestro_clientes) — a
-  // wholly separate driver from PERSISTENCE_DRIVER, since it's a different
-  // database Mr Outreach doesn't own.
-  CRM_DRIVER: Joi.string().valid('mock', 'postgres').default('mock'),
-  CRM_DATABASE_URL: Joi.string().when('CRM_DRIVER', {
-    is: 'postgres',
-    then: Joi.string().required(),
-    otherwise: Joi.string().allow('').optional(),
-  }),
-  CRM_ACTIVE_STATUS_VALUE: Joi.string().allow('').optional(),
-
   AUTH_SECRET: Joi.string().min(16).required(),
 
   // Must decode to exactly 32 bytes (AES-256) — see SecretEncryptionService.

@@ -29,7 +29,6 @@ export interface MailboxMotorDomainInfo {
 
 export interface MailboxMotorClientInfo {
   serverClientId: string;
-  crmClientId: number | null;
   name: string;
 }
 

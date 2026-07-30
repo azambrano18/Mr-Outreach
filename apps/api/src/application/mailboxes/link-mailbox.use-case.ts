@@ -1,8 +1,6 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
-import { ManagedClient } from '../../domain/client/managed-client.entity';
-import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
@@ -13,18 +11,16 @@ import {
   MailboxMotorMailboxInfo,
 } from '../../domain/mailbox-motor/mailbox-motor.types';
 import { MAILBOX_MOTOR_PORT, MailboxMotorPort } from '../../domain/mailbox-motor/mailbox-motor-port';
-import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
+import { TransactionManager } from '../../domain/persistence/transaction';
 import { isUniqueConstraintViolation } from '../../infrastructure/persistence/prisma/prisma-transaction-manager';
 import {
   AUDIT_LOG_REPOSITORY,
   DOMAIN_REPOSITORY,
   MAILBOX_ASSIGNMENT_REPOSITORY,
   MAILBOX_REPOSITORY,
-  MANAGED_CLIENT_REPOSITORY,
   TRANSACTION_MANAGER,
 } from '../../infrastructure/persistence/tokens';
 import { ClientsService } from '../clients/clients.service';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
 import { IDEMPOTENCY_SCOPE, IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { hashLogicalPayload } from '../idempotency/payload-canonicalizer';
 import { ClientMailboxVisibilityService } from './client-mailbox-visibility.service';
@@ -90,9 +86,7 @@ export class LinkMailboxUseCase {
     @Inject(MAILBOX_ASSIGNMENT_REPOSITORY) private readonly assignments: MailboxAssignmentRepository,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     @Inject(MAILBOX_MOTOR_PORT) private readonly motor: MailboxMotorPort,
-    @Inject(MANAGED_CLIENT_REPOSITORY) private readonly managedClients: ManagedClientRepository,
     private readonly clients: ClientsService,
-    private readonly crmEligibility: CrmClientEligibilityService,
     private readonly idempotency: IdempotentOperationService,
     private readonly executiveValidator: MailboxExecutiveAssignmentValidator,
     private readonly clientVisibility: ClientMailboxVisibilityService,
@@ -168,11 +162,6 @@ export class LinkMailboxUseCase {
       actorId: input.actorId,
     });
 
-    let crmClient = null;
-    if (redemption.client.crmClientId !== null) {
-      crmClient = await this.crmEligibility.getVerifiedActiveClient(redemption.client.crmClientId);
-    }
-
     try {
       const { result } = await this.tx.run(async (ctx) => {
         const alreadyLinked = await this.mailboxes.findByServerMailboxId(redemption.mailbox.serverMailboxId, ctx);
@@ -180,9 +169,13 @@ export class LinkMailboxUseCase {
           throw new ConflictException('Esta cuenta ya fue vinculada por otra operación.');
         }
 
-        const managedClient = crmClient
-          ? await this.clients.upsertFromVerifiedCrmClient(input.organizationId, crmClient, input.actorId, {}, ctx)
-          : await this.findOrCreateClientWithoutCrm(input.organizationId, redemption.client, input.actorId, ctx);
+        const managedClient = await this.clients.upsertFromServerPayload(
+          input.organizationId,
+          redemption.client,
+          input.actorId,
+          {},
+          ctx,
+        );
 
         let domain = await this.domains.findByName(input.organizationId, redemption.domain.name, ctx);
         if (domain && domain.clientId !== managedClient.id) {
@@ -357,36 +350,5 @@ export class LinkMailboxUseCase {
       }
       throw error;
     }
-  }
-
-  /**
-   * §9.1 — the motor returned a client with no CRM linkage (`crmClientId:
-   * null`). serverClientId (not crmClientId) is this client's dedupe key:
-   * a repeated redemption for the same Railway client upserts the same
-   * local ManagedClient row instead of creating a duplicate. Never
-   * fabricates a crmClientId; source stays SERVER for the lifetime of the
-   * row (never silently promoted to LEGACY_CRM by this path).
-   */
-  private async findOrCreateClientWithoutCrm(
-    organizationId: string,
-    client: MailboxMotorClientInfo,
-    actorId: string,
-    ctx: TransactionContext,
-  ): Promise<ManagedClient> {
-    const existing = await this.managedClients.findByServerClientId(organizationId, client.serverClientId, ctx);
-    if (existing) {
-      return existing;
-    }
-    return this.managedClients.create(
-      {
-        organizationId,
-        crmClientId: null,
-        source: 'SERVER',
-        serverClientId: client.serverClientId,
-        name: client.name,
-        createdBy: actorId,
-      },
-      ctx,
-    );
   }
 }

@@ -7,13 +7,6 @@ export type StorageDriver = 'local' | 's3';
 /** Fase Firma — gates `SignatureAssetStoragePort` (signature-embedded images), independent of `StorageDriver` above (the older, generic rich-text image port). */
 export type SignatureAssetStorageMode = 'simulated' | 'r2';
 /**
- * Independent of `PersistenceDriver`: the app's own database can be
- * memory/postgres while the CRM read is separately mock/postgres, since
- * they're two entirely different databases (Mr Outreach's own vs Neon's
- * external, read-only `maestro_clientes`) — see AdminReorg plan Etapa 4.
- */
-export type CrmDriver = 'mock' | 'postgres';
-/**
  * Separate from `EngineDriver` on purpose — `EngineDriver` gates the older
  * synchronous EngineClient port (test connection / send test / read inbox
  * on demand). `MailEngineMode` gates the newer async command/event
@@ -202,25 +195,4 @@ export class AppConfigService {
     return this.config.get<string>('DEV_EXECUTIVE_PASSWORD') || undefined;
   }
 
-  get crmDriver(): CrmDriver {
-    return this.config.get<CrmDriver>('CRM_DRIVER', 'mock');
-  }
-
-  /** Diagnostics only, mirrors hasDatabaseUrl — the Postgres pool reads CRM_DATABASE_URL directly. */
-  get hasCrmDatabaseUrl(): boolean {
-    return Boolean(this.config.get<string>('CRM_DATABASE_URL'));
-  }
-
-  get crmDatabaseUrl(): string {
-    return this.config.getOrThrow<string>('CRM_DATABASE_URL');
-  }
-
-  /**
-   * The real stored value confirmed via introspection is "ACTIVO" — kept
-   * configurable (not hardcoded) so it can be corrected without a redeploy
-   * if the CRM's data ever changes shape.
-   */
-  get crmActiveStatusValue(): string {
-    return this.config.get<string>('CRM_ACTIVE_STATUS_VALUE', 'ACTIVO');
-  }
 }

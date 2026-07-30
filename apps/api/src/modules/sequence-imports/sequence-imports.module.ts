@@ -5,7 +5,7 @@ import { SchedulingService } from '../../application/scheduling/scheduling.servi
 import { IdempotencyModule } from '../../application/idempotency/idempotency.module';
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { AuthModule } from '../auth/auth.module';
-import { CrmClientsModule } from '../crm-clients/crm-clients.module';
+import { ClientEligibilityModule } from '../clients/client-eligibility.module';
 import { IntegrationModule } from '../integration/integration.module';
 import { SequencesModule } from '../sequences/sequences.module';
 import { MeSchedulingController } from './me-scheduling.controller';
@@ -13,7 +13,7 @@ import { MeSequenceImportsController } from './me-sequence-imports.controller';
 import { SequenceImportsController } from './sequence-imports.controller';
 
 @Module({
-  imports: [PersistenceModule, AuthModule, IntegrationModule, SequencesModule, CrmClientsModule, IdempotencyModule],
+  imports: [PersistenceModule, AuthModule, IntegrationModule, SequencesModule, ClientEligibilityModule, IdempotencyModule],
   controllers: [MeSequenceImportsController, SequenceImportsController, MeSchedulingController],
   providers: [SequenceImportsService, SchedulingService, ConfirmProspectImportUseCase],
   exports: [SequenceImportsService, SchedulingService, ConfirmProspectImportUseCase],

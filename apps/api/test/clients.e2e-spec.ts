@@ -1,11 +1,12 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox } from './fixtures';
 
 describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', () => {
   let app: INestApplication;
   let adminToken: string;
+  let adminUserId: string;
   let executiveRoleId: string;
 
   const adminEmail = process.env.DEV_ADMIN_EMAIL as string;
@@ -61,38 +62,39 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
     executiveRoleId = rolesResponse.body.find(
       (role: { name: string }) => role.name === 'EXECUTIVE',
     ).id;
+    const me = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${adminToken}`);
+    adminUserId = me.body.id;
   });
 
   afterAll(async () => {
     await app.close();
   });
 
-  it('creates a client, a domain under it, and rejects a duplicate domain name in the same org', async () => {
+  it('creates a client (via mailbox-link redemption), a second domain under it, and rejects a duplicate domain name in the same org', async () => {
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2001 });
-    expect(client.status).toBe(201);
+      .get(`/clients/${clientId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(client.body.status).toBe('ACTIVE');
-    expect(client.body.domainCount).toBe(0);
+    expect(client.body.domainCount).toBe(1); // the fixture's own domain, from the link redemption
 
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: 'vertex-e2e.cl' });
     expect(domain.status).toBe(201);
-    expect(domain.body.clientId).toBe(client.body.id);
+    expect(domain.body.clientId).toBe(clientId);
 
     const duplicate = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: 'vertex-e2e.cl' });
     expect(duplicate.status).toBe(409);
 
     const refreshedClient = await request(app.getHttpServer())
-      .get(`/clients/${client.body.id}`)
+      .get(`/clients/${clientId}`)
       .set('Authorization', `Bearer ${adminToken}`);
-    expect(refreshedClient.body.domainCount).toBe(1);
+    expect(refreshedClient.body.domainCount).toBe(2);
   });
 
   it('returns 404 (not 403) for a client id that does not exist', async () => {
@@ -103,12 +105,9 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
   });
 
   it('links a mailbox to a domain, and the client/domain mailbox counts and lists reflect it', async () => {
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2002 });
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: 'gtd-e2e.cl' });
     const mailbox = await request(app.getHttpServer())
@@ -121,11 +120,11 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainId: domain.body.id });
     expect(linked.status).toBe(201);
-    expect(linked.body.clientId).toBe(client.body.id);
+    expect(linked.body.clientId).toBe(clientId);
     expect(linked.body.domainId).toBe(domain.body.id);
 
     const byClient = await request(app.getHttpServer())
-      .get(`/clients/${client.body.id}/mailboxes`)
+      .get(`/clients/${clientId}/mailboxes`)
       .set('Authorization', `Bearer ${adminToken}`);
     expect(byClient.body.map((m: { id: string }) => m.id)).toContain(mailbox.body.id);
 
@@ -144,12 +143,9 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
     const { id: executiveId, token: executiveToken } = await createExecutive(
       'scoped.exec.e2e@mejoreferido.cl',
     );
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2003 });
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: 'defontana-e2e.cl' });
     const mailbox = await request(app.getHttpServer())
@@ -164,10 +160,10 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
     const beforeAssignment = await request(app.getHttpServer())
       .get('/me/clients')
       .set('Authorization', `Bearer ${executiveToken}`);
-    expect(beforeAssignment.body.map((c: { id: string }) => c.id)).not.toContain(client.body.id);
+    expect(beforeAssignment.body.map((c: { id: string }) => c.id)).not.toContain(clientId);
 
     await request(app.getHttpServer())
-      .put(`/clients/${client.body.id}/assignees`)
+      .put(`/clients/${clientId}/assignees`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ primaryUserId: executiveId, secondaryUserIds: [] });
     await request(app.getHttpServer())
@@ -178,10 +174,10 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
     const afterAssignment = await request(app.getHttpServer())
       .get('/me/clients')
       .set('Authorization', `Bearer ${executiveToken}`);
-    expect(afterAssignment.body.map((c: { id: string }) => c.id)).toContain(client.body.id);
+    expect(afterAssignment.body.map((c: { id: string }) => c.id)).toContain(clientId);
 
     const myDomains = await request(app.getHttpServer())
-      .get(`/me/clients/${client.body.id}/domains`)
+      .get(`/me/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${executiveToken}`);
     expect(myDomains.body.map((d: { id: string }) => d.id)).toContain(domain.body.id);
 
@@ -191,23 +187,17 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
     expect(myMailboxes.body.map((m: { id: string }) => m.id)).toContain(mailbox.body.id);
 
     // A client this executive was never assigned to must respond as nonexistent.
-    const otherClient = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2004 });
+    const { clientId: otherClientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const forbidden = await request(app.getHttpServer())
-      .get(`/me/clients/${otherClient.body.id}`)
+      .get(`/me/clients/${otherClientId}`)
       .set('Authorization', `Bearer ${executiveToken}`);
     expect(forbidden.status).toBe(404);
   });
 
   it('syncs conversations from the mock engine, then classifies/tags/notes/assigns/resolves/reopens one', async () => {
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2005 });
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: 'conversaciones-e2e.cl' });
     const mailbox = await request(app.getHttpServer())
@@ -220,12 +210,12 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
       .send({ domainId: domain.body.id });
 
     const list = await request(app.getHttpServer())
-      .get(`/conversations?clientId=${client.body.id}`)
+      .get(`/conversations?clientId=${clientId}`)
       .set('Authorization', `Bearer ${adminToken}`);
     expect(list.status).toBe(200);
     expect(list.body.length).toBeGreaterThan(0);
     for (const conversation of list.body) {
-      expect(conversation.clientId).toBe(client.body.id);
+      expect(conversation.clientId).toBe(clientId);
       expect(conversation.domainId).toBe(domain.body.id);
       expect(conversation.isUnmatched).toBe(false);
     }
@@ -288,16 +278,13 @@ describe('Client hierarchy + Centro de conversaciones (e2e) — memory + mock', 
       'autopausa.e2e@mejoreferido.cl',
     );
 
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2006 });
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     await request(app.getHttpServer())
-      .put(`/clients/${client.body.id}/assignees`)
+      .put(`/clients/${clientId}/assignees`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ primaryUserId: executiveId, secondaryUserIds: [] });
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: 'autopausa-e2e.cl' });
     const mailbox = await request(app.getHttpServer())

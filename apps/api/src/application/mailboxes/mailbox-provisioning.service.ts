@@ -19,11 +19,10 @@ import { MailboxProvisioningEventApplier } from './mailbox-provisioning-event-ap
  * synchronous EngineClient call unrelated to this async flow); this service
  * owns only the new provisioning lifecycle riding on IntegrationService.
  *
- * Fase 2 — kept as the QA/legacy path (manual scenario-setting,
- * step-by-step advance); event→state translation delegates to the shared
+ * Kept as the QA/legacy path (manual scenario-setting, step-by-step
+ * advance); event→state translation delegates to the shared
  * `MailboxProvisioningEventApplier` so this never diverges from
- * `ConfigureMailboxUseCase`/`UpdateMailboxConfigurationUseCase`'s own
- * post-commit handling.
+ * `UpdateMailboxConfigurationUseCase`'s own post-commit handling.
  */
 @Injectable()
 export class MailboxProvisioningService {

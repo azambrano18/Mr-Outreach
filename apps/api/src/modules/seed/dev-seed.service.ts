@@ -254,7 +254,8 @@ export class DevSeedService implements OnApplicationBootstrap {
     // real data to click through instead of landing on an empty state.
     const demoClient = await this.managedClients.create({
       organizationId: organization.id,
-      crmClientId: 9001, // demo placeholder — out of the mock CRM dataset's 1001-1005 range, on purpose
+      source: 'SERVER',
+      serverClientId: 'srv_demo_9001',
       name: 'Empresa Demostración (Demo)',
       legalName: 'Empresa Demostración SpA (Demo)',
       industry: 'Tecnología',
@@ -465,7 +466,8 @@ export class DevSeedService implements OnApplicationBootstrap {
 
     const gtdClient = await this.managedClients.create({
       organizationId: organization.id,
-      crmClientId: 9002,
+      source: 'SERVER',
+      serverClientId: 'srv_demo_9002',
       name: 'Demo Dos (Demo)',
       legalName: 'Demo Dos Chile S.A. (Demo)',
       industry: 'Telecomunicaciones',
@@ -528,7 +530,8 @@ export class DevSeedService implements OnApplicationBootstrap {
     // left with zero conversations ("cuenta sin respuestas").
     const andesClient = await this.managedClients.create({
       organizationId: organization.id,
-      crmClientId: 9003,
+      source: 'SERVER',
+      serverClientId: 'srv_demo_9003',
       name: 'Empresa Demostración Tres (Demo)',
       legalName: 'Empresa Demostración Tres Ltda. (Demo)',
       industry: 'Construcción',

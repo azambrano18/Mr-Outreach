@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ClientMailboxVisibilityService } from '../../application/mailboxes/client-mailbox-visibility.service';
-import { ConfigureMailboxUseCase } from '../../application/mailboxes/configure-mailbox.use-case';
 import { LinkMailboxUseCase } from '../../application/mailboxes/link-mailbox.use-case';
 import { MailboxExecutiveAssignmentValidator } from '../../application/mailboxes/mailbox-executive-assignment.validator';
 import { MailboxProvisioningEventApplier } from '../../application/mailboxes/mailbox-provisioning-event-applier';
@@ -16,8 +15,8 @@ import { MailboxMotorModule } from '../../infrastructure/mailbox-motor/mailbox-m
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { SecurityModule } from '../../infrastructure/security/security.module';
 import { AuthModule } from '../auth/auth.module';
+import { ClientEligibilityModule } from '../clients/client-eligibility.module';
 import { ClientsModule } from '../clients/clients.module';
-import { CrmClientsModule } from '../crm-clients/crm-clients.module';
 import { IntegrationModule } from '../integration/integration.module';
 import { DevMailboxTokensController } from './dev-mailbox-tokens.controller';
 import { MailboxHierarchyController } from './mailbox-hierarchy.controller';
@@ -32,7 +31,7 @@ import { MeController } from './me.controller';
     AuthModule,
     IntegrationModule,
     ClientsModule,
-    CrmClientsModule,
+    ClientEligibilityModule,
     IdempotencyModule,
     MailboxMotorModule,
     // Fase 2.1 §17 — only link-token/introspect uses @UseGuards(ThrottlerGuard); every
@@ -43,7 +42,6 @@ import { MeController } from './me.controller';
   providers: [
     MailboxesService,
     MailboxProvisioningService,
-    ConfigureMailboxUseCase,
     UpdateMailboxConfigurationUseCase,
     MailboxExecutiveAssignmentValidator,
     MailboxProvisioningEventApplier,
@@ -55,7 +53,6 @@ import { MeController } from './me.controller';
   exports: [
     MailboxesService,
     MailboxProvisioningService,
-    ConfigureMailboxUseCase,
     UpdateMailboxConfigurationUseCase,
     MailboxExecutiveAssignmentValidator,
     MailboxProvisioningEventApplier,

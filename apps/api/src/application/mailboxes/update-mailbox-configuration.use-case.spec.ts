@@ -8,7 +8,7 @@ import { SignatureVersionRepository } from '../../domain/signature/signature-ver
 import { SignatureRepository } from '../../domain/signature/signature.repository';
 import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { IntegrationService } from '../integration/integration.service';
 import { ClientMailboxVisibilityService } from './client-mailbox-visibility.service';
@@ -29,7 +29,7 @@ describe('UpdateMailboxConfigurationUseCase', () => {
   let signatureVersions: jest.Mocked<SignatureVersionRepository>;
   let managedClients: jest.Mocked<Pick<ManagedClientRepository, 'findById'>>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
-  let crmEligibility: jest.Mocked<Pick<CrmClientEligibilityService, 'getVerifiedActiveClient'>>;
+  let eligibility: jest.Mocked<Pick<ClientEligibilityService, 'assertEligibleForPublish'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
   let htmlSanitizer: jest.Mocked<Pick<HtmlSanitizerService, 'sanitize'>>;
   let idempotency: jest.Mocked<Pick<IdempotentOperationService, 'checkExisting' | 'claim' | 'refreshResultSnapshot'>>;
@@ -83,9 +83,9 @@ describe('UpdateMailboxConfigurationUseCase', () => {
     };
     signatures = { findById: jest.fn(), findByMailbox: jest.fn().mockResolvedValue(null), findAllByOrganization: jest.fn(), create: jest.fn(), update: jest.fn() };
     signatureVersions = { create: jest.fn(), findById: jest.fn(), findBySignature: jest.fn() };
-    managedClients = { findById: jest.fn().mockResolvedValue({ id: 'mc_1', organizationId: orgId, crmClientId: 7 }) };
+    managedClients = { findById: jest.fn().mockResolvedValue({ id: 'mc_1', organizationId: orgId, status: 'ACTIVE', externalStatusSnapshot: null }) };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
-    crmEligibility = { getVerifiedActiveClient: jest.fn().mockResolvedValue({ crmClientId: 7, status: 'ACTIVO' }) };
+    eligibility = { assertEligibleForPublish: jest.fn().mockResolvedValue(undefined) };
     secrets = { encrypt: jest.fn((v: string) => `enc(${v})`), decrypt: jest.fn() };
     htmlSanitizer = { sanitize: jest.fn((html: string) => html) };
     idempotency = {
@@ -137,7 +137,7 @@ describe('UpdateMailboxConfigurationUseCase', () => {
       signatureVersions,
       managedClients as unknown as ManagedClientRepository,
       auditLogs,
-      crmEligibility as unknown as CrmClientEligibilityService,
+      eligibility as unknown as ClientEligibilityService,
       secrets as unknown as SecretEncryptionService,
       htmlSanitizer as unknown as HtmlSanitizerService,
       idempotency as unknown as IdempotentOperationService,

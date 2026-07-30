@@ -24,16 +24,16 @@ export class InMemoryManagedClientRepository implements ManagedClientRepository 
   }
 
   async create(input: CreateManagedClientInput): Promise<ManagedClient> {
-    if (input.crmClientId != null) {
-      const existing = await this.findByCrmClientId(input.organizationId, input.crmClientId);
-      if (existing) {
-        throw new ConflictException('This CRM client is already configured in this organization.');
-      }
-    }
+    // serverClientId is globally unique (Fase 2.1 — a single, shared
+    // external Railway id space, never scoped per organization), matching
+    // the Prisma schema's bare `@unique` (not a composite with
+    // organizationId) — mirrored here, not just within this organization.
     if (input.serverClientId) {
-      const existing = await this.findByServerClientId(input.organizationId, input.serverClientId);
+      const existing = Array.from(this.store.managedClients.values()).find(
+        (client) => !client.deletedAt && client.serverClientId === input.serverClientId,
+      );
       if (existing) {
-        throw new ConflictException('This server client is already configured in this organization.');
+        throw new ConflictException('This server client is already configured.');
       }
     }
 
@@ -41,8 +41,7 @@ export class InMemoryManagedClientRepository implements ManagedClientRepository 
     const client: ManagedClient = {
       id: randomUUID(),
       organizationId: input.organizationId,
-      crmClientId: input.crmClientId ?? null,
-      source: input.source ?? (input.crmClientId != null ? 'LEGACY_CRM' : 'SERVER'),
+      source: input.source ?? 'SERVER',
       serverClientId: input.serverClientId ?? null,
       name: input.name,
       legalName: input.legalName ?? null,
@@ -53,9 +52,9 @@ export class InMemoryManagedClientRepository implements ManagedClientRepository 
       startDate: input.startDate ?? null,
       supervisorUserId: input.supervisorUserId ?? null,
       notes: input.notes ?? null,
-      crmRutSnapshot: input.crmRutSnapshot ?? null,
-      crmStatusSnapshot: input.crmStatusSnapshot ?? null,
-      crmStatusCheckedAt: input.crmStatusCheckedAt ?? null,
+      clientRutSnapshot: input.clientRutSnapshot ?? null,
+      externalStatusSnapshot: input.externalStatusSnapshot ?? null,
+      externalStatusCheckedAt: input.externalStatusCheckedAt ?? null,
       createdBy: input.createdBy,
       updatedBy: input.createdBy,
       createdAt: now,
@@ -74,15 +73,6 @@ export class InMemoryManagedClientRepository implements ManagedClientRepository 
     const updated: ManagedClient = { ...existing, ...input, updatedAt: new Date() };
     this.store.managedClients.set(id, updated);
     return updated;
-  }
-
-  async findByCrmClientId(organizationId: string, crmClientId: number): Promise<ManagedClient | null> {
-    for (const client of this.store.managedClients.values()) {
-      if (!client.deletedAt && client.organizationId === organizationId && client.crmClientId === crmClientId) {
-        return client;
-      }
-    }
-    return null;
   }
 
   async findByServerClientId(organizationId: string, serverClientId: string): Promise<ManagedClient | null> {

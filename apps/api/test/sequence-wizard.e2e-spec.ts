@@ -2,7 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox } from './fixtures';
 
 async function buildXlsxBuffer(headers: string[], rows: string[][]): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -49,19 +49,11 @@ describe('Sequence creation wizard + publish contract (e2e) — memory + simulat
     executiveId = executive.id;
     executiveToken = executive.token;
 
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2014 });
-    clientId = client.body.id;
+    clientId = (await linkClientMailbox(app, adminToken, executiveId)).clientId;
     const domain = await request(app.getHttpServer())
       .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: `sequence-wizard-e2e-${stamp}.test` });
-    await request(app.getHttpServer())
-      .put(`/clients/${clientId}/assignees`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ primaryUserId: executiveId, secondaryUserIds: [] });
 
     const mailbox = await request(app.getHttpServer())
       .post('/mailboxes')

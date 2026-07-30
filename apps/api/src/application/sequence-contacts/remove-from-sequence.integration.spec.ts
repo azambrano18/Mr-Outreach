@@ -58,7 +58,7 @@ describeIfDatabaseAvailable('RemoveContactFromSequenceUseCase / RemoveCompanyFro
     const org = await prisma.organization.create({ data: { name: `__fase2_case_de_${stamp}` } });
     orgId = org.id;
     const client = await prisma.managedClient.create({
-      data: { organizationId: orgId, crmClientId: 999003, name: 'Cliente Fixture', createdBy: 'seed', updatedBy: 'seed' },
+      data: { organizationId: orgId, source: 'SERVER', serverClientId: `srv_${stamp}`, name: 'Cliente Fixture', createdBy: 'seed', updatedBy: 'seed' },
     });
     clientId = client.id;
     const user = await prisma.user.create({

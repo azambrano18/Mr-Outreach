@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox } from './fixtures';
 
 /**
  * The response-outcome bar reachable from a conversation — replaces the
@@ -13,6 +13,7 @@ import { createReadyExecutive } from './fixtures';
 describe('Response outcome from a conversation (e2e) — memory + simulated engine', () => {
   let app: INestApplication;
   let adminToken: string;
+  let adminUserId: string;
   let executiveToken: string;
   let executiveId: string;
   let sequenceId: string;
@@ -63,6 +64,8 @@ describe('Response outcome from a conversation (e2e) — memory + simulated engi
   beforeAll(async () => {
     app = await createTestApp();
     adminToken = await loginAs(adminEmail, adminPassword);
+    const me = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${adminToken}`);
+    adminUserId = me.body.id;
 
     const roles = await request(app.getHttpServer()).get('/roles').set('Authorization', `Bearer ${adminToken}`);
     const executiveRoleId = roles.body.find((role: { name: string }) => role.name === 'EXECUTIVE').id;
@@ -76,18 +79,11 @@ describe('Response outcome from a conversation (e2e) — memory + simulated engi
     executiveId = executive.id;
     executiveToken = executive.token;
 
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2012 });
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: `response-outcome-e2e-${stamp}.test` });
-    await request(app.getHttpServer())
-      .put(`/clients/${client.body.id}/assignees`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ primaryUserId: executiveId, secondaryUserIds: [] });
 
     const mailbox = await request(app.getHttpServer())
       .post('/mailboxes')

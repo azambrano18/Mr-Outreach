@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox } from './fixtures';
 
 /**
  * End-to-end proof of the whole simulated mail-engine chain (§59's
@@ -65,12 +65,9 @@ describe('Sequence mail-engine simulation flow (e2e) — memory + simulated engi
     const executiveId = executive.id;
     executiveToken = executive.token;
 
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2013 });
+    const { clientId } = await linkClientMailbox(app, adminToken, executiveId);
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: `flujo-e2e-${Date.now()}.test` });
 

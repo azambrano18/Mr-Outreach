@@ -1,7 +1,7 @@
 export type ManagedClientStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 
-/** Fase 2.1 §9.1 — which system is authoritative for this client's identity. */
-export type ManagedClientSource = 'SERVER' | 'LEGACY_CRM' | 'MANUAL';
+/** Which system is authoritative for this client's identity. */
+export type ManagedClientSource = 'SERVER' | 'MANUAL';
 
 /**
  * `ManagedClient` is the customer whose outbound campaigns are operated
@@ -13,29 +13,27 @@ export type ManagedClientSource = 'SERVER' | 'LEGACY_CRM' | 'MANUAL';
 export interface ManagedClient {
   id: string;
   organizationId: string;
-  /** Foreign key into the external Neon CRM's master row (maestro_clientes.id) — never written back there. Null for a SERVER-origin client the motor never linked to a CRM record. */
-  crmClientId: number | null;
-  /** Fase 2.1 — SERVER: created from a Railway mailbox-link redemption. LEGACY_CRM: pre-Fase-2.1 "activar cliente" flow, always has crmClientId. MANUAL: reserved. */
+  /** SERVER: created from a mailbox-link token redemption. MANUAL: reserved. */
   source: ManagedClientSource;
-  /** Fase 2.1 — external Railway client id, set only when source = SERVER; the dedupe/upsert key for repeated redemptions instead of crmClientId. */
+  /** External server client id, set when source = SERVER; the dedupe/upsert key for repeated redemptions. */
   serverClientId: string | null;
-  /** Fase 1.5 — snapshot of maestro_clientes.empresa. No longer administrator-editable; only upsertFromVerifiedCrmClient writes this. */
+  /** Snapshot of the client's corporate name reported by the external server. No longer administrator-editable; only upsertFromServerPayload writes this. */
   name: string;
   legalName: string | null;
   internalCode: string | null;
-  /** Fase 1.5 — snapshot of maestro_clientes.rubro. No longer administrator-editable; only upsertFromVerifiedCrmClient writes this. */
+  /** Snapshot of the client's industry reported by the external server. No longer administrator-editable; only upsertFromServerPayload writes this. */
   industry: string | null;
   status: ManagedClientStatus;
   logoUrl: string | null;
   startDate: Date | null;
   supervisorUserId: string | null;
   notes: string | null;
-  /** Fase 1.5 — last known maestro_clientes.rut. Display/audit only — never used to authorize anything. */
-  crmRutSnapshot: string | null;
-  /** Fase 1.5 — last known maestro_clientes.status, normalized (TRIM+UPPER not applied here — stored as CrmClientsService returns it). Distinct from `status` (Mr Outreach's own operational lifecycle). */
-  crmStatusSnapshot: string | null;
-  /** Fase 1.5 — when crmStatusSnapshot was last confirmed against the CRM. Never used, by itself, to authorize a new operation when the CRM is unreachable. */
-  crmStatusCheckedAt: Date | null;
+  /** Last known RUT reported by the external server. Display/audit only — never used to authorize anything. */
+  clientRutSnapshot: string | null;
+  /** Last known status reported by the external server. Distinct from `status` (Mr Outreach's own operational lifecycle). */
+  externalStatusSnapshot: string | null;
+  /** When externalStatusSnapshot was last confirmed against the external server. Never used, by itself, to authorize a new operation when the server is unreachable. */
+  externalStatusCheckedAt: Date | null;
   createdBy: string;
   updatedBy: string;
   createdAt: Date;
@@ -45,8 +43,6 @@ export interface ManagedClient {
 
 export interface CreateManagedClientInput {
   organizationId: string;
-  /** Omit/null for a SERVER-origin client with no CRM linkage; repositories default `source` to LEGACY_CRM when a crmClientId is given, SERVER otherwise (override with `source` if needed). */
-  crmClientId?: number | null;
   source?: ManagedClientSource;
   serverClientId?: string | null;
   name: string;
@@ -57,9 +53,9 @@ export interface CreateManagedClientInput {
   startDate?: Date | null;
   supervisorUserId?: string | null;
   notes?: string | null;
-  crmRutSnapshot?: string | null;
-  crmStatusSnapshot?: string | null;
-  crmStatusCheckedAt?: Date | null;
+  clientRutSnapshot?: string | null;
+  externalStatusSnapshot?: string | null;
+  externalStatusCheckedAt?: Date | null;
   createdBy: string;
 }
 
@@ -73,9 +69,9 @@ export interface UpdateManagedClientInput {
   startDate?: Date | null;
   supervisorUserId?: string | null;
   notes?: string | null;
-  crmRutSnapshot?: string | null;
-  crmStatusSnapshot?: string | null;
-  crmStatusCheckedAt?: Date | null;
+  clientRutSnapshot?: string | null;
+  externalStatusSnapshot?: string | null;
+  externalStatusCheckedAt?: Date | null;
   updatedBy?: string;
   deletedAt?: Date | null;
 }

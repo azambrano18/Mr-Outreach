@@ -14,7 +14,6 @@ describe('SimulatedMailboxMotorAdapter', () => {
       displayName: 'Ventas',
       domainName: 'cliente.cl',
       clientName: 'Cliente Ejemplo',
-      crmClientId: 88,
       ...overrides,
     });
   }
@@ -27,7 +26,6 @@ describe('SimulatedMailboxMotorAdapter', () => {
       expect(info.status).toBe('ISSUED');
       expect(info.mailbox.email).toBe('ventas@cliente.cl');
       expect(info.domain.name).toBe('cliente.cl');
-      expect(info.client.crmClientId).toBe(88);
       const hoursUntilExpiry = (info.expiresAt.getTime() - Date.now()) / (60 * 60 * 1000);
       expect(hoursUntilExpiry).toBeGreaterThan(23.9);
       expect(hoursUntilExpiry).toBeLessThanOrEqual(24);

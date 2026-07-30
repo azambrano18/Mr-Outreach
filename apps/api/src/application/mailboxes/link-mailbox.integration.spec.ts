@@ -10,7 +10,7 @@ import { LinkMailboxInput, LinkMailboxUseCase } from './link-mailbox.use-case';
 
 /**
  * Fase 2.1 — real-PostgreSQL evidence for `LinkMailboxUseCase`. Runs only
- * against mr-outreach-test (`npm run test:integration`), CRM_DRIVER=mock.
+ * against mr-outreach-test (`npm run test:integration`).
  */
 const describeIfDatabaseAvailable = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 
@@ -65,11 +65,10 @@ describeIfDatabaseAvailable('LinkMailboxUseCase (PostgreSQL integration)', () =>
       displayName: 'Ventas',
       domainName: `link-${stamp}-${domainSuffix}.test`,
       clientName: 'Cliente Fase 2.1',
-      crmClientId: 2001,
       ...overrides,
     });
     const managedClient = await prisma.managedClient.create({
-      data: { organizationId: orgId, crmClientId: 2001, name: 'Cliente Fase 2.1', createdBy: 'admin_1', updatedBy: 'admin_1' },
+      data: { organizationId: orgId, serverClientId: 'srv_fx_2001', name: 'Cliente Fase 2.1', createdBy: 'admin_1', updatedBy: 'admin_1' },
     });
     await prisma.clientExecutiveAssignment.create({
       data: { organizationId: orgId, clientId: managedClient.id, userId: executiveId, role: 'PRIMARY', assignedBy: 'admin_1' },
@@ -151,7 +150,7 @@ describeIfDatabaseAvailable('LinkMailboxUseCase (PostgreSQL integration)', () =>
         data: { organizationId: org2.id, firstName: 'Exec', lastName: 'Dos', email: `exec2-${randomUUID()}@example.com`, passwordHash: 'hash', status: 'ACTIVE' },
       });
       const managedClient2 = await prisma.managedClient.create({
-        data: { organizationId: org2.id, crmClientId: 2001, name: 'Cliente Fase 2.1', createdBy: 'admin_1', updatedBy: 'admin_1' },
+        data: { organizationId: org2.id, serverClientId: 'srv_fx_2001_org2', name: 'Cliente Fase 2.1', createdBy: 'admin_1', updatedBy: 'admin_1' },
       });
       await prisma.clientExecutiveAssignment.create({
         data: { organizationId: org2.id, clientId: managedClient2.id, userId: user2.id, role: 'PRIMARY', assignedBy: 'admin_1' },

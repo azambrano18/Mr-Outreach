@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
+import { linkClientMailbox } from './fixtures';
 
 describe('Mailbox provisioning simulation (e2e) — memory + simulated engine', () => {
   let app: INestApplication;
@@ -38,18 +39,17 @@ describe('Mailbox provisioning simulation (e2e) — memory + simulated engine', 
     return response.body.id as string;
   }
 
-  let nextCrmClientId = 2010;
-
   async function createClientAndDomain() {
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: nextCrmClientId++ });
+    // A ManagedClient only exists via mailbox-link token redemption now —
+    // this creates one (plus its own throwaway domain/mailbox, unused here)
+    // purely to get a valid clientId, then creates the domain this test
+    // actually uses under that same client.
+    const { clientId } = await linkClientMailbox(app, adminToken, adminUserId);
     const domain = await request(app.getHttpServer())
-      .post(`/clients/${client.body.id}/domains`)
+      .post(`/clients/${clientId}/domains`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ domainName: `provisioning-e2e-${Date.now()}.test` });
-    return { clientId: client.body.id as string, domainId: domain.body.id as string };
+    return { clientId, domainId: domain.body.id as string };
   }
 
   beforeAll(async () => {

@@ -733,32 +733,30 @@ export interface MailboxThreadReadStateResult {
 
 export type ManagedClientStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 
-export type ManagedClientSource = 'SERVER' | 'LEGACY_CRM' | 'MANUAL';
+export type ManagedClientSource = 'SERVER' | 'MANUAL';
 
 export interface ManagedClientSummary {
   id: string;
   organizationId: string;
-  /** Null for a SERVER-origin client (Fase 2.1, §9.1) with no CRM linkage. */
-  crmClientId: number | null;
   source: ManagedClientSource;
   serverClientId: string | null;
-  /** Fase 1.5 — snapshot local del nombre corporativo. Ya no editable a mano. */
+  /** Snapshot local del nombre corporativo, reportado por el servidor externo. Ya no editable a mano. */
   name: string;
   legalName: string | null;
   internalCode: string | null;
-  /** Fase 1.5 — snapshot local del rubro corporativo. Ya no editable a mano. */
+  /** Snapshot local del rubro corporativo, reportado por el servidor externo. Ya no editable a mano. */
   industry: string | null;
   status: ManagedClientStatus;
   logoUrl: string | null;
   startDate: string | null;
   supervisorUserId: string | null;
   notes: string | null;
-  /** Fase 1.5 — último RUT conocido del CRM. Solo informativo. */
-  crmRutSnapshot: string | null;
-  /** Fase 1.5 — último estado normalizado conocido del CRM. Solo informativo. */
-  crmStatusSnapshot: string | null;
-  /** Fase 1.5 — cuándo se verificó por última vez contra el CRM. */
-  crmStatusCheckedAt: string | null;
+  /** Último RUT conocido, reportado por el servidor externo. Solo informativo. */
+  clientRutSnapshot: string | null;
+  /** Último estado normalizado conocido del servidor externo. Solo informativo. */
+  externalStatusSnapshot: string | null;
+  /** Cuándo se verificó por última vez contra el servidor externo. */
+  externalStatusCheckedAt: string | null;
   domainCount: number;
   mailboxCount: number;
   sequenceCount: number;
@@ -768,40 +766,20 @@ export interface ManagedClientSummary {
   updatedAt: string;
 }
 
-/** Fase 1.5 — "activar cliente en Mr Outreach": crmClientId es el único dato corporativo confiable; name/rut/rubro/estado siempre vienen del CRM. */
-export interface ActivateManagedClientPayload {
-  crmClientId: number;
-  legalName?: string;
-  internalCode?: string;
-  logoUrl?: string;
-  startDate?: string;
-  supervisorUserId?: string;
-  notes?: string;
-}
-
-/** From the external Neon CRM (maestro_clientes), read-only — see GET /crm-clients. */
-export interface CrmClientSummary {
-  crmClientId: number;
-  name: string;
-  rut: string | null;
-  rubro: string | null;
-  status: string;
-}
-
 export type ClientConfigurationStatus =
   | 'SIN_CONFIGURAR'
   | 'CONFIGURACION_INCOMPLETA'
   | 'CON_INCIDENCIAS'
   | 'CONFIGURADO';
 
-/** One CRM (maestro_clientes) row merged with its Mr Outreach operational configuration, if any — see GET /clients/crm-overview. */
+/** Listado local puro de ManagedClient con su estado de configuración — ver GET /clients/overview. */
 export interface AdminClientOverview {
-  crmClientId: number;
+  id: string;
   name: string;
-  rut: string | null;
-  rubro: string | null;
-  crmStatus: string;
-  managedClientId: string | null;
+  legalName: string | null;
+  internalCode: string | null;
+  industry: string | null;
+  status: ManagedClientStatus;
   configurationStatus: ClientConfigurationStatus;
   domainCount: number;
   mailboxCount: number;

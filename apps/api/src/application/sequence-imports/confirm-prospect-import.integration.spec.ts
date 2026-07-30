@@ -2,7 +2,6 @@ import { ConflictException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
-import { CrmClient } from '../../domain/crm-client/crm-client.entity';
 import { PrismaAuditLogRepository } from '../../infrastructure/persistence/prisma/prisma-audit-log.repository';
 import { PrismaCompanyRepository } from '../../infrastructure/persistence/prisma/prisma-company.repository';
 import { PrismaContactRepository } from '../../infrastructure/persistence/prisma/prisma-contact.repository';
@@ -15,7 +14,7 @@ import { PrismaSequenceStepRepository } from '../../infrastructure/persistence/p
 import { PrismaSequenceRepository } from '../../infrastructure/persistence/prisma/prisma-sequence.repository';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { assertTestDatabaseEnvironment } from '../../infrastructure/persistence/prisma/test-database-guard';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { IntegrationService } from '../integration/integration.service';
 import { ConfirmProspectImportInput, ConfirmProspectImportUseCase } from './confirm-prospect-import.use-case';
@@ -26,16 +25,14 @@ import { ConfirmProspectImportInput, ConfirmProspectImportUseCase } from './conf
  * by directly instantiating the Prisma repositories (same pattern as
  * restart-durability.integration.spec.ts) rather than the full AppModule,
  * so query counting via a logging-enabled PrismaClient is straightforward.
- * A minimal stand-in CRM eligibility service is used — the CRM check
+ * A minimal stand-in eligibility service is used — the eligibility check
  * itself is already covered elsewhere; this file's focus is the
  * transactional/bulk materialization behavior.
  */
 const describeIfDatabaseAvailable = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 
-class FakeCrmEligibilityService {
-  async getVerifiedActiveClient(): Promise<CrmClient> {
-    return { crmClientId: 999001, name: 'Fixture', rut: null, rubro: null, status: 'ACTIVO' };
-  }
+class FakeClientEligibilityService {
+  async assertEligibleForPublish(): Promise<void> {}
 }
 
 class FakeIntegrationService {
@@ -68,7 +65,7 @@ describeIfDatabaseAvailable('ConfirmProspectImportUseCase (PostgreSQL integratio
     const org = await prisma.organization.create({ data: { name: `__fase2_case_b_${stamp}` } });
     orgId = org.id;
     const client = await prisma.managedClient.create({
-      data: { organizationId: orgId, crmClientId: 999001, name: 'Cliente Fixture', createdBy: 'seed', updatedBy: 'seed' },
+      data: { organizationId: orgId, source: 'SERVER', serverClientId: `srv_${stamp}`, name: 'Cliente Fixture', createdBy: 'seed', updatedBy: 'seed' },
     });
     clientId = client.id;
     const user = await prisma.user.create({
@@ -166,7 +163,7 @@ describeIfDatabaseAvailable('ConfirmProspectImportUseCase (PostgreSQL integratio
       steps,
       managedClients,
       auditLogs,
-      new FakeCrmEligibilityService() as unknown as CrmClientEligibilityService,
+      new FakeClientEligibilityService() as unknown as ClientEligibilityService,
       idempotency,
       new FakeIntegrationService() as unknown as IntegrationService,
     );

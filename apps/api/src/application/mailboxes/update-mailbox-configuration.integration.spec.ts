@@ -5,26 +5,22 @@ import { AppModule } from '../../app.module';
 import { assertTestDatabaseEnvironment } from '../../infrastructure/persistence/prisma/test-database-guard';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { PRISMA_SERVICE } from '../../infrastructure/persistence/tokens';
-import { ConfigureMailboxInput, ConfigureMailboxUseCase } from './configure-mailbox.use-case';
+import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
 import { UpdateMailboxConfigurationInput, UpdateMailboxConfigurationUseCase } from './update-mailbox-configuration.use-case';
 
 /**
- * Fase 2 — real-PostgreSQL evidence for `UpdateMailboxConfigurationUseCase`,
- * the edit-side counterpart of Caso A. Runs only against mr-outreach-test
- * (`npm run test:integration`), CRM_DRIVER=mock throughout.
+ * Real-PostgreSQL evidence for `UpdateMailboxConfigurationUseCase`. Runs only
+ * against mr-outreach-test (`npm run test:integration`).
  */
 const describeIfDatabaseAvailable = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 
-// Each test's beforeEach already calls ConfigureMailboxUseCase (dispatch +
-// advance) before exercising the update itself — real network round-trips
-// add up past the default 5s Jest timeout.
 jest.setTimeout(30_000);
 
 describeIfDatabaseAvailable('UpdateMailboxConfigurationUseCase (PostgreSQL integration)', () => {
   let moduleRef: TestingModule;
-  let configureUseCase: ConfigureMailboxUseCase;
   let updateUseCase: UpdateMailboxConfigurationUseCase;
   let prisma: PrismaService;
+  let secrets: SecretEncryptionService;
   const stamp = Date.now();
   let orgId: string;
   let mailboxId: string;
@@ -33,9 +29,9 @@ describeIfDatabaseAvailable('UpdateMailboxConfigurationUseCase (PostgreSQL integ
   beforeAll(async () => {
     assertTestDatabaseEnvironment();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    configureUseCase = moduleRef.get(ConfigureMailboxUseCase);
     updateUseCase = moduleRef.get(UpdateMailboxConfigurationUseCase);
     prisma = moduleRef.get(PRISMA_SERVICE);
+    secrets = moduleRef.get(SecretEncryptionService);
   });
 
   afterAll(async () => {
@@ -47,20 +43,56 @@ describeIfDatabaseAvailable('UpdateMailboxConfigurationUseCase (PostgreSQL integ
     orgId = org.id;
 
     const domainSuffix = randomUUID().slice(0, 6);
-    const configureInput: ConfigureMailboxInput = {
-      organizationId: orgId,
-      crmClientId: 2001,
-      domainName: `edit-${stamp}-${domainSuffix}.test`,
-      email: `contacto@edit-${stamp}-${domainSuffix}.test`,
-      fromName: 'Equipo de Ventas',
-      imap: { host: 'imap.example.com', port: 993, encryption: 'SSL_TLS', username: 'contacto', password: 'imap-secret', verifyCertificate: true },
-      smtp: { host: 'smtp.example.com', port: 587, encryption: 'STARTTLS', username: 'contacto', password: 'smtp-secret', verifyCertificate: true },
-      actorId: 'admin_1',
-      idempotencyKey: `key_${randomUUID()}`,
-    };
-    const { result } = await configureUseCase.execute(configureInput);
-    mailboxId = result.mailboxId;
-    clientId = result.clientId;
+    const client = await prisma.managedClient.create({
+      data: { organizationId: orgId, source: 'SERVER', serverClientId: `srv_edit_${domainSuffix}`, name: 'Cliente Edición', createdBy: 'admin_1', updatedBy: 'admin_1' },
+    });
+    clientId = client.id;
+    const domain = await prisma.domain.create({
+      data: { organizationId: orgId, clientId, domainName: `edit-${stamp}-${domainSuffix}.test`, createdBy: 'admin_1', updatedBy: 'admin_1' },
+    });
+    const setupCommandId = `cmd_${randomUUID()}`;
+    const mailbox = await prisma.mailbox.create({
+      data: {
+        organizationId: orgId,
+        clientId,
+        domainId: domain.id,
+        name: 'Equipo de Ventas',
+        email: `contacto@edit-${stamp}-${domainSuffix}.test`,
+        fromName: 'Equipo de Ventas',
+        connectionStatus: 'CONNECTED',
+        provisioningStatus: 'PROVISIONED',
+        lastProvisionCommandId: setupCommandId,
+        imapHost: 'imap.example.com',
+        imapPort: 993,
+        imapEncryption: 'SSL_TLS',
+        imapUsername: 'contacto',
+        imapVerifyCertificate: true,
+        imapSecretCiphertext: secrets.encrypt('imap-secret'),
+        smtpHost: 'smtp.example.com',
+        smtpPort: 587,
+        smtpEncryption: 'STARTTLS',
+        smtpUsername: 'contacto',
+        smtpVerifyCertificate: true,
+        smtpSecretCiphertext: secrets.encrypt('smtp-secret'),
+      },
+    });
+    mailboxId = mailbox.id;
+    await prisma.integrationCommand.create({
+      data: {
+        organizationId: orgId,
+        commandId: setupCommandId,
+        commandType: 'MAILBOX_PROVISION_REQUESTED',
+        aggregateType: 'MAILBOX',
+        aggregateId: mailboxId,
+        schemaVersion: '1.0',
+        idempotencyKey: `key_${randomUUID()}`,
+        correlationId: `corr_${randomUUID()}`,
+        payload: {},
+        status: 'COMPLETED',
+        requestedBy: 'admin_1',
+        completedAt: new Date(),
+      },
+    });
   });
 
   afterEach(async () => {

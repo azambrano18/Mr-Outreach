@@ -21,7 +21,7 @@ import {
 import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { htmlToPlainText } from '../../infrastructure/security/html-to-plain-text';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IDEMPOTENCY_SCOPE, IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { hashLogicalPayload } from '../idempotency/payload-canonicalizer';
 import { IntegrationService } from '../integration/integration.service';
@@ -96,7 +96,7 @@ export class UpdateMailboxConfigurationUseCase {
     @Inject(SIGNATURE_VERSION_REPOSITORY) private readonly signatureVersions: SignatureVersionRepository,
     @Inject(MANAGED_CLIENT_REPOSITORY) private readonly managedClients: ManagedClientRepository,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
-    private readonly crmEligibility: CrmClientEligibilityService,
+    private readonly eligibility: ClientEligibilityService,
     private readonly secrets: SecretEncryptionService,
     private readonly htmlSanitizer: HtmlSanitizerService,
     private readonly idempotency: IdempotentOperationService,
@@ -145,12 +145,10 @@ export class UpdateMailboxConfigurationUseCase {
       };
     }
 
-    // §"El CRM se consulta antes de abrir la transacción local" — same rule as every other Fase 2 use case.
     if (existing.clientId) {
       const managedClient = await this.managedClients.findById(existing.clientId);
-      // A SERVER-origin client with no CRM linkage has nothing to verify here — out of scope for this phase.
-      if (managedClient && managedClient.crmClientId !== null) {
-        await this.crmEligibility.getVerifiedActiveClient(managedClient.crmClientId);
+      if (managedClient) {
+        await this.eligibility.assertEligibleForPublish(managedClient);
       }
     }
 

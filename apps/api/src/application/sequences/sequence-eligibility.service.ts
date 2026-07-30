@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { ClientExecutiveAssignmentRepository } from '../../domain/client/client-executive-assignment.repository';
 import { ManagedClient } from '../../domain/client/managed-client.entity';
 import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
-import { CrmClient } from '../../domain/crm-client/crm-client.entity';
 import { Domain } from '../../domain/domain-entity/domain.entity';
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
@@ -18,7 +17,7 @@ import {
   MANAGED_CLIENT_REPOSITORY,
   USER_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 
 export interface SequenceEligibilityInput {
   organizationId: string;
@@ -29,7 +28,6 @@ export interface SequenceEligibilityInput {
 }
 
 export interface SequenceEligibilityResult {
-  crmClient: CrmClient;
   managedClient: ManagedClient;
   executive: User;
   domain: Domain | null;
@@ -48,9 +46,10 @@ export interface SequenceEligibilityResult {
  * by which permissions/scope they additionally enforce before calling in.
  *
  * Pure validation: never writes to PostgreSQL, never creates a command,
- * never opens a transaction, never records audit. The CRM check
- * (`CrmClientEligibilityService.getVerifiedActiveClient`) is itself a pure
- * read — safe to call before opening any local transaction.
+ * never opens a transaction, never records audit. The eligibility check
+ * (`ClientEligibilityService.assertEligibleForPublish`) evaluates the
+ * client's local snapshot only — see that service's own doc comment for
+ * why there is no live external call yet.
  */
 @Injectable()
 export class SequenceEligibilityService {
@@ -62,7 +61,7 @@ export class SequenceEligibilityService {
     @Inject(CLIENT_EXECUTIVE_ASSIGNMENT_REPOSITORY)
     private readonly clientAssignments: ClientExecutiveAssignmentRepository,
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
-    private readonly crmEligibility: CrmClientEligibilityService,
+    private readonly eligibility: ClientEligibilityService,
   ) {}
 
   async verify(input: SequenceEligibilityInput): Promise<SequenceEligibilityResult> {
@@ -82,14 +81,7 @@ export class SequenceEligibilityService {
       throw new BadRequestException('El cliente seleccionado no está activo.');
     }
 
-    // Fase 2.1 — a SERVER-origin client with no CRM linkage can't create
-    // sequences yet: out of scope for this phase (§20), never fabricated.
-    if (managedClient.crmClientId === null) {
-      throw new BadRequestException('Este cliente no tiene vinculación con el CRM; no admite secuencias todavía.');
-    }
-    // Live CRM check — never writes, never inside a transaction. Throws
-    // 404/409/503 exactly as CrmClientEligibilityService already defines.
-    const crmClient = await this.crmEligibility.getVerifiedActiveClient(managedClient.crmClientId);
+    await this.eligibility.assertEligibleForPublish(managedClient);
 
     const clientAssignments = await this.clientAssignments.findByUser(input.executiveId);
     if (!clientAssignments.some((assignment) => assignment.clientId === managedClient.id)) {
@@ -144,6 +136,6 @@ export class SequenceEligibilityService {
       mailboxAlreadyAssigned = assignments.some((assignment) => assignment.userId === input.executiveId);
     }
 
-    return { crmClient, managedClient, executive, domain, mailbox, mailboxAlreadyAssigned };
+    return { managedClient, executive, domain, mailbox, mailboxAlreadyAssigned };
   }
 }

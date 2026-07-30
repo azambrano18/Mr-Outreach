@@ -1,17 +1,15 @@
-export type ClientConfigurationStatus =
-  | 'SIN_CONFIGURAR'
-  | 'CONFIGURACION_INCOMPLETA'
-  | 'CON_INCIDENCIAS'
-  | 'CONFIGURADO';
+import { ManagedClientStatus } from '../../domain/client/managed-client.entity';
 
-/** One CRM (maestro_clientes) row merged with its Mr Outreach operational configuration, if any. */
+export type ClientConfigurationStatus = 'CONFIGURACION_INCOMPLETA' | 'CON_INCIDENCIAS' | 'CONFIGURADO';
+
+/** Listado local puro de ManagedClient con su estado de configuración. */
 export interface AdminClientOverview {
-  crmClientId: number;
+  id: string;
   name: string;
-  rut: string | null;
-  rubro: string | null;
-  crmStatus: string;
-  managedClientId: string | null;
+  legalName: string | null;
+  internalCode: string | null;
+  industry: string | null;
+  status: ManagedClientStatus;
   configurationStatus: ClientConfigurationStatus;
   domainCount: number;
   mailboxCount: number;
@@ -19,7 +17,6 @@ export interface AdminClientOverview {
 }
 
 export interface AdminClientsListResult {
-  /** false when the external CRM connection failed — never a hard 500, see PostgresCrmClientRepository. */
   available: boolean;
   clients: AdminClientOverview[];
 }

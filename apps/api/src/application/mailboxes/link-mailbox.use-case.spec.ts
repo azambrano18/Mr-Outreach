@@ -1,13 +1,11 @@
 import { ConflictException, GoneException, ServiceUnavailableException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
-import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { MailboxMotorPort } from '../../domain/mailbox-motor/mailbox-motor-port';
 import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
 import { ClientsService } from '../clients/clients.service';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { ClientMailboxVisibilityService } from './client-mailbox-visibility.service';
 import { LinkMailboxInput, LinkMailboxUseCase } from './link-mailbox.use-case';
@@ -25,17 +23,14 @@ describe('LinkMailboxUseCase', () => {
   let assignments: jest.Mocked<MailboxAssignmentRepository>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
   let motor: jest.Mocked<MailboxMotorPort>;
-  let clients: jest.Mocked<Pick<ClientsService, 'upsertFromVerifiedCrmClient'>>;
-  let managedClients: jest.Mocked<Pick<ManagedClientRepository, 'findByServerClientId' | 'create'>>;
-  let crmEligibility: jest.Mocked<Pick<CrmClientEligibilityService, 'getVerifiedActiveClient'>>;
+  let clients: jest.Mocked<Pick<ClientsService, 'upsertFromServerPayload'>>;
   let idempotency: jest.Mocked<Pick<IdempotentOperationService, 'checkExisting' | 'claim' | 'markCompleted'>>;
   let executiveValidator: jest.Mocked<Pick<MailboxExecutiveAssignmentValidator, 'plan' | 'validate'>>;
   let clientVisibility: jest.Mocked<Pick<ClientMailboxVisibilityService, 'grantForExecutives' | 'revokeIfNoRemainingMailbox'>>;
   let useCase: LinkMailboxUseCase;
 
   const orgId = 'org_1';
-  const crmClient = { crmClientId: 88, name: 'Cliente Ejemplo', rut: '76.111.222-3', rubro: 'Servicios', status: 'ACTIVO' };
-  const managedClient = { id: 'mc_1', organizationId: orgId, crmClientId: 88 } as never;
+  const managedClient = { id: 'mc_1', organizationId: orgId, source: 'SERVER', serverClientId: 'client_1' } as never;
   const domain = { id: 'domain_1', organizationId: orgId, clientId: 'mc_1', domainName: 'cliente.cl' };
 
   const redemption = {
@@ -45,7 +40,7 @@ describe('LinkMailboxUseCase', () => {
     redeemedAt: new Date(),
     mailbox: { serverMailboxId: 'mbx_1', email: 'ventas@cliente.cl', displayName: 'Ventas', status: 'CONNECTED' as const, canSend: true },
     domain: { serverDomainId: 'dom_1', name: 'cliente.cl' },
-    client: { serverClientId: 'client_1', crmClientId: 88, name: 'Cliente Ejemplo' },
+    client: { serverClientId: 'client_1', name: 'Cliente Ejemplo' },
   };
 
   function baseInput(overrides: Partial<LinkMailboxInput> = {}): LinkMailboxInput {
@@ -70,9 +65,7 @@ describe('LinkMailboxUseCase', () => {
       getMailboxStatus: jest.fn(),
       unlinkMailbox: jest.fn(),
     };
-    clients = { upsertFromVerifiedCrmClient: jest.fn().mockResolvedValue(managedClient) };
-    managedClients = { findByServerClientId: jest.fn().mockResolvedValue(null), create: jest.fn() };
-    crmEligibility = { getVerifiedActiveClient: jest.fn().mockResolvedValue(crmClient) };
+    clients = { upsertFromServerPayload: jest.fn().mockResolvedValue(managedClient) };
     idempotency = {
       checkExisting: jest.fn().mockResolvedValue(null),
       claim: jest.fn(),
@@ -125,9 +118,7 @@ describe('LinkMailboxUseCase', () => {
       assignments,
       auditLogs,
       motor,
-      managedClients as never,
       clients as never,
-      crmEligibility as never,
       idempotency as never,
       executiveValidator as never,
       clientVisibility as never,
@@ -141,7 +132,7 @@ describe('LinkMailboxUseCase', () => {
     expect(result.mailboxId).toBe('mailbox_1');
     expect(result.serverMailboxId).toBe('mbx_1');
     expect(result.linkStatus).toBe('ACTIVE');
-    expect(clients.upsertFromVerifiedCrmClient).toHaveBeenCalledWith(orgId, crmClient, 'admin_1', {}, { kind: 'fake' });
+    expect(clients.upsertFromServerPayload).toHaveBeenCalledWith(orgId, redemption.client, 'admin_1', {}, { kind: 'fake' });
     expect(domains.create).toHaveBeenCalled();
     expect(mailboxes.createLinked).toHaveBeenCalledWith(
       expect.objectContaining({ serverMailboxId: 'mbx_1', clientId: 'mc_1', domainId: 'domain_1' }),
@@ -258,36 +249,12 @@ describe('LinkMailboxUseCase', () => {
     );
   });
 
-  it('§9.1 — links successfully for a client the motor reports without crmClientId, using serverClientId as the dedupe key instead', async () => {
-    motor.redeemLinkToken.mockResolvedValue({
-      ...redemption,
-      client: { ...redemption.client, crmClientId: null },
-    });
-    const serverOnlyClient = { id: 'mc_server_1', organizationId: orgId, crmClientId: null, source: 'SERVER', serverClientId: 'client_1' };
-    managedClients.create.mockResolvedValue(serverOnlyClient as never);
+  it('reuses the existing local client on a repeat redemption for the same serverClientId', async () => {
+    clients.upsertFromServerPayload.mockResolvedValue(managedClient);
 
     const { result } = await useCase.execute(baseInput());
 
-    expect(result.clientId).toBe('mc_server_1');
-    expect(clients.upsertFromVerifiedCrmClient).not.toHaveBeenCalled();
-    expect(crmEligibility.getVerifiedActiveClient).not.toHaveBeenCalled();
-    expect(managedClients.create).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: orgId, crmClientId: null, source: 'SERVER', serverClientId: 'client_1' }),
-      { kind: 'fake' },
-    );
-  });
-
-  it('§9.1 — reuses the existing local client on a repeat redemption for the same Railway serverClientId', async () => {
-    motor.redeemLinkToken.mockResolvedValue({
-      ...redemption,
-      client: { ...redemption.client, crmClientId: null },
-    });
-    const serverOnlyClient = { id: 'mc_server_1', organizationId: orgId, crmClientId: null, source: 'SERVER', serverClientId: 'client_1' };
-    managedClients.findByServerClientId.mockResolvedValue(serverOnlyClient as never);
-
-    const { result } = await useCase.execute(baseInput());
-
-    expect(result.clientId).toBe('mc_server_1');
-    expect(managedClients.create).not.toHaveBeenCalled();
+    expect(result.clientId).toBe('mc_1');
+    expect(clients.upsertFromServerPayload).toHaveBeenCalledWith(orgId, redemption.client, 'admin_1', {}, { kind: 'fake' });
   });
 });

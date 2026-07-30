@@ -38,8 +38,6 @@ export const SEQUENCE_EXECUTION_REPOSITORY = Symbol('SEQUENCE_EXECUTION_REPOSITO
 export const PROSPECT_IMPORT_REPOSITORY = Symbol('PROSPECT_IMPORT_REPOSITORY');
 export const PROSPECT_IMPORT_ROW_REPOSITORY = Symbol('PROSPECT_IMPORT_ROW_REPOSITORY');
 export const SIGNATURE_ASSET_REPOSITORY = Symbol('SIGNATURE_ASSET_REPOSITORY');
-/** External, read-only Neon CRM database (table maestro_clientes) — never the app's own PrismaService. */
-export const CRM_CLIENT_REPOSITORY = Symbol('CRM_CLIENT_REPOSITORY');
 
 /**
  * Internal to the persistence layer — resolves to a live PrismaService

@@ -10,7 +10,7 @@ import { SequenceContactRepository } from '../../domain/sequence-contact/sequenc
 import { SequenceImportRow } from '../../domain/sequence-import-row/sequence-import-row.entity';
 import { SequenceImportRowRepository } from '../../domain/sequence-import-row/sequence-import-row.repository';
 import { SequenceImportRepository } from '../../domain/sequence-import/sequence-import.repository';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { IntegrationService } from '../integration/integration.service';
 import {
@@ -35,7 +35,7 @@ describe('ConfirmProspectImportUseCase', () => {
   let steps: jest.Mocked<SequenceStepRepository>;
   let managedClients: jest.Mocked<ManagedClientRepository>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
-  let crmEligibility: jest.Mocked<Pick<CrmClientEligibilityService, 'getVerifiedActiveClient'>>;
+  let eligibility: jest.Mocked<Pick<ClientEligibilityService, 'assertEligibleForPublish'>>;
   let idempotency: jest.Mocked<Pick<IdempotentOperationService, 'checkExisting' | 'claim' | 'refreshResultSnapshot'>>;
   let integration: jest.Mocked<Pick<IntegrationService, 'dispatchExistingCommand'>>;
   let useCase: ConfirmProspectImportUseCase;
@@ -176,15 +176,15 @@ describe('ConfirmProspectImportUseCase', () => {
       remove: jest.fn(),
     };
     managedClients = {
-      findById: jest.fn().mockResolvedValue({ id: 'mc_1', organizationId: orgId, crmClientId: 2001 }),
+      findById: jest.fn().mockResolvedValue({ id: 'mc_1', organizationId: orgId, status: 'ACTIVE', externalStatusSnapshot: null }),
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      findByCrmClientId: jest.fn(), findByServerClientId: jest.fn(),
+      findByServerClientId: jest.fn(),
     };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
-    crmEligibility = {
-      getVerifiedActiveClient: jest.fn().mockResolvedValue({ crmClientId: 2001, status: 'ACTIVO' }),
+    eligibility = {
+      assertEligibleForPublish: jest.fn().mockResolvedValue(undefined),
     };
     idempotency = {
       checkExisting: jest.fn().mockResolvedValue(null),
@@ -254,7 +254,7 @@ describe('ConfirmProspectImportUseCase', () => {
       steps,
       managedClients,
       auditLogs,
-      crmEligibility as unknown as CrmClientEligibilityService,
+      eligibility as unknown as ClientEligibilityService,
       idempotency as unknown as IdempotentOperationService,
       integration as unknown as IntegrationService,
     );
@@ -311,14 +311,14 @@ describe('ConfirmProspectImportUseCase', () => {
     expect(imports.conditionalUpdateStatus).not.toHaveBeenCalled();
   });
 
-  it('propagates 409 when the CRM reports the client inactive', async () => {
-    crmEligibility.getVerifiedActiveClient.mockRejectedValue(new ConflictException('inactive'));
+  it('propagates 409 when the client is reported inactive', async () => {
+    eligibility.assertEligibleForPublish.mockRejectedValue(new ConflictException('inactive'));
     await expect(useCase.execute(baseInput())).rejects.toThrow(ConflictException);
     expect(imports.conditionalUpdateStatus).not.toHaveBeenCalled();
   });
 
-  it('propagates 503 when the CRM is unavailable', async () => {
-    crmEligibility.getVerifiedActiveClient.mockRejectedValue(new ServiceUnavailableException('down'));
+  it('propagates 503 when eligibility can not be determined', async () => {
+    eligibility.assertEligibleForPublish.mockRejectedValue(new ServiceUnavailableException('down'));
     await expect(useCase.execute(baseInput())).rejects.toThrow(ServiceUnavailableException);
   });
 

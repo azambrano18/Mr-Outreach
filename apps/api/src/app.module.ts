@@ -6,7 +6,6 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
-import { CrmClientsModule } from './modules/crm-clients/crm-clients.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { HealthModule } from './modules/health/health.module';
 import { IntegrationMonitorModule } from './modules/integration-monitor/integration-monitor.module';
@@ -63,7 +62,6 @@ const NODE_ENV = process.env.NODE_ENV ?? 'development';
     ReplySimulationModule,
     ClientsModule,
     DomainsModule,
-    CrmClientsModule,
     ConversationsModule,
     AuditModule,
     IntegrationMonitorModule,

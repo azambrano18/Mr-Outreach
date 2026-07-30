@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
-import { createReadyExecutive } from './fixtures';
+import { createReadyExecutive, linkClientMailbox } from './fixtures';
 
 /**
  * Spec §4 — the admin's global "todas las secuencias" monitoring panel.
@@ -36,11 +36,8 @@ describe('Admin sequence monitoring panel (e2e) — memory + simulated engine', 
       roleId: executiveRoleId,
     });
 
-    const client = await request(app.getHttpServer())
-      .post('/clients')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ crmClientId: 2048 });
-    clientId = client.body.id;
+    const linked = await linkClientMailbox(app, adminToken, executive.id);
+    clientId = linked.clientId;
     await request(app.getHttpServer())
       .put(`/clients/${clientId}/assignees`)
       .set('Authorization', `Bearer ${adminToken}`)

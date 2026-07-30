@@ -6,7 +6,6 @@ import { AuthenticatedUser } from '../../application/auth/auth.types';
 import { AuditLogEntry } from '../../domain/audit/audit-log.entity';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { AUDIT_LOG_REPOSITORY } from '../../infrastructure/persistence/tokens';
-import { ConfigureMailboxResult, ConfigureMailboxUseCase } from '../../application/mailboxes/configure-mailbox.use-case';
 import { IntrospectLinkTokenResult, LinkMailboxResult, LinkMailboxUseCase } from '../../application/mailboxes/link-mailbox.use-case';
 import {
   ReassignMailboxPrimaryExecutiveResult,
@@ -34,7 +33,6 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { AdvanceProvisioningDto } from './dto/advance-provisioning.dto';
-import { ConfigureMailboxDto } from './dto/configure-mailbox.dto';
 import { CreateMailboxDto } from './dto/create-mailbox.dto';
 import { IntrospectLinkTokenDto } from './dto/introspect-link-token.dto';
 import { LinkDomainDto } from './dto/link-domain.dto';
@@ -57,7 +55,6 @@ export class MailboxesController {
     private readonly mailboxesService: MailboxesService,
     private readonly provisioning: MailboxProvisioningService,
     private readonly integration: IntegrationService,
-    private readonly configureMailbox: ConfigureMailboxUseCase,
     private readonly updateMailboxConfiguration: UpdateMailboxConfigurationUseCase,
     private readonly linkMailbox: LinkMailboxUseCase,
     private readonly reassignPrimaryExecutive: ReassignMailboxPrimaryExecutiveUseCase,
@@ -144,41 +141,6 @@ export class MailboxesController {
       actorId: user.id,
       idempotencyKey,
       correlationId: dto.correlationId,
-    });
-    return result;
-  }
-
-  /**
-   * Fase 2, Caso A — replaces the "crear → vincular dominio → provisionar →
-   * avanzar" sequence of separate requests with one atomic, idempotent
-   * intent. Requires `Idempotency-Key`: the frontend generates it once and
-   * must resend the exact same value on every retry of the same attempt.
-   */
-  @Post('configure')
-  @RequirePermissions('mailboxes.create')
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
-  async configure(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ConfigureMailboxDto,
-    @Headers('idempotency-key') idempotencyKey: string,
-  ): Promise<ConfigureMailboxResult> {
-    if (!idempotencyKey) {
-      throw new BadRequestException('El encabezado Idempotency-Key es obligatorio.');
-    }
-    const { result } = await this.configureMailbox.execute({
-      organizationId: user.organizationId,
-      crmClientId: dto.crmClientId,
-      domainName: dto.domainName,
-      email: dto.email,
-      fromName: dto.fromName,
-      replyTo: dto.replyTo ?? null,
-      imap: dto.imap,
-      smtp: dto.smtp,
-      signatureHtml: dto.signatureHtml ?? null,
-      primaryExecutiveId: dto.primaryExecutiveId ?? null,
-      secondaryExecutiveIds: dto.secondaryExecutiveIds ?? [],
-      actorId: user.id,
-      idempotencyKey,
     });
     return result;
   }

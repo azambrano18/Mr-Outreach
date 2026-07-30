@@ -38,7 +38,6 @@ interface WireDomain {
 
 interface WireClient {
   serverClientId: string;
-  crmClientId: number | null;
   name: string;
 }
 
@@ -86,7 +85,7 @@ function toDomainInfo(w: WireDomain): MailboxMotorDomainInfo {
 }
 
 function toClientInfo(w: WireClient): MailboxMotorClientInfo {
-  return { serverClientId: w.serverClientId, crmClientId: w.crmClientId, name: w.name };
+  return { serverClientId: w.serverClientId, name: w.name };
 }
 
 /**

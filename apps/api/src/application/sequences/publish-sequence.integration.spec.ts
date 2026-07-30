@@ -2,7 +2,6 @@ import { ConflictException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
-import { CrmClient } from '../../domain/crm-client/crm-client.entity';
 import { PrismaAuditLogRepository } from '../../infrastructure/persistence/prisma/prisma-audit-log.repository';
 import { PrismaCompanyRepository } from '../../infrastructure/persistence/prisma/prisma-company.repository';
 import { PrismaContactRepository } from '../../infrastructure/persistence/prisma/prisma-contact.repository';
@@ -17,7 +16,7 @@ import { PrismaSignatureVersionRepository } from '../../infrastructure/persisten
 import { PrismaSignatureRepository } from '../../infrastructure/persistence/prisma/prisma-signature.repository';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { assertTestDatabaseEnvironment } from '../../infrastructure/persistence/prisma/test-database-guard';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { IntegrationService } from '../integration/integration.service';
 import { PublishSequenceInput, PublishSequenceUseCase } from './publish-sequence.use-case';
@@ -32,16 +31,14 @@ import { PublishSequenceInput, PublishSequenceUseCase } from './publish-sequence
  *    succeed (the loser's transaction rolls back for real);
  *  - a retry with the same Idempotency-Key+content never re-executes;
  *  - state survives a full process restart.
- * A minimal stand-in CRM/engine pair is used (same pattern as
+ * A minimal stand-in eligibility/engine pair is used (same pattern as
  * confirm-prospect-import.integration.spec.ts) — this file's focus is
- * transactional/durability behavior, not CRM specifics (covered elsewhere).
+ * transactional/durability behavior, not eligibility specifics (covered elsewhere).
  */
 const describeIfDatabaseAvailable = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 
-class FakeCrmEligibilityService {
-  async getVerifiedActiveClient(): Promise<CrmClient> {
-    return { crmClientId: 999002, name: 'Fixture', rut: null, rubro: null, status: 'ACTIVO' };
-  }
+class FakeClientEligibilityService {
+  async assertEligibleForPublish(): Promise<void> {}
 }
 
 class FakeIntegrationService {
@@ -175,7 +172,7 @@ describeIfDatabaseAvailable('PublishSequenceUseCase (PostgreSQL integration)', (
       companies,
       managedClients,
       auditLogs,
-      new FakeCrmEligibilityService() as unknown as CrmClientEligibilityService,
+      new FakeClientEligibilityService() as unknown as ClientEligibilityService,
       idempotency,
       new FakeIntegrationService() as unknown as IntegrationService,
       new NoopSimulatedAdapter() as never,

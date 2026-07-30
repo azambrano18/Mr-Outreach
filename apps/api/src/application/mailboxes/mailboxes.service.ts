@@ -515,7 +515,7 @@ export class MailboxesService {
 
     // §9 — the first point where mailbox↔client becomes unambiguous; never
     // gated in create() (per §9, no client relationship exists yet there).
-    await this.clients.assertClientCrmEligible(organizationId, domain.clientId, actorId);
+    await this.clients.assertClientEligible(organizationId, domain.clientId);
 
     const updated = await this.mailboxes.update(mailbox.id, {
       domainId: domain.id,

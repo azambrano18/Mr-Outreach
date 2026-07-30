@@ -13,7 +13,7 @@ import { SequenceContactRepository } from '../../domain/sequence-contact/sequenc
 import { SignatureVersionRepository } from '../../domain/signature/signature-version.repository';
 import { SignatureRepository } from '../../domain/signature/signature.repository';
 import { SimulatedMailEngineAdapter } from '../../infrastructure/mail-engine/simulated/simulated-mail-engine-adapter';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { ClientEligibilityService } from '../clients/client-eligibility.service';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { IntegrationService } from '../integration/integration.service';
 import { PublishSequenceInput, PublishSequenceUseCase } from './publish-sequence.use-case';
@@ -36,7 +36,7 @@ describe('PublishSequenceUseCase', () => {
   let companies: jest.Mocked<Pick<CompanyRepository, 'findManyByIds'>>;
   let managedClients: jest.Mocked<Pick<ManagedClientRepository, 'findById'>>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
-  let crmEligibility: jest.Mocked<Pick<CrmClientEligibilityService, 'getVerifiedActiveClient'>>;
+  let eligibility: jest.Mocked<Pick<ClientEligibilityService, 'assertEligibleForPublish'>>;
   let idempotency: jest.Mocked<Pick<IdempotentOperationService, 'checkExisting' | 'claim' | 'refreshResultSnapshot'>>;
   let integration: jest.Mocked<Pick<IntegrationService, 'dispatchExistingCommand' | 'advance'>>;
   let simulatedAdapter: jest.Mocked<Pick<SimulatedMailEngineAdapter, 'setPublishScenario'>>;
@@ -135,9 +135,9 @@ describe('PublishSequenceUseCase', () => {
     };
     contacts = { findManyByIds: jest.fn().mockResolvedValue([]) };
     companies = { findManyByIds: jest.fn().mockResolvedValue([]) };
-    managedClients = { findById: jest.fn().mockResolvedValue({ id: 'mc_1', organizationId: orgId, crmClientId: 7 }) };
+    managedClients = { findById: jest.fn().mockResolvedValue({ id: 'mc_1', organizationId: orgId, status: 'ACTIVE', externalStatusSnapshot: null }) };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
-    crmEligibility = { getVerifiedActiveClient: jest.fn().mockResolvedValue({ crmClientId: 7, status: 'ACTIVO' }) };
+    eligibility = { assertEligibleForPublish: jest.fn().mockResolvedValue(undefined) };
     idempotency = {
       checkExisting: jest.fn().mockResolvedValue(null),
       claim: jest.fn(),
@@ -199,7 +199,7 @@ describe('PublishSequenceUseCase', () => {
       companies as unknown as CompanyRepository,
       managedClients as unknown as ManagedClientRepository,
       auditLogs,
-      crmEligibility as unknown as CrmClientEligibilityService,
+      eligibility as unknown as ClientEligibilityService,
       idempotency as unknown as IdempotentOperationService,
       integration as unknown as IntegrationService,
       simulatedAdapter as unknown as SimulatedMailEngineAdapter,
@@ -247,17 +247,17 @@ describe('PublishSequenceUseCase', () => {
     await expect(useCase.execute(baseInput())).rejects.toThrow(ConflictException);
   });
 
-  it('checks CRM eligibility when the mailbox is linked to a client, and propagates a 409', async () => {
+  it('checks client eligibility when the mailbox is linked to a client, and propagates a 409', async () => {
     const { ConflictException: CE } = await import('@nestjs/common');
     (mailboxes.findById as jest.Mock).mockResolvedValue({ id: 'mailbox_1', organizationId: orgId, clientId: 'mc_1', domainId: 'domain_1' });
-    crmEligibility.getVerifiedActiveClient.mockRejectedValue(new CE('inactive'));
+    eligibility.assertEligibleForPublish.mockRejectedValue(new CE('inactive'));
     await expect(useCase.execute(baseInput())).rejects.toThrow(ConflictException);
     expect(sequences.conditionalUpdatePublishStatus).not.toHaveBeenCalled();
   });
 
-  it('never checks CRM when the sender mailbox has no clientId (Pendiente de clasificación)', async () => {
+  it('never checks eligibility when the sender mailbox has no clientId (Pendiente de clasificación)', async () => {
     await useCase.execute(baseInput());
-    expect(crmEligibility.getVerifiedActiveClient).not.toHaveBeenCalled();
+    expect(eligibility.assertEligibleForPublish).not.toHaveBeenCalled();
   });
 
   it('idempotent retry with the same key and content returns the persisted result without re-claiming', async () => {

@@ -1,5 +1,8 @@
 import { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { SimulatedMailboxMotorAdapter, IssueLinkTokenInput } from '../src/infrastructure/mailbox-motor/simulated/simulated-mailbox-motor-adapter';
+import { LinkMailboxResult } from '../src/application/mailboxes/link-mailbox.use-case';
 
 export interface ReadyExecutive {
   id: string;
@@ -47,4 +50,45 @@ export async function createReadyExecutive(
     .send({ currentPassword: temporaryPassword, newPassword: FIXTURE_PASSWORD });
 
   return { id, email: input.email, token };
+}
+
+/**
+ * A `ManagedClient` (plus its Domain and a linked Mailbox) can no longer be
+ * created via a manual "activate client" endpoint — the mailbox-link token
+ * redemption (`POST /mailboxes/link`) is the only path. This fixture wraps
+ * that flow: issues a simulated token via `SimulatedMailboxMotorAdapter`,
+ * then redeems it as `adminToken`, returning the resulting ids.
+ */
+export async function linkClientMailbox(
+  app: INestApplication,
+  adminToken: string,
+  primaryExecutiveId: string,
+  overrides: Partial<IssueLinkTokenInput> = {},
+): Promise<{ clientId: string; domainId: string; mailboxId: string; serverMailboxId: string }> {
+  const motor = app.get(SimulatedMailboxMotorAdapter);
+  const suffix = randomUUID().slice(0, 8);
+  const token = motor.issueLinkToken({
+    email: `ventas@fixture-${suffix}.test`,
+    displayName: 'Ventas',
+    domainName: `fixture-${suffix}.test`,
+    clientName: 'Cliente Fixture',
+    ...overrides,
+  });
+
+  const response = await request(app.getHttpServer())
+    .post('/mailboxes/link')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .set('Idempotency-Key', `fixture-link-${suffix}`)
+    .send({ token, primaryExecutiveId });
+
+  if (response.status !== 201) {
+    throw new Error(`Failed to link fixture mailbox: ${response.status} ${JSON.stringify(response.body)}`);
+  }
+  const result = response.body as LinkMailboxResult;
+  return {
+    clientId: result.clientId,
+    domainId: result.domainId,
+    mailboxId: result.mailboxId,
+    serverMailboxId: result.serverMailboxId,
+  };
 }

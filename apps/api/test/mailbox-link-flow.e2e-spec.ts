@@ -53,7 +53,6 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
       displayName: 'Ventas',
       domainName: `e2e-${suffix}.test`,
       clientName: 'Cliente E2E',
-      crmClientId: 2001,
       ...overrides,
     });
   }
@@ -372,8 +371,8 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
   });
 
   describe('GET /mailboxes/overview (§12.1 admin listing)', () => {
-    it('includes linked mailboxes with denormalized client/domain/executive names (§9.1 — no crmClientId required)', async () => {
-      const token = issueToken({ clientName: 'Cliente Overview E2E', crmClientId: null });
+    it('includes linked mailboxes with denormalized client/domain/executive names', async () => {
+      const token = issueToken({ clientName: 'Cliente Overview E2E' });
       const linkResponse = await request(app.getHttpServer())
         .post('/mailboxes/link')
         .set('Authorization', `Bearer ${adminToken}`)

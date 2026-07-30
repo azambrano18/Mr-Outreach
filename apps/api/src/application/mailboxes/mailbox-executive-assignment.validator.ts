@@ -16,13 +16,13 @@ export interface MailboxExecutiveAssignmentPlan {
 }
 
 /**
- * Fase 2 — Caso A completion. Single, shared authority for "may this
- * executive be assigned to a mailbox of this client", used identically by
- * `ConfigureMailboxUseCase` and `UpdateMailboxConfigurationUseCase` (never
- * duplicated). Deliberately pure validation: never writes an assignment
- * itself — that stays the caller's responsibility (MailboxAssignmentRepository),
- * exactly like SequenceEligibilityService's own "validates, never writes"
- * contract from Caso C.
+ * Single, shared authority for "may this executive be assigned to a
+ * mailbox of this client", used by `LinkMailboxUseCase` and
+ * `UpdateMailboxConfigurationUseCase` (never duplicated). Deliberately pure
+ * validation: never writes an assignment itself — that stays the caller's
+ * responsibility (MailboxAssignmentRepository), exactly like
+ * SequenceEligibilityService's own "validates, never writes" contract from
+ * Caso C.
  *
  * Called twice by design, per the approved proposal:
  *  - once with `ctx` omitted, before opening the transaction, purely to

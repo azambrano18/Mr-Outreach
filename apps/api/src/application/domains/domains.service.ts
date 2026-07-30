@@ -66,7 +66,7 @@ export class DomainsService {
     actorId: string,
   ): Promise<DomainSummary> {
     const client = await this.clients.getOwnedClient(organizationId, clientId);
-    await this.clients.assertClientCrmEligible(organizationId, clientId, actorId);
+    await this.clients.assertClientEligible(organizationId, clientId);
     const domainName = input.domainName.trim().toLowerCase();
 
     // Unique per organization, not globally — different organizations
@@ -112,7 +112,7 @@ export class DomainsService {
     // to INACTIVE/ARCHIVED never depend on the CRM.
     const isReactivating = input.status === 'ACTIVE' && existing.status !== 'ACTIVE';
     if (isReactivating) {
-      await this.clients.assertClientCrmEligible(organizationId, existing.clientId, actorId);
+      await this.clients.assertClientEligible(organizationId, existing.clientId);
     }
 
     const domainName = input.domainName?.trim().toLowerCase();

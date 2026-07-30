@@ -10,7 +10,6 @@ export interface ManagedClientRepository {
   findAll(organizationId: string): Promise<ManagedClient[]>;
   create(input: CreateManagedClientInput, ctx?: TransactionContext): Promise<ManagedClient>;
   update(id: string, input: UpdateManagedClientInput, ctx?: TransactionContext): Promise<ManagedClient>;
-  findByCrmClientId(organizationId: string, crmClientId: number, ctx?: TransactionContext): Promise<ManagedClient | null>;
-  /** Fase 2.1 — dedupe/upsert key for SERVER-origin clients (no crmClientId). */
+  /** Dedupe/upsert key for SERVER-origin clients. */
   findByServerClientId(organizationId: string, serverClientId: string, ctx?: TransactionContext): Promise<ManagedClient | null>;
 }

@@ -11,12 +11,12 @@ export interface ProvisioningEventTarget {
 }
 
 /**
- * Fase 2 — single, shared translation of "engine-reported provisioning
- * event" into "account state", used identically by
- * `ConfigureMailboxUseCase`, `UpdateMailboxConfigurationUseCase` and the
- * legacy `MailboxProvisioningService` (never three separate mappings).
- * Always called strictly after the business transaction has committed —
- * this never opens or participates in a database transaction itself.
+ * Single, shared translation of "engine-reported provisioning event" into
+ * "account state", used identically by `UpdateMailboxConfigurationUseCase`
+ * and the legacy `MailboxProvisioningService` (never two separate
+ * mappings). Always called strictly after the business transaction has
+ * committed — this never opens or participates in a database transaction
+ * itself.
  *
  * Idempotent by construction: `IntegrationService.advance()` only ever
  * returns *newly recorded* events (already-applied events are filtered

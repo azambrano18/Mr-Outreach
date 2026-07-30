@@ -1,6 +1,5 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { CrmClient } from '../../domain/crm-client/crm-client.entity';
-import { CrmClientEligibilityService } from '../crm-clients/crm-client-eligibility.service';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ClientEligibilityService } from './client-eligibility.service';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { ClientExecutiveAssignment } from '../../domain/client/client-executive-assignment.entity';
 import { ClientExecutiveAssignmentRepository } from '../../domain/client/client-executive-assignment.repository';
@@ -24,12 +23,26 @@ import {
   USER_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
 import {
-  ActivateManagedClientPayload,
   ClientAssigneeSummary,
   ManagedClientSummary,
   SetClientAssigneesPayload,
   UpdateManagedClientPayload,
 } from './clients.types';
+
+/** Minimal shape of the identity payload the external server hands over when a mailbox-link token is redeemed. */
+export interface ServerClientPayload {
+  serverClientId: string;
+  name: string;
+}
+
+export interface ServerClientOperationalInput {
+  legalName?: string;
+  internalCode?: string;
+  logoUrl?: string;
+  startDate?: string;
+  supervisorUserId?: string;
+  notes?: string;
+}
 
 @Injectable()
 export class ClientsService {
@@ -43,7 +56,7 @@ export class ClientsService {
     @Inject(CONVERSATION_REPOSITORY) private readonly conversations: ConversationRepository,
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
-    private readonly crmEligibility: CrmClientEligibilityService,
+    private readonly eligibility: ClientEligibilityService,
   ) {}
 
   async list(organizationId: string): Promise<ManagedClientSummary[]> {
@@ -77,73 +90,45 @@ export class ClientsService {
   }
 
   /**
-   * Fase 1.5 — "Activar en Mr Outreach", not "crear cliente" anymore. The
-   * only corporate-trustworthy input is `crmClientId`; name/rut/industry/
-   * status always come from the CRM (never from the request body — the
-   * DTO no longer even has fields for them, so the ValidationPipe's
-   * `forbidNonWhitelisted` already rejects them if the frontend sent
-   * them). Idempotent: activating an already-configured client refreshes
-   * its CRM snapshot and any operational fields passed instead of
-   * rejecting with "already configured".
+   * Creates or updates the local ManagedClient snapshot from a mailbox-link
+   * token redemption — the only way a client's identity enters Mr
+   * Outreach. Never fetches anything itself; the caller (LinkMailboxUseCase)
+   * already has the verified payload from the external server. Corporate
+   * fields (name) are always overwritten from the payload; every
+   * operational field (legalName/internalCode/logoUrl/startDate/
+   * supervisorUserId/notes) and every relation is left untouched on update
+   * — only ever set on first creation, from `operationalInput` when given.
    */
-  async create(
+  async upsertFromServerPayload(
     organizationId: string,
-    input: ActivateManagedClientPayload,
+    payload: ServerClientPayload,
     actorId: string,
-  ): Promise<ManagedClientSummary> {
-    const crmClient = await this.crmEligibility.getVerifiedActiveClient(input.crmClientId); // 404/409/503
-
-    const alreadyExisted = !!(await this.clients.findByCrmClientId(organizationId, input.crmClientId));
-    const client = await this.upsertFromVerifiedCrmClient(organizationId, crmClient, actorId, input);
-
-    await this.auditLogs.record({
-      organizationId,
-      actorId,
-      action: alreadyExisted ? 'client.crm_sync' : 'client.activate',
-      entityType: 'ManagedClient',
-      entityId: client.id,
-      metadata: { crmClientId: client.crmClientId, name: client.name },
-    });
-
-    return this.toSummary(client);
-  }
-
-  /**
-   * Fase 1.5 — creates or updates the ManagedClient from an already
-   * CRM-verified client (never fetches the CRM itself — the caller must
-   * have already called CrmClientEligibilityService). Corporate fields
-   * (name/industry/crmRutSnapshot/crmStatusSnapshot/crmStatusCheckedAt)
-   * are always overwritten from `crmClient`; every operational field
-   * (legalName/internalCode/logoUrl/startDate/supervisorUserId/notes) and
-   * every relation (domains/mailboxes/assignments/sequences/contacts/
-   * commands/audit) is left untouched on update — only ever set on first
-   * creation, from `operationalInput` when provided.
-   */
-  async upsertFromVerifiedCrmClient(
-    organizationId: string,
-    crmClient: CrmClient,
-    actorId: string,
-    operationalInput: Omit<ActivateManagedClientPayload, 'crmClientId'> = {},
+    operationalInput: ServerClientOperationalInput = {},
     ctx?: TransactionContext,
   ): Promise<ManagedClient> {
-    const crmSnapshot = {
-      name: crmClient.name,
-      industry: crmClient.rubro,
-      crmRutSnapshot: crmClient.rut,
-      crmStatusSnapshot: crmClient.status.trim().toUpperCase(),
-      crmStatusCheckedAt: new Date(),
-    };
-
-    const existing = await this.clients.findByCrmClientId(organizationId, crmClient.crmClientId, ctx);
+    const existing = await this.clients.findByServerClientId(organizationId, payload.serverClientId, ctx);
     if (existing) {
-      return this.clients.update(existing.id, { ...crmSnapshot, updatedBy: actorId }, ctx);
+      const updated = await this.clients.update(existing.id, { name: payload.name, updatedBy: actorId }, ctx);
+      await this.auditLogs.record(
+        {
+          organizationId,
+          actorId,
+          action: 'client.sync_from_link',
+          entityType: 'ManagedClient',
+          entityId: updated.id,
+          metadata: { serverClientId: payload.serverClientId, name: payload.name },
+        },
+        ctx,
+      );
+      return updated;
     }
 
-    return this.clients.create(
+    const created = await this.clients.create(
       {
         organizationId,
-        crmClientId: crmClient.crmClientId,
-        ...crmSnapshot,
+        source: 'SERVER',
+        serverClientId: payload.serverClientId,
+        name: payload.name,
         legalName: operationalInput.legalName ?? null,
         internalCode: operationalInput.internalCode ?? null,
         logoUrl: operationalInput.logoUrl ?? null,
@@ -154,37 +139,28 @@ export class ClientsService {
       },
       ctx,
     );
+    await this.auditLogs.record(
+      {
+        organizationId,
+        actorId,
+        action: 'client.create_from_link',
+        entityType: 'ManagedClient',
+        entityId: created.id,
+        metadata: { serverClientId: payload.serverClientId, name: payload.name },
+      },
+      ctx,
+    );
+    return created;
   }
 
   /**
-   * Fase 1.5 §6/§9 — the single, reusable "may this client have new
-   * activity" gate, used identically by domains/mailboxes/sequences and
-   * by both the admin and executive flows (see each service's own call
-   * site). Always refreshes the CRM snapshot (§11 — including when the
-   * answer is "inactive", so the ficha reflects reality even though the
-   * operation gets blocked) before throwing. Never authorizes based on
-   * the snapshot itself — always asks the CRM live.
+   * The single, reusable "may this client have new activity" gate, used
+   * identically by domains/mailboxes/sequences and by both the admin and
+   * executive flows (see each service's own call site).
    */
-  async assertClientCrmEligible(organizationId: string, managedClientId: string, actorId: string): Promise<void> {
+  async assertClientEligible(organizationId: string, managedClientId: string): Promise<void> {
     const client = await this.getOwnedClient(organizationId, managedClientId);
-    // Fase 2.1 — a SERVER-origin client with no CRM linkage has nothing to verify here; out of scope for this phase (§20).
-    if (client.crmClientId === null) {
-      return;
-    }
-    const { crmClient, active } = await this.crmEligibility.verify(client.crmClientId);
-
-    await this.clients.update(client.id, {
-      name: crmClient.name,
-      industry: crmClient.rubro,
-      crmRutSnapshot: crmClient.rut,
-      crmStatusSnapshot: crmClient.status.trim().toUpperCase(),
-      crmStatusCheckedAt: new Date(),
-      updatedBy: actorId,
-    });
-
-    if (!active) {
-      throw new ConflictException('Este cliente está inactivo en el CRM y no admite nuevas configuraciones.');
-    }
+    this.eligibility.assertEligible(client);
   }
 
   async update(
@@ -274,7 +250,7 @@ export class ClientsService {
     // §9 — only gate NEW assignments; removing assignees from an inactive
     // client (e.g. offboarding) must always be allowed.
     if (isAddingSomeone) {
-      await this.assertClientCrmEligible(organizationId, clientId, actorId);
+      await this.assertClientEligible(organizationId, clientId);
     }
 
     await Promise.all(
@@ -383,7 +359,6 @@ export class ClientsService {
     return {
       id: client.id,
       organizationId: client.organizationId,
-      crmClientId: client.crmClientId,
       source: client.source,
       serverClientId: client.serverClientId,
       name: client.name,
@@ -395,9 +370,9 @@ export class ClientsService {
       startDate: client.startDate,
       supervisorUserId: client.supervisorUserId,
       notes: client.notes,
-      crmRutSnapshot: client.crmRutSnapshot,
-      crmStatusSnapshot: client.crmStatusSnapshot,
-      crmStatusCheckedAt: client.crmStatusCheckedAt,
+      clientRutSnapshot: client.clientRutSnapshot,
+      externalStatusSnapshot: client.externalStatusSnapshot,
+      externalStatusCheckedAt: client.externalStatusCheckedAt,
       domainCount: clientDomains.length,
       mailboxCount,
       sequenceCount: clientSequences.length,

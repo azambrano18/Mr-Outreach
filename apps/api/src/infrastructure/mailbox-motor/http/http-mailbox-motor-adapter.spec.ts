@@ -32,7 +32,7 @@ describe('HttpMailboxMotorAdapter', () => {
 
   const wireMailbox = { serverMailboxId: 'mbx_1', email: 'ventas@cliente.cl', displayName: 'Ventas', status: 'CONNECTED', canSend: true };
   const wireDomain = { serverDomainId: 'dom_1', name: 'cliente.cl' };
-  const wireClient = { serverClientId: 'client_1', crmClientId: 88, name: 'Cliente' };
+  const wireClient = { serverClientId: 'client_1', name: 'Cliente' };
 
   it('introspects a token, sending Bearer auth and never the token as a header', async () => {
     fetchMock.mockResolvedValue(
