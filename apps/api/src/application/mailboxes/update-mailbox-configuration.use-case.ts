@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
-import { MailboxProtocolConfig } from '../../domain/mailbox/mailbox.entity';
+import { MailboxLinkSource, MailboxProtocolConfig } from '../../domain/mailbox/mailbox.entity';
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { TransactionManager } from '../../domain/persistence/transaction';
 import { isUniqueConstraintViolation } from '../../infrastructure/persistence/prisma/prisma-transaction-manager';
@@ -114,6 +114,11 @@ export class UpdateMailboxConfigurationUseCase {
       throw new NotFoundException('Mailbox not found.');
     }
 
+    const imapSmtpProvided = input.imap !== undefined || input.smtp !== undefined;
+    if (imapSmtpProvided) {
+      this.assertManualConfigurationAllowed(existing.linkSource);
+    }
+
     const executivesProvided = input.primaryExecutiveId !== undefined || input.secondaryExecutiveIds !== undefined;
     const signatureProvided = input.signatureHtml !== undefined;
 
@@ -157,6 +162,13 @@ export class UpdateMailboxConfigurationUseCase {
         const mailboxBefore = await this.mailboxes.findById(input.mailboxId, ctx);
         if (!mailboxBefore || mailboxBefore.organizationId !== input.organizationId) {
           throw new NotFoundException('Mailbox not found.');
+        }
+
+        // Authoritative re-check — closes the race window between the
+        // preliminary check above and this commit (e.g. a concurrent
+        // link-by-token completing in between).
+        if (imapSmtpProvided) {
+          this.assertManualConfigurationAllowed(mailboxBefore.linkSource);
         }
 
         // Authoritative executive check — inside the SAME transaction
@@ -366,6 +378,21 @@ export class UpdateMailboxConfigurationUseCase {
         }
       }
       throw error;
+    }
+  }
+
+  /**
+   * SERVER_TOKEN accounts are administered by the motor — Mr Outreach never
+   * holds their credentials, so it must never accept an IMAP/SMTP patch for
+   * one. Default-deny: only the known LEGACY_LOCAL value is allowed through;
+   * anything else (including a future, still-unknown linkSource) is rejected
+   * rather than silently permitted.
+   */
+  private assertManualConfigurationAllowed(linkSource: MailboxLinkSource): void {
+    if (linkSource !== 'LEGACY_LOCAL') {
+      throw new ConflictException(
+        'Esta cuenta es administrada por el servidor y no admite configuración IMAP/SMTP desde Mr Outreach.',
+      );
     }
   }
 

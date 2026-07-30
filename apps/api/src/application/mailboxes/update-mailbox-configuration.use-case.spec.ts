@@ -50,6 +50,7 @@ describe('UpdateMailboxConfigurationUseCase', () => {
     email: 'ventas@ventas.cl',
     fromName: 'Ventas',
     replyTo: null,
+    linkSource: 'LEGACY_LOCAL' as const,
     imap: { host: 'imap.old.cl', port: 993, encryption: 'SSL_TLS', username: 'old', verifyCertificate: true, secretCiphertext: 'enc(old-imap)' },
     smtp: { host: 'smtp.old.cl', port: 587, encryption: 'STARTTLS', username: 'old', verifyCertificate: true, secretCiphertext: 'enc(old-smtp)' },
   };
@@ -161,6 +162,54 @@ describe('UpdateMailboxConfigurationUseCase', () => {
   it('404s for a mailbox in a different organization', async () => {
     mailboxes.findById.mockResolvedValue({ ...baseMailbox, organizationId: 'other_org' } as never);
     await expect(useCase.execute(baseInput())).rejects.toThrow(NotFoundException);
+  });
+
+  it('404s for a mailbox that does not exist', async () => {
+    mailboxes.findById.mockResolvedValue(null as never);
+    await expect(useCase.execute(baseInput({ imap: { host: 'imap.new.cl' } }))).rejects.toThrow(NotFoundException);
+  });
+
+  describe('manual IMAP/SMTP configuration guard (server-linked accounts)', () => {
+    it('rejects an imap patch for a SERVER_TOKEN mailbox and modifies nothing', async () => {
+      mailboxes.findById.mockResolvedValue({ ...baseMailbox, linkSource: 'SERVER_TOKEN' } as never);
+      await expect(useCase.execute(baseInput({ imap: { host: 'imap.new.cl' } }))).rejects.toThrow(ConflictException);
+      expect(mailboxes.update).not.toHaveBeenCalled();
+      expect(idempotency.claim).not.toHaveBeenCalled();
+      expect(auditLogs.record).not.toHaveBeenCalled();
+    });
+
+    it('rejects an smtp patch for a SERVER_TOKEN mailbox and modifies nothing', async () => {
+      mailboxes.findById.mockResolvedValue({ ...baseMailbox, linkSource: 'SERVER_TOKEN' } as never);
+      await expect(
+        useCase.execute(baseInput({ smtp: { host: 'smtp.new.cl' } })),
+      ).rejects.toThrow('Esta cuenta es administrada por el servidor y no admite configuración IMAP/SMTP desde Mr Outreach.');
+      expect(mailboxes.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an imap/smtp patch for an unknown/unexpected linkSource by default (fail-closed)', async () => {
+      mailboxes.findById.mockResolvedValue({ ...baseMailbox, linkSource: 'SOMETHING_UNEXPECTED' } as never);
+      await expect(useCase.execute(baseInput({ imap: { host: 'imap.new.cl' } }))).rejects.toThrow(ConflictException);
+      expect(mailboxes.update).not.toHaveBeenCalled();
+    });
+
+    it('allows an imap/smtp patch for a LEGACY_LOCAL mailbox (existing behavior preserved)', async () => {
+      await expect(
+        useCase.execute(baseInput({ imap: { host: 'imap.new.cl' }, smtp: { host: 'smtp.new.cl' } })),
+      ).resolves.toEqual(expect.objectContaining({ httpStatus: 201 }));
+      expect(mailboxes.update).toHaveBeenCalled();
+    });
+
+    it('does not reject a SERVER_TOKEN mailbox update that never touches imap/smtp (e.g. only fromName)', async () => {
+      mailboxes.findById.mockResolvedValue({ ...baseMailbox, linkSource: 'SERVER_TOKEN' } as never);
+      await expect(useCase.execute(baseInput({ fromName: 'Nuevo Nombre' }))).resolves.toEqual(
+        expect.objectContaining({ httpStatus: 201 }),
+      );
+    });
+
+    it('enforces multi-tenant isolation together with the guard: a SERVER_TOKEN mailbox from another org 404s before the guard even runs', async () => {
+      mailboxes.findById.mockResolvedValue({ ...baseMailbox, linkSource: 'SERVER_TOKEN', organizationId: 'other_org' } as never);
+      await expect(useCase.execute(baseInput({ imap: { host: 'imap.new.cl' } }))).rejects.toThrow(NotFoundException);
+    });
   });
 
   it('an omitted password never touches the stored ciphertext', async () => {
