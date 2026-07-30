@@ -106,7 +106,6 @@ const PERMISSION_CATALOG = [
     description: 'Create, view and edit steps of sequences one owns (self-service, under /me).',
   },
 
-  { key: 'clients.create', description: 'Register a managed client.' },
   { key: 'clients.read.all', description: 'View every managed client in the organization.' },
   { key: 'clients.read.assigned', description: 'View only managed clients assigned to oneself.' },
   { key: 'clients.update', description: 'Edit a managed client.' },
@@ -117,11 +116,6 @@ const PERMISSION_CATALOG = [
   { key: 'domains.read', description: 'View a domain and its accounts.' },
   { key: 'domains.update', description: 'Edit a domain.' },
   { key: 'domains.delete', description: 'Soft-delete (archive) a domain.' },
-
-  {
-    key: 'crm_clients.read',
-    description: 'View the CRM master client list (Neon maestro_clientes), read-only.',
-  },
 
   { key: 'conversations.read.all', description: 'View every conversation in the organization.' },
   {
@@ -177,9 +171,56 @@ const PERMISSION_CATALOG = [
     key: 'simulation.manage',
     description: 'Choose simulated scenarios and drive the Monitor de integración (simulation mode only).',
   },
+
+  // Etapa "cuenta del ejecutivo" — Plantilla/Gestión. Distinct prefixes
+  // (sequence_templates.*/sequence_executions.*) so these never collide
+  // with the pre-existing, unrelated `templates.*` (canned-reply) or
+  // `sequences.*` (legacy hybrid template+execution) resources.
+  { key: 'sequence_templates.create_own', description: 'Create a Plantilla (reusable sequence content) for one of your own assigned mailboxes.' },
+  { key: 'sequence_templates.read_own', description: 'View your own Plantillas.' },
+  { key: 'sequence_templates.update_own', description: 'Edit your own Plantilla content, variables and scheduling.' },
+  { key: 'sequence_templates.publish_own', description: 'Publish a new immutable version of your own Plantilla to the sequence-template motor.' },
+  { key: 'sequence_templates.archive_own', description: 'Archive your own Plantilla.' },
+  { key: 'sequence_templates.delete_own', description: 'Logically delete your own archived Plantilla (§11) — never a currently-published or DRAFT one.' },
+  { key: 'sequence_executions.create_own', description: 'Create a Gestión (execution) from one of your own published Plantillas.' },
+  { key: 'sequence_executions.read_own', description: 'View your own Gestiones.' },
+  { key: 'sequence_executions.update_own', description: 'Edit your own Gestión while it is still DRAFT (§10) — never one already sent/accepted.' },
+  { key: 'sequence_executions.delete_own', description: 'Delete your own Gestión while it is still DRAFT (§10) — never sends anything to the server.' },
+  { key: 'sequence_executions.import_own', description: 'Upload and map a prospect file for your own Gestión.' },
+  { key: 'sequence_executions.start_own', description: 'Submit your own Gestión to the sequence-execution motor.' },
+  { key: 'sequence_executions.refresh_status_own', description: "Query the motor for your own Gestión's current status." },
+  { key: 'sequence_executions.monitor_all', description: 'Read-only: view every Gestión in the organization (admin monitor).' },
+  { key: 'sequence_executions.refresh_status_all', description: "Admin: query the motor for any executive's Gestión status." },
+
+  // Dev-only tool — never reachable when SEQUENCE_MOTOR_MODE=http or in production (see DevSimulatedExecutionsController).
+  {
+    key: 'dev_tools.simulate_execution_state',
+    description: 'Dev-only: force a Gestión into a simulated terminal/in-flight state for local visual validation (never a real motor call).',
+  },
 ];
 
 const ADMIN_PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
+
+// "Capacidades operativas del administrador" — kept as its own named list,
+// mirroring apps/api/src/modules/seed/permission-catalog.ts, so the admin
+// role's operational (Plantillas/Gestiones) permissions and the executive
+// role's own list stay in sync from one source.
+const TEMPLATE_AND_EXECUTION_OPERATIONAL_KEYS = [
+  'sequence_templates.create_own',
+  'sequence_templates.read_own',
+  'sequence_templates.update_own',
+  'sequence_templates.publish_own',
+  'sequence_templates.archive_own',
+  'sequence_templates.delete_own',
+  'sequence_executions.create_own',
+  'sequence_executions.read_own',
+  'sequence_executions.update_own',
+  'sequence_executions.delete_own',
+  'sequence_executions.import_own',
+  'sequence_executions.start_own',
+  'sequence_executions.refresh_status_own',
+];
+
 const EXECUTIVE_PERMISSION_KEYS = [
   'mailboxes.read.assigned',
   'templates.read',
@@ -211,6 +252,7 @@ const EXECUTIVE_PERMISSION_KEYS = [
   'sequence_contacts.read',
   'sequence_contacts.remove',
   'sequence_contacts.suppress',
+  ...TEMPLATE_AND_EXECUTION_OPERATIONAL_KEYS,
 ];
 
 const prisma = new PrismaClient();
