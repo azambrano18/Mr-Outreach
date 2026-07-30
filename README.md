@@ -77,10 +77,13 @@ npm run prisma:migrate     # desarrollo — crea/aplica migraciones nuevas si el
 npm run prisma:deploy      # aplica migraciones ya generadas, sin crear nuevas (uso en Staging/Production)
 ```
 
-Dos migraciones hoy: `20260714153849_init` (núcleo — Organization/User/Mailbox/Sequence/etc.) y
-`20260722190000_operational_persistence_core` (Fase 1 — ver "Persistencia PostgreSQL" más abajo).
-Ambas ya se aplicaron realmente contra una base Neon de prueba (`mr-outreach-test`) — no son solo
-SQL generado sin verificar.
+Dos migraciones hoy: `20260730000000_init_mr_outreach` (esquema completo consolidado — reemplaza
+la cadena histórica de migraciones incrementales de una base Neon anterior compartida con otro
+sistema) y `20260730000001_restore_case_insensitive_unique_indexes` (2 índices únicos parciales
+escritos a mano — Prisma no tiene sintaxis declarativa para "único mientras no esté eliminado" ni
+para comparación insensible a mayúsculas). Ambas ya se aplicaron realmente, vía `prisma migrate
+deploy`, contra los branches `development` y `test` del proyecto Neon dedicado — no son solo SQL
+generado sin verificar.
 
 Si tu proveedor usa una conexión *pooled* (PgBouncer/Neon `-pooler`), `schema.prisma` separa
 `DATABASE_URL` (runtime, puede ser pooled) de `DIRECT_URL` (solo lo usan los comandos `prisma
@@ -117,7 +120,7 @@ Para levantarlos por separado: `npm run start:dev -w apps/api` y `npm run dev -w
 
 No requiere ningún paso adicional: con `PERSISTENCE_DRIVER=memory` + `ENGINE_DRIVER=mock` +
 `MAIL_ENGINE_MODE=simulation` (todos los defaults de `.env.example`) el proyecto entero — datos,
-motor de correo, CRM — corre sin ninguna infraestructura externa. Ver "Modalidad simulada (la
+motor de correo — corre sin ninguna infraestructura externa. Ver "Modalidad simulada (la
 actual)" más abajo para el detalle de qué hace el seed automático y cómo se simula el motor.
 
 ### 8. Ejecutar pruebas
@@ -249,8 +252,6 @@ Rotar, como mínimo:
 - **Usuario y contraseña de la base de datos** (`DATABASE_URL`), si `PERSISTENCE_DRIVER=postgres`
   — rotar la contraseña directamente en PostgreSQL/Hetzner y actualizar la cadena de conexión en
   cada entorno.
-- **Credenciales de la base CRM** (`CRM_DATABASE_URL`), si `CRM_DRIVER=postgres` — rotar el
-  usuario de solo lectura en Neon.
 - **`ENGINE_API_KEY`** — cuando exista un servidor motor real emitiendo tokens.
 - **`DEV_ADMIN_PASSWORD`/`DEV_EXECUTIVE_PASSWORD`** — si el `.env` de desarrollo circuló fuera de
   un entorno controlado.
@@ -836,7 +837,6 @@ concepto inventado aparte. `GET /unmatched-messages`, `POST /unmatched-messages/
 
 ```http
 GET    /clients                                   # clients.read.all
-POST   /clients                                    # clients.create
 GET    /clients/:id                                # clients.read.all
 PATCH  /clients/:id                                # clients.update
 DELETE /clients/:id                                # clients.delete
@@ -878,7 +878,7 @@ patrón "requireAccessibleConversation/requireAssignedClient" ya usado en fases 
 
 ### Permisos nuevos
 
-`clients.create/.read.all/.read.assigned/.update/.delete/.assign`,
+`clients.read.all/.read.assigned/.update/.delete/.assign`,
 `domains.create/.read/.update/.delete`, `conversations.read.all/.read.assigned/.update/.assign/
 .resolve/.archive`, `conversation_tags.create/.read/.update/.delete`,
 `conversation_notes.create/.read/.update/.delete`, `unmatched_messages.read/.associate`. El rol
@@ -2027,13 +2027,14 @@ la base de datos de producción.**
 ver "Persistencia PostgreSQL (Fase 1)" más arriba para el detalle). `prisma generate` sigue sin
 necesitar ninguna base de datos alcanzable.
 
-Dos migraciones, **ambas ya aplicadas de verdad** contra una base Neon de prueba
-(`mr-outreach-test`, vía `prisma migrate deploy`, no solo generadas y sin verificar):
-`prisma/migrations/20260714153849_init/` (núcleo administrativo) y
-`prisma/migrations/20260722190000_operational_persistence_core/` (núcleo operativo). Esta
-segunda migración incluye dos índices únicos parciales agregados a mano al SQL generado
-(Prisma no tiene sintaxis declarativa para "único mientras no esté eliminado" ni para
-comparación insensible a mayúsculas) — ver los comentarios en el propio archivo `migration.sql`.
+Dos migraciones, **ambas ya aplicadas de verdad** contra los branches `development` y `test` del
+proyecto Neon dedicado "Mr Outreach" (vía `prisma migrate deploy`, no solo generadas y sin
+verificar): `prisma/migrations/20260730000000_init_mr_outreach/` (esquema completo consolidado,
+generado desde un estado vacío) y
+`prisma/migrations/20260730000001_restore_case_insensitive_unique_indexes/` (2 índices únicos
+parciales agregados a mano al SQL generado — Prisma no tiene sintaxis declarativa para "único
+mientras no esté eliminado" ni para comparación insensible a mayúsculas) — ver los comentarios en
+el propio archivo `migration.sql`.
 
 Flujo de migraciones hacia un entorno real (Development/Staging/Production):
 
@@ -2096,7 +2097,6 @@ redirigiendo a `/login` si no hay cookie de sesión.
 npm run test         -w apps/api  # Jest — unitarias, incluye las de contrato en modo memoria
 npm run test:e2e      -w apps/api  # Jest + Supertest — end-to-end
 npm run test:integration -w apps/api  # Jest — contrato + reinicio contra PostgreSQL real (ver abajo)
-npm run test:crm-integration -w apps/api  # Jest — la única suite que habla con el CRM real; nunca automática (ver "CRM durante desarrollo y pruebas")
 ```
 
 `test` y `test:e2e` corren enteramente en modalidad simulada — **sin PostgreSQL, sin Hetzner, sin
@@ -2120,14 +2120,16 @@ solo la nueva.
   catálogo independiente (sin llaves).
 - **Pruebas de contrato de repositorios**
   (`infrastructure/persistence/contracts/*.contract.ts`): la misma suite de comportamiento se
-  ejecuta contra el adaptador en memoria y contra el adaptador Prisma de cada entidad — 14 pares
-  hoy (el núcleo administrativo: User/Role/Mailbox/Template/Variable/Signature, y el núcleo
-  operativo de Fase 1: IntegrationCommand/IntegrationEvent/Company/Contact/SequenceImport/
+  ejecuta contra el adaptador en memoria y contra el adaptador Prisma de cada entidad — 15 pares
+  hoy (el núcleo administrativo: User/Role/Mailbox/Template/Variable/Signature/ManagedClient, y el
+  núcleo operativo: IntegrationCommand/IntegrationEvent/Company/Contact/SequenceImport/
   SequenceImportRow/SequenceContact/ScheduledEmail). Las specs Prisma (`*.contract.spec.ts`) usan
   `describe.skip` sin `TEST_DATABASE_URL` definida; con `npm run test:integration` corren de
-  verdad — las 14 se ejecutaron y pasaron contra una base Neon real (`mr-outreach-test`) durante
-  Fase 1, incluyendo aislamiento multiempresa, unicidad de idempotencia/dedupe, y conversión de
-  JSONB/fechas/enums. Además, `restart-durability.integration.spec.ts` demuestra que un comando,
+  verdad — las 22 suites (15 pares de contrato + `restart-durability` + los `.integration.spec.ts`
+  de mailboxes/sequences/sequence-imports/sequence-contacts) se ejecutaron y pasaron contra el
+  branch `test` real del proyecto Neon dedicado "Mr Outreach", incluyendo aislamiento
+  multiempresa, unicidad de idempotencia/dedupe, y conversión de JSONB/fechas/enums. Además,
+  `restart-durability.integration.spec.ts` demuestra que un comando,
   sus eventos, una importación, un contacto, una relación contacto-secuencia y un trabajo
   programado sobreviven a una desconexión + reconexión completa de Prisma (un reinicio real, no
   solo "otro repositorio en el mismo proceso").
@@ -2216,34 +2218,17 @@ solo la nueva.
   (`403`).
 - **Health e2e**: `/health/live` siempre 200; `/health/ready` refleja memory+mock.
 
-## CRM durante desarrollo y pruebas
+## Identidad de cliente: token del servidor, no un CRM
 
-`maestro_clientes` es una tabla externa (de otra aplicación) de la que Mr Outreach solo lee —
-nunca la modela en Prisma, nunca escribe en ella. El driver que decide de dónde sale el catálogo
-es independiente de `PERSISTENCE_DRIVER` y se controla con `CRM_DRIVER`:
-
-- **Desarrollo funcional** (`apps/api/.env`, local, gitignored): `CRM_DRIVER=postgres` +
-  `CRM_DATABASE_URL` apuntando a una conexión de solo lectura dedicada (nunca `neondb_owner`) —
-  así el panel muestra el catálogo real de clientes mientras se desarrolla.
-- **Pruebas ordinarias** (`npm test`, `npm run test:e2e`, cualquier validación local o de CI):
-  siempre `CRM_DRIVER=mock`, sin excepción — nunca consultan el CRM real, nunca abren una conexión
-  a él. Esto se garantiza en dos capas independientes:
-  1. `apps/api/.env.test` (versionado, sin secretos) fuerza `CRM_DRIVER=mock`. `.env.<NODE_ENV>`
-     se revisa antes que `.env` en `app.module.ts`, así que este archivo siempre gana sobre el
-     `CRM_DRIVER=postgres` de `apps/api/.env`, sin importar qué tenga ese archivo local.
-  2. Aunque algo forzara `CRM_DRIVER=postgres` durante una prueba, `assertCrmDriverAllowedInTests`
-     (`apps/api/src/infrastructure/persistence/crm/crm-test-guard.ts`) se ejecuta justo antes de
-     construir `PostgresCrmClientRepository` y detiene el arranque con un mensaje claro —
-     **nunca imprime la cadena de conexión, host, usuario ni contraseña** — salvo que se
-     establezca explícitamente `ALLOW_REAL_CRM_IN_TESTS=true`.
-- **Prueba de integración CRM real, explícita y separada**: `npm run test:crm-integration -w
-  apps/api`. Es la única suite que habla con el CRM real; nunca corre dentro de `npm test`,
-  `npm run test:e2e` ni ningún pipeline normal — se salta sola (`describe.skip`) igual que las
-  pruebas de contrato PostgreSQL se saltan sin `TEST_DATABASE_URL`. Requiere que
-  `apps/api/.env` ya tenga una `CRM_DATABASE_URL` real de solo lectura configurada localmente.
-- `CRM_DATABASE_URL` nunca se imprime, ni se versiona, ni se copia a `.env.test`/`.env.test.local`/
-  archivos `.example`/README/scripts — solo vive en archivos locales ya cubiertos por
-  `.gitignore`.
+Mr Outreach no lee ningún catálogo externo (CRM/portal) directamente — ya no existe un
+`CRM_DRIVER`/`CRM_DATABASE_URL` ni una conexión Postgres independiente hacia otra base. La
+identidad de un `ManagedClient` (nombre, RUT, estado externo) se resuelve exclusivamente a partir
+del payload que el servidor externo entrega al redimir un token de vinculación de cuenta de
+correo (`LinkMailboxUseCase`, ver `docs/motor-mailbox-link-contract-v1.md`), y se guarda como un
+snapshot local (`clientRutSnapshot`/`externalStatusSnapshot`/`externalStatusCheckedAt`) — nunca se
+vuelve a consultar esa fuente para confirmar cada operación nueva; el gate de elegibilidad
+(`ClientEligibilityService`) evalúa el estado local (`ManagedClient.status` +
+`externalStatusSnapshot`), sin ninguna llamada de red adicional.
 
 ## Lint y formato
 

@@ -59,7 +59,7 @@ estado; `valid`/`status` indican por qué no puede usarse:
     "canSend": true
   },
   "domain": { "serverDomainId": "dom_456", "name": "cliente.cl" },
-  "client": { "serverClientId": "client_789", "crmClientId": 88, "name": "Cliente Ejemplo" }
+  "client": { "serverClientId": "client_789", "name": "Cliente Ejemplo" }
 }
 ```
 
@@ -85,7 +85,7 @@ actor.
   "redeemedAt": "2026-07-24T15:00:00Z",
   "mailbox": { "serverMailboxId": "mbx_123", "email": "ventas@cliente.cl", "displayName": "Ventas", "status": "CONNECTED", "canSend": true },
   "domain": { "serverDomainId": "dom_456", "name": "cliente.cl" },
-  "client": { "serverClientId": "client_789", "crmClientId": 88, "name": "Cliente Ejemplo" }
+  "client": { "serverClientId": "client_789", "name": "Cliente Ejemplo" }
 }
 ```
 
