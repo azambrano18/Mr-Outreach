@@ -9,7 +9,9 @@ import {
   IntegrationEventFilter,
   IntegrationEventRepository,
 } from '../../../domain/integration/integration-event.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaIntegrationEventRow): IntegrationEvent {
   return {
@@ -20,12 +22,18 @@ function toDomain(row: PrismaIntegrationEventRow): IntegrationEvent {
     commandId: row.commandId,
     correlationId: row.correlationId,
     schemaVersion: row.schemaVersion,
+    aggregateType: row.aggregateType,
+    aggregateId: row.aggregateId,
     payload: row.payload as Record<string, unknown>,
     status: row.status,
     origin: row.origin,
+    occurredAt: row.occurredAt,
     receivedAt: row.receivedAt,
     processedAt: row.processedAt,
     processingError: row.processingError,
+    errorCode: row.errorCode,
+    failedAt: row.failedAt,
+    attempts: row.attempts,
   };
 }
 
@@ -33,8 +41,8 @@ function toDomain(row: PrismaIntegrationEventRow): IntegrationEvent {
 export class PrismaIntegrationEventRepository implements IntegrationEventRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<IntegrationEvent | null> {
-    const row = await this.prisma.integrationEvent.findUnique({ where: { id } });
+  async findById(id: string, ctx?: TransactionContext): Promise<IntegrationEvent | null> {
+    const row = await resolveClient(this.prisma, ctx).integrationEvent.findUnique({ where: { id } });
     return row ? toDomain(row) : null;
   }
 
@@ -42,8 +50,9 @@ export class PrismaIntegrationEventRepository implements IntegrationEventReposit
     organizationId: string,
     eventId: string,
     origin: 'SIMULATED' | 'REMOTE',
+    ctx?: TransactionContext,
   ): Promise<IntegrationEvent | null> {
-    const row = await this.prisma.integrationEvent.findUnique({
+    const row = await resolveClient(this.prisma, ctx).integrationEvent.findUnique({
       where: { organizationId_eventId_origin: { organizationId, eventId, origin } },
     });
     return row ? toDomain(row) : null;
@@ -57,13 +66,15 @@ export class PrismaIntegrationEventRepository implements IntegrationEventReposit
     if (filter.eventType) where.eventType = filter.eventType;
     if (filter.status) where.status = filter.status as never;
     if (filter.commandId) where.commandId = filter.commandId;
+    if (filter.aggregateType) where.aggregateType = filter.aggregateType as never;
+    if (filter.aggregateId) where.aggregateId = filter.aggregateId;
     const rows = await this.prisma.integrationEvent.findMany({ where, orderBy: { receivedAt: 'desc' } });
     return rows.map(toDomain);
   }
 
-  async create(input: CreateIntegrationEventInput): Promise<IntegrationEvent> {
+  async create(input: CreateIntegrationEventInput, ctx?: TransactionContext): Promise<IntegrationEvent> {
     try {
-      const row = await this.prisma.integrationEvent.create({
+      const row = await resolveClient(this.prisma, ctx).integrationEvent.create({
         data: {
           organizationId: input.organizationId,
           eventId: input.eventId,
@@ -71,8 +82,11 @@ export class PrismaIntegrationEventRepository implements IntegrationEventReposit
           commandId: input.commandId,
           correlationId: input.correlationId,
           schemaVersion: input.schemaVersion,
+          aggregateType: input.aggregateType ?? null,
+          aggregateId: input.aggregateId ?? null,
           payload: input.payload as Prisma.InputJsonValue,
           origin: input.origin,
+          occurredAt: input.occurredAt ?? null,
         },
       });
       return toDomain(row);
@@ -84,8 +98,17 @@ export class PrismaIntegrationEventRepository implements IntegrationEventReposit
     }
   }
 
-  async update(id: string, input: UpdateIntegrationEventInput): Promise<IntegrationEvent> {
-    const row = await this.prisma.integrationEvent.update({ where: { id }, data: input });
+  async update(id: string, input: UpdateIntegrationEventInput, ctx?: TransactionContext): Promise<IntegrationEvent> {
+    const row = await resolveClient(this.prisma, ctx).integrationEvent.update({ where: { id }, data: input });
     return toDomain(row);
+  }
+
+  async conditionalClaimForProcessing(id: string, ctx?: TransactionContext): Promise<number> {
+    const client = resolveClient(this.prisma, ctx);
+    const result = await client.integrationEvent.updateMany({
+      where: { id, status: { in: ['RECEIVED', 'FAILED_RETRYABLE'] } },
+      data: { status: 'PROCESSING' },
+    });
+    return result.count;
   }
 }

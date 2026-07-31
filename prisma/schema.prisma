@@ -829,6 +829,12 @@ enum IntegrationEventProcessingStatus {
   RECEIVED
   PROCESSED
   FAILED
+  /// Fase "Recepción de eventos del motor" — new states, used only by the
+  /// active-flow motor-event receiver (never by the legacy simulated flow,
+  /// which keeps using RECEIVED/PROCESSED/FAILED exactly as before).
+  PROCESSING
+  FAILED_RETRYABLE
+  FAILED_TERMINAL
 }
 
 enum IntegrationEventOrigin {
@@ -844,12 +850,22 @@ model IntegrationEvent {
   commandId       String?
   correlationId   String
   schemaVersion   String
+  /// Fase "Recepción de eventos del motor" — null for legacy simulated-flow events (resolved via commandId instead); always set for active-flow motor events, validated against the referenced IntegrationCommand's own aggregateType/aggregateId when commandId is present.
+  aggregateType   IntegrationAggregateType?
+  aggregateId     String?
   payload         Json
   status          IntegrationEventProcessingStatus @default(RECEIVED)
   origin          IntegrationEventOrigin
+  /// When the motor says the event happened — distinct from receivedAt. Null for legacy events.
+  occurredAt      DateTime?
   receivedAt      DateTime                         @default(now())
   processedAt     DateTime?
   processingError String?
+  /// Structured classification for FAILED_RETRYABLE/FAILED_TERMINAL — separate from the free-text processingError.
+  errorCode       String?
+  failedAt        DateTime?
+  /// Number of projection attempts (Etapa B runs), including manual retries.
+  attempts        Int                              @default(0)
 
   organization Organization        @relation(fields: [organizationId], references: [id])
   command      IntegrationCommand? @relation(fields: [commandId], references: [commandId])
@@ -860,6 +876,7 @@ model IntegrationEvent {
   @@index([organizationId, status])
   @@index([commandId])
   @@index([correlationId])
+  @@index([aggregateType, aggregateId])
   @@map("integration_events")
 }
 

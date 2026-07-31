@@ -62,6 +62,7 @@ describe('IntegrationService', () => {
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      conditionalClaimForProcessing: jest.fn(),
     };
     port = {
       submitCommand: jest.fn(),

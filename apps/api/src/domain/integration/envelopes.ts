@@ -67,7 +67,23 @@ export type EventType =
   | 'SEQUENCE_COMPANY_REMOVED'
   | 'INBOUND_REPLY_MATCHED'
   | 'INBOUND_REPLY_UNMATCHED'
-  | 'PROSPECT_SEQUENCE_ACTION_APPLIED';
+  | 'PROSPECT_SEQUENCE_ACTION_APPLIED'
+  /**
+   * Fase "Recepción de eventos del motor" — the active Plantillas/Gestiones
+   * flow's own event vocabulary. Unlike everything above (produced
+   * internally by SimulatedMailEngineAdapter, origin always SIMULATED),
+   * these are the types a real external motor (origin REMOTE) or the
+   * dev-only synthetic emitter (origin SIMULATED) POSTs to
+   * `/integration/events`. aggregateType is always EXECUTION for these.
+   */
+  | 'EXECUTION_ACCEPTED'
+  | 'EXECUTION_PROCESSING'
+  | 'OUTBOUND_MESSAGE_CREATED'
+  | 'OUTBOUND_MESSAGE_SENT'
+  | 'INBOUND_MESSAGE_RECEIVED'
+  | 'EXECUTION_COMPLETED'
+  | 'EXECUTION_FAILED'
+  | 'FUTURE_JOBS_CANCELLED';
 
 /** The envelope every command carries, regardless of `commandType` — §9. */
 export interface CommandEnvelope<TPayload = Record<string, unknown>> {
@@ -91,5 +107,13 @@ export interface EventEnvelope<TPayload = Record<string, unknown>> {
   correlationId: string;
   organizationId: string;
   occurredAt: string;
+  /**
+   * Fase "Recepción de eventos del motor" — optional: the legacy
+   * SimulatedMailEngineAdapter events above don't set these (they're
+   * resolved from `commandId` instead, see IntegrationCommand.aggregateType/
+   * aggregateId). The new active-flow event types always set both.
+   */
+  aggregateType?: 'TEMPLATE' | 'EXECUTION';
+  aggregateId?: string;
   payload: TPayload;
 }

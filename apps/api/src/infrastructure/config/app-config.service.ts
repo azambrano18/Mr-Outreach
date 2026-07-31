@@ -35,6 +35,9 @@ export type MailboxMotorDriver = 'simulated' | 'http';
  */
 export type SequenceMotorMode = 'simulated' | 'http';
 
+/** Fase "Recepción de eventos del motor" — only 'hmac' exists today. */
+export type MotorEventAuthMode = 'hmac';
+
 /**
  * The one place in the app that reads PERSISTENCE_DRIVER / ENGINE_DRIVER
  * and related settings. Modules ask this service which adapter to use;
@@ -99,6 +102,19 @@ export class AppConfigService {
 
   get sequenceMotorTimeoutMs(): number {
     return this.config.get<number>('SEQUENCE_MOTOR_TIMEOUT_MS', 10_000);
+  }
+
+  get motorEventAuthMode(): MotorEventAuthMode {
+    return this.config.get<MotorEventAuthMode>('MOTOR_EVENT_AUTH_MODE', 'hmac');
+  }
+
+  /** Empty/undefined means the feature is disabled — MotorEventAuthGuard fail-closes (404) rather than accept unsigned events. */
+  get motorEventHmacSecret(): string | undefined {
+    return this.config.get<string>('MOTOR_EVENT_HMAC_SECRET') || undefined;
+  }
+
+  get motorEventMaxClockSkewSeconds(): number {
+    return this.config.get<number>('MOTOR_EVENT_MAX_CLOCK_SKEW_SECONDS', 300);
   }
 
   get storageDriver(): StorageDriver {

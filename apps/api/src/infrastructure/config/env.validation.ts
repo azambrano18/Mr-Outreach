@@ -79,6 +79,17 @@ export const envValidationSchema = Joi.object({
   }),
   SEQUENCE_MOTOR_TIMEOUT_MS: Joi.number().default(10_000),
 
+  // Fase "Recepción de eventos del motor" — authenticates inbound
+  // POST /integration/events calls. Deliberately NOT required at boot
+  // (Joi.required() would make every environment, including ones that never
+  // enable this endpoint, fail to start) — MotorEventModule itself refuses
+  // to accept any event when MOTOR_EVENT_HMAC_SECRET is empty, fail-closed,
+  // in every environment (never just production). Only 'hmac' is
+  // implemented today; the variable is kept open for a future mode.
+  MOTOR_EVENT_AUTH_MODE: Joi.string().valid('hmac').default('hmac'),
+  MOTOR_EVENT_HMAC_SECRET: Joi.string().allow('').optional(),
+  MOTOR_EVENT_MAX_CLOCK_SKEW_SECONDS: Joi.number().default(300),
+
   // Fase Firma — gates SignatureAssetStoragePort (images embedded in a
   // Plantilla's signature). Independent of STORAGE_DRIVER (the older,
   // generic rich-text image port): when SIGNATURE_ASSET_STORAGE_MODE=r2,

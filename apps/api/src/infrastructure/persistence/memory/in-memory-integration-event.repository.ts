@@ -52,6 +52,12 @@ export class InMemoryIntegrationEventRepository implements IntegrationEventRepos
     if (filter.commandId) {
       results = results.filter((e) => e.commandId === filter.commandId);
     }
+    if (filter.aggregateType) {
+      results = results.filter((e) => e.aggregateType === filter.aggregateType);
+    }
+    if (filter.aggregateId) {
+      results = results.filter((e) => e.aggregateId === filter.aggregateId);
+    }
     return results.sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime());
   }
 
@@ -69,12 +75,18 @@ export class InMemoryIntegrationEventRepository implements IntegrationEventRepos
       commandId: input.commandId,
       correlationId: input.correlationId,
       schemaVersion: input.schemaVersion,
+      aggregateType: input.aggregateType ?? null,
+      aggregateId: input.aggregateId ?? null,
       payload: input.payload,
       status: 'RECEIVED',
       origin: input.origin,
+      occurredAt: input.occurredAt ?? null,
       receivedAt: new Date(),
       processedAt: null,
       processingError: null,
+      errorCode: null,
+      failedAt: null,
+      attempts: 0,
     };
     this.store.integrationEvents.set(event.id, event);
     return event;
@@ -88,5 +100,12 @@ export class InMemoryIntegrationEventRepository implements IntegrationEventRepos
     const updated: IntegrationEvent = { ...existing, ...input };
     this.store.integrationEvents.set(id, updated);
     return updated;
+  }
+
+  async conditionalClaimForProcessing(id: string): Promise<number> {
+    const existing = this.store.integrationEvents.get(id);
+    if (!existing || !['RECEIVED', 'FAILED_RETRYABLE'].includes(existing.status)) return 0;
+    this.store.integrationEvents.set(id, { ...existing, status: 'PROCESSING' });
+    return 1;
   }
 }
