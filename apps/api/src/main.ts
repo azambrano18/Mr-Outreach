@@ -13,16 +13,15 @@ async function bootstrap(): Promise<void> {
   // by MotorEventAuthGuard (POST /integration/events) to verify an HMAC
   // signature computed over the untouched body; every other route is
   // unaffected, since `req.body` still gets parsed exactly as before.
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
-  // Serves whatever LocalImageStorageAdapter writes (STORAGE_DRIVER=local,
-  // the dev default) back out at /uploads/<organizationId>/<file> — see
-  // its class comment for why this must be a public, unauthenticated URL.
-  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
+  // Used only when STORAGE_DRIVER=local.
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads',
+  });
 
-  // Required for OnModuleDestroy (DatabaseService pool.end()) to actually
-  // run on SIGTERM/SIGINT, instead of the connection pool being abandoned
-  // when the process exits (e.g. during a deploy or container restart).
   app.enableShutdownHooks();
 
   app.enableCors({
@@ -37,20 +36,25 @@ async function bootstrap(): Promise<void> {
       transform: true,
     }),
   );
+
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Outreach Platform API')
-    .setDescription('Panel administrativo y plano de control de la plataforma de prospección.')
+    .setDescription(
+      'Panel administrativo y plano de control de la plataforma de prospección.',
+    )
     .setVersion('0.1.0')
     .build();
+
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument);
 
-  const port = process.env.PORT ?? 3001;
-  await app.listen(port);
-  console.log(`API listening on http://localhost:${port} (docs at /docs)`);
+  const port = Number(process.env.PORT ?? 3001);
+  await app.listen(port, '::');
+
+  console.log(`API listening on port ${port} (docs at /docs)`);
 }
 
 bootstrap();
