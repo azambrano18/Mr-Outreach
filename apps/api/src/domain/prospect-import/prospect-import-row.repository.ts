@@ -1,3 +1,4 @@
+import { TransactionContext } from '../persistence/transaction';
 import { CreateProspectImportRowInput, ProspectExecutionState, ProspectImportRow } from './prospect-import-row.entity';
 
 export interface ProspectImportRowRepository {
@@ -9,4 +10,10 @@ export interface ProspectImportRowRepository {
   deleteByImport(importId: string): Promise<void>;
   /** §2/§11 — stamps every VALID row of this import with the server-reported (or contractually-defaulted) initial execution state, right after the Gestión is accepted. */
   markValidRowsExecutionState(importId: string, state: ProspectExecutionState): Promise<void>;
+  /** ProspectIdentityResolver — one statement for the whole batch, never one per row. Idempotent: re-running with the same ids is a no-op (never clears an already-resolved row). */
+  bulkSetResolvedIdentity(
+    updates: Array<{ rowId: string; companyId: string | null; contactId: string }>,
+    resolvedAt: Date,
+    ctx?: TransactionContext,
+  ): Promise<void>;
 }

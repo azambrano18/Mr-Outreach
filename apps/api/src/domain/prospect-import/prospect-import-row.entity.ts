@@ -39,6 +39,10 @@ export interface ProspectImportRow {
   validationErrors: string[];
   /** Null until the Gestión this row belongs to is accepted by the server. */
   executionState: ProspectExecutionState | null;
+  /** Resolved/created by ProspectIdentityResolver, reusing companies/contacts — see docs/database-architecture.md. Null until resolution runs; never cleared back to null once set. */
+  companyId: string | null;
+  contactId: string | null;
+  resolvedAt: Date | null;
   createdAt: Date;
 }
 

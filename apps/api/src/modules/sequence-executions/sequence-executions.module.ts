@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DevSimulatedExecutionStateService } from '../../application/sequence-executions/dev-simulated-execution-state.service';
+import { ProspectIdentityResolver } from '../../application/prospect-imports/prospect-identity-resolver.service';
 import { ProspectImportsService } from '../../application/prospect-imports/prospect-imports.service';
 import { RefreshExecutionStatusUseCase } from '../../application/sequence-executions/refresh-execution-status.use-case';
 import { SequenceExecutionsService } from '../../application/sequence-executions/sequence-executions.service';
@@ -26,6 +27,7 @@ import { MeSequenceExecutionsController } from './me-sequence-executions.control
   controllers: [MeSequenceExecutionsController, AdminSequenceExecutionsController, DevSimulatedExecutionsController],
   providers: [
     ProspectImportsService,
+    ProspectIdentityResolver,
     SequenceExecutionsService,
     StartSequenceExecutionUseCase,
     RefreshExecutionStatusUseCase,

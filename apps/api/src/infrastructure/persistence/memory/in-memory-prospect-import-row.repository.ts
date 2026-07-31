@@ -29,6 +29,9 @@ export class InMemoryProspectImportRowRepository implements ProspectImportRowRep
       validationStatus: input.validationStatus,
       validationErrors: input.validationErrors ?? [],
       executionState: null,
+      companyId: null,
+      contactId: null,
+      resolvedAt: null,
       createdAt: new Date(),
     };
   }
@@ -54,6 +57,25 @@ export class InMemoryProspectImportRowRepository implements ProspectImportRowRep
     for (const [id, row] of this.store.prospectImportRows) {
       if (row.importId === importId && row.validationStatus === 'VALID') {
         this.store.prospectImportRows.set(id, { ...row, executionState: state });
+      }
+    }
+  }
+
+  async bulkSetResolvedIdentity(
+    updates: Array<{ rowId: string; companyId: string | null; contactId: string }>,
+    resolvedAt: Date,
+  ): Promise<void> {
+    // No transaction context needed — the in-memory store has no isolation boundaries to cross.
+    const byId = new Map(updates.map((u) => [u.rowId, u]));
+    for (const [id, row] of this.store.prospectImportRows) {
+      const update = byId.get(id);
+      if (update) {
+        this.store.prospectImportRows.set(id, {
+          ...row,
+          companyId: update.companyId,
+          contactId: update.contactId,
+          resolvedAt,
+        });
       }
     }
   }

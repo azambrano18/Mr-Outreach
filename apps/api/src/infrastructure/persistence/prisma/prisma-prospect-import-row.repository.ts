@@ -8,7 +8,9 @@ import {
   ProspectImportRowValidationStatus,
 } from '../../../domain/prospect-import/prospect-import-row.entity';
 import { ProspectImportRowRepository } from '../../../domain/prospect-import/prospect-import-row.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaRowRow): ProspectImportRow {
   return {
@@ -21,6 +23,9 @@ function toDomain(row: PrismaRowRow): ProspectImportRow {
     validationStatus: row.validationStatus as ProspectImportRowValidationStatus,
     validationErrors: row.validationErrors as unknown as string[],
     executionState: row.executionState as ProspectExecutionState | null,
+    companyId: row.companyId,
+    contactId: row.contactId,
+    resolvedAt: row.resolvedAt,
     createdAt: row.createdAt,
   };
 }
@@ -79,5 +84,26 @@ export class PrismaProspectImportRowRepository implements ProspectImportRowRepos
       where: { importId, validationStatus: 'VALID' },
       data: { executionState: state },
     });
+  }
+
+  /** ProspectIdentityResolver — one `UPDATE ... FROM (VALUES ...)` for the whole batch, never one per row. */
+  async bulkSetResolvedIdentity(
+    updates: Array<{ rowId: string; companyId: string | null; contactId: string }>,
+    resolvedAt: Date,
+    ctx?: TransactionContext,
+  ): Promise<void> {
+    if (updates.length === 0) return;
+    const client = resolveClient(this.prisma, ctx);
+    const values = Prisma.join(
+      updates.map(
+        (u) => Prisma.sql`(${u.rowId}::text, ${u.companyId}::text, ${u.contactId}::text)`,
+      ),
+    );
+    await client.$executeRaw`
+      UPDATE "prospect_import_rows" AS r
+      SET "companyId" = v.company_id, "contactId" = v.contact_id, "resolvedAt" = ${resolvedAt}::timestamp
+      FROM (VALUES ${values}) AS v(row_id, company_id, contact_id)
+      WHERE r.id = v.row_id
+    `;
   }
 }
