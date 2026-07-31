@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/co
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser } from '../../application/auth/auth.types';
 import { IntegrationService } from '../../application/integration/integration.service';
+import { RetryMotorEventUseCase } from '../../application/motor-event/retry-motor-event.use-case';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
@@ -27,6 +28,7 @@ export class IntegrationMonitorController {
   constructor(
     private readonly integration: IntegrationService,
     private readonly config: AppConfigService,
+    private readonly retryMotorEvent: RetryMotorEventUseCase,
   ) {}
 
   @Get('summary')
@@ -105,5 +107,19 @@ export class IntegrationMonitorController {
   @RequirePermissions('integration_events.retry')
   reprocessEvent(@CurrentUser() user: AuthenticatedUser, @Param('eventId') eventId: string) {
     return this.integration.reprocessEvent(user.organizationId, eventId, user.id);
+  }
+
+  /**
+   * Fase "Recepción de eventos del motor", Fase 11 — distinct from
+   * `reprocess` above (that one is the legacy simulated-flow's relabel-only
+   * action). This one actually re-runs MotorEventProjector for an active-
+   * flow event stuck at FAILED_RETRYABLE — never for FAILED_TERMINAL, never
+   * automatic, and never reachable by an executive (same
+   * `integration_events.retry` admin-only permission).
+   */
+  @Post('events/:eventRowId/retry-projection')
+  @RequirePermissions('integration_events.retry')
+  retryProjection(@CurrentUser() user: AuthenticatedUser, @Param('eventRowId') eventRowId: string) {
+    return this.retryMotorEvent.execute(user.organizationId, eventRowId, user.id);
   }
 }
