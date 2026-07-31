@@ -431,13 +431,19 @@ para aprobación futura del equipo del servidor:
 | Endpoint/comando | `POST /operational-status/check` (o `OPERATIONAL_STATUS_CHECK` si el motor usa un bus de comandos) |
 | Request | `{ serverClientId, serverDomainId?, serverMailboxId?, correlationId, idempotencyKey }` |
 | Response | `{ serverClientId, serverDomainId, serverMailboxId, clientStatus, domainStatus, mailboxStatus, checkedAt, blockReasonCode, blockReason, motorStatusCode }` |
+| Autenticación | Sin definir por el motor todavía. Si Mr Outreach termina siendo quien LLAMA a este endpoint (no quien lo recibe), la autenticación la exige el motor, no este proyecto — no hay nada que decidir aquí hasta que el equipo del motor publique su propio mecanismo. Si en cambio el motor prefiriera empujar el resultado como un evento entrante (en vez de que Mr Outreach lo consulte activamente), el mecanismo HMAC ya construido para `POST /integration/events` (Fase "Recepción de eventos del motor" — ver §22) es reutilizable tal cual: mismo esquema de firma, mismo `MotorEventAuthenticator`, sin inventar un segundo mecanismo. Ninguna de las dos formas está decidida; ambas quedan documentadas como opciones, no como implementación. |
 | Timeout | 5s, igual al resto de adaptadores HTTP existentes |
 | Reintentos | 1, solo en timeout/5xx |
 | Fail-closed | timeout, 5xx, estado desconocido, o cualquier entidad inactiva → bloquear, nunca asumir elegibilidad |
 | Transacción | La llamada al motor nunca ocurre dentro de una transacción Postgres abierta; el snapshot se actualiza en una transacción nueva, posterior a la respuesta |
 
 `ClientEligibilityService.assertEligibleForPublish` sigue evaluando solo el
-snapshot local — este bloqueador **no se marca como resuelto**.
+snapshot local — este bloqueador **no se marca como resuelto**. La Fase
+"Recepción de eventos del motor" (§22) no lo resuelve tampoco: construye la
+recepción genérica de eventos del motor para el flujo activo (Plantillas/
+Gestiones), no una llamada de verificación de estado operativo — son
+contratos distintos que solo comparten, opcionalmente, el mecanismo de
+autenticación HMAC si el equipo del motor así lo decide.
 
 ## 21. Matriz final de identificadores externos
 
@@ -458,3 +464,99 @@ snapshot local — este bloqueador **no se marca como resuelto**.
 Ningún esquema fue modificado más allá de lo explícitamente listado en la
 sección 20 — todas las demás filas de esta matriz permanecen como
 recomendaciones para cuando exista evidencia real del motor.
+
+## 22. Fase "Recepción de eventos del motor" — cambios aplicados
+
+Reutiliza íntegramente la infraestructura de Outbox/Inbox descrita en la
+sección 15 (`IntegrationCommand`/`IntegrationEvent`) en vez de crear un
+segundo sistema de eventos — confirmado tras auditar `IntegrationService`,
+que documenta explícitamente no tener lógica de efectos de dominio,
+dejando espacio para que esta fase agregue esa lógica en un servicio
+nuevo y separado (`MotorEventProjector`) sin tocar el mecanismo de
+persistencia existente.
+
+**Contrato de evento** — `EventEnvelope` (ya existente en
+`domain/integration/envelopes.ts`) se extiende con `aggregateType?` y
+`aggregateId?` opcionales; conserva `schemaVersion`, `eventId`,
+`eventType`, `commandId`, `correlationId`, `organizationId`, `occurredAt`,
+`payload` sin cambios de nombre. 8 `EventType` nuevos, exclusivos del
+flujo activo (nunca reutilizados por el simulador legado de
+Mailbox/Secuencias): `EXECUTION_ACCEPTED`, `EXECUTION_PROCESSING`,
+`OUTBOUND_MESSAGE_CREATED`, `OUTBOUND_MESSAGE_SENT`,
+`INBOUND_MESSAGE_RECEIVED`, `EXECUTION_COMPLETED`, `EXECUTION_FAILED`,
+`FUTURE_JOBS_CANCELLED`.
+
+**`IntegrationEvent`** gana 6 columnas (`aggregateType`, `aggregateId`,
+`occurredAt`, `errorCode`, `failedAt`, `attempts`) y 3 estados nuevos en
+`IntegrationEventProcessingStatus` (`PROCESSING`, `FAILED_RETRYABLE`,
+`FAILED_TERMINAL`) — los 3 estados legado (`RECEIVED`/`PROCESSED`/
+`FAILED`) se mantienen intactos para el simulador. La restricción
+`@@unique([organizationId, eventId, origin])` ya existente se conserva
+sin cambios — el nuevo origen `REMOTE` obtiene su propio espacio de
+deduplicación sin requerir migración adicional.
+
+**Autenticación** — `POST /integration/events` no usa `JwtAuthGuard`: la
+llamada la hace el motor externo, no un usuario logueado. Firma HMAC-SHA256
+sobre `${timestamp}.${rawBody}` (mismo esquema que Stripe/GitHub),
+verificada con comparación de tiempo constante
+(`crypto.timingSafeEqual`). Fail-closed: sin `MOTOR_EVENT_HMAC_SECRET`
+configurado, el endpoint responde 404 en todo ambiente (nunca solo en
+producción) — su existencia nunca se filtra ni se acepta un evento sin
+firma "por ahora".
+
+**Procesamiento en dos etapas** — Etapa A (una transacción: deduplicar
+por `eventId`+`origin`, crear la fila en `RECEIVED` si es nueva) y Etapa B
+(una segunda transacción: reclamar atómicamente vía
+`conditionalClaimForProcessing` — un `UPDATE ... WHERE status IN (...)`
+que retorna 0 si otra entrega concurrente ya lo tomó —, proyectar,
+marcar `PROCESSED`/`FAILED_RETRYABLE`/`FAILED_TERMINAL`). Ninguna llamada
+externa ocurre dentro de una transacción. Una violación de la restricción
+única durante una carrera genuina entre dos entregas concurrentes del
+mismo `eventId` se recupera releyendo la fila ganadora en una conexión
+nueva (Postgres aborta toda la transacción ante ese conflicto — la
+relectura nunca puede ocurrir dentro de la misma transacción abortada).
+
+**Proyección al flujo activo** — `OUTBOUND_MESSAGE_CREATED` es el primer
+punto que crea una `Conversation` con `origin = ACTIVE_EXECUTION`,
+resolviendo `SequenceExecution`/`ProspectImportRow`/`Mailbox`/`Company`/
+`Contact`/ejecutivo asignado. Identidad de hilo por prioridad: threadId
+del motor → `outboundMessageId` → `exec_{executionId}_row_{rowId}` — nunca
+el asunto solo. `INBOUND_MESSAGE_RECEIVED` resuelve la conversación por
+prioridad: `In-Reply-To` → `References` (en orden inverso) →
+`outboundMessageId` → `serverExecutionId`+`prospectImportRowId` →
+mailbox+email normalizado (último recurso) → si nada resuelve, crea una
+conversación `EXTERNAL_INBOUND` nueva sin rechazar el evento. La relación
+con `IntegrationCommand` (Fase 10) nunca acepta un `commandId` de otra
+organización — `findByCommandId` ya está scoped por `organizationId`, así
+que un `commandId` ajeno simplemente no se encuentra (se audita como
+`command_not_found`, nunca se crea un comando ficticio).
+
+**Lectura por usuario** — `ConversationReadState` (ya existente desde la
+sección 20) sigue siendo la única fuente de verdad por usuario; esta fase
+no le agrega escritura en la llegada de un mensaje (solo se escribe
+cuando un usuario abre la conversación). El campo `Conversation.isUnread`
+que hoy expone `ConversationSummary` sigue siendo el flag global heredado
+del sync IMAP legado — **no** se consulta `ConversationReadState` todavía
+para calcular ese campo por usuario. Esto es una limitación conocida y
+documentada, no un error: la independencia por usuario ya es
+comprobable a nivel de almacenamiento (ver
+`conversation-persistence.integration.spec.ts` y el nuevo
+`motor-events.e2e-spec.ts`), pero el badge/contador visible en pantalla
+todavía no deriva de ahí. Conectar ambas cosas queda fuera del alcance
+de esta fase.
+
+**Simulador** (`dev/motor-events/:executionId/emit`) — construye un
+`MotorEventEnvelopeDto` real (mismo `eventId` generado, mismo
+`commandId`/`correlationId` reutilizados del `IntegrationCommand` de la
+ejecución cuando existe) y lo pasa por el mismo `ProcessMotorEventUseCase`
+que usa el endpoint HTTP real — nunca una ruta de persistencia paralela.
+Gateado exactamente como `DevSimulatedExecutionsController`: 404 salvo
+`SEQUENCE_MOTOR_MODE=simulated` y `NODE_ENV!=='production'`.
+
+**Reintento manual** (`POST /integration/events/:eventRowId/retry-projection`,
+permiso `integration_events.retry`, admin-only — el mismo permiso ya
+usado por el reprocesador legado del simulador, sin crear uno nuevo) —
+solo acepta eventos en `FAILED_RETRYABLE`; un evento `FAILED_TERMINAL`
+nunca se reintenta automática ni manualmente. Cada intento incrementa
+`attempts`; al alcanzar `MAX_PROJECTION_ATTEMPTS` (5) un fallo retryable
+se degrada a terminal.
