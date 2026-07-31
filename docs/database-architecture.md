@@ -423,7 +423,12 @@ quedan `null` hasta un futuro relink.
 ### 20.5 Contrato `OPERATIONAL_STATUS_CHECK` — documentado, NO implementado
 
 Por instrucción expresa, este bloqueador permanece abierto. No se creó
-ningún puerto, adaptador HTTP, ni respuesta simulada. Contrato propuesto
+ningún puerto, adaptador HTTP, ni respuesta simulada. **El contrato
+completo y definitivo (21 secciones, listo para entregar al equipo
+responsable del motor) vive en
+[`docs/operational-status-check-contract-v1.md`](./operational-status-check-contract-v1.md)**
+— lo que sigue aquí es solo el resumen original de la fase anterior,
+conservado para no romper el historial de esta sección. Contrato propuesto
 para aprobación futura del equipo del servidor:
 
 | Elemento | Propuesta |
