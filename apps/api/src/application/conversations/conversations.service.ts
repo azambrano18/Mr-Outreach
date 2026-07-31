@@ -7,6 +7,7 @@ import { ConversationMessageRepository } from '../../domain/conversation/convers
 import { ConversationNoteRepository } from '../../domain/conversation/conversation-note.repository';
 import { ConversationReadStateRepository } from '../../domain/conversation/conversation-read-state.repository';
 import { ConversationTagRepository } from '../../domain/conversation/conversation-tag.repository';
+import { isConversationUnreadForUser } from '../../domain/conversation/conversation-unread.policy';
 import {
   Conversation,
   ConversationClassification,
@@ -209,8 +210,14 @@ export class ConversationsService {
     actorId: string,
   ): Promise<ConversationSummary[]> {
     await this.syncMailboxes(organizationId, mailboxIdsToSync, actorId);
-    const rows = await this.conversations.findAll(organizationId, filter);
-    return Promise.all(rows.map((row) => this.toSummary(row)));
+    // isUnread is never pushed down to the repository here — it is a
+    // per-user computed value, not a column the DB can filter on for
+    // "the current caller" (see ConversationReadState's own doc comment).
+    const { isUnread: wantUnread, ...dbFilter } = filter;
+    const rows = await this.conversations.findAll(organizationId, dbFilter);
+    const unreadMap = await this.computeUnreadMap(organizationId, actorId, rows.map((row) => row.id));
+    const filtered = wantUnread === undefined ? rows : rows.filter((row) => (unreadMap.get(row.id) ?? false) === wantUnread);
+    return Promise.all(filtered.map((row) => this.toSummary(row, unreadMap.get(row.id))));
   }
 
   async counters(
@@ -220,16 +227,20 @@ export class ConversationsService {
     actorId: string,
   ): Promise<ConversationCounters> {
     await this.syncMailboxes(organizationId, mailboxIdsToSync, actorId);
+    const { isUnread: _ignored, ...dbFilter } = filter;
     const [all, statusNew, statusPending, statusInProgress] = await Promise.all([
-      this.conversations.findAll(organizationId, filter),
-      this.conversations.findAll(organizationId, { ...filter, managementStatus: 'NEW' }),
-      this.conversations.findAll(organizationId, { ...filter, managementStatus: 'PENDING' }),
-      this.conversations.findAll(organizationId, { ...filter, managementStatus: 'IN_PROGRESS' }),
+      this.conversations.findAll(organizationId, dbFilter),
+      this.conversations.findAll(organizationId, { ...dbFilter, managementStatus: 'NEW' }),
+      this.conversations.findAll(organizationId, { ...dbFilter, managementStatus: 'PENDING' }),
+      this.conversations.findAll(organizationId, { ...dbFilter, managementStatus: 'IN_PROGRESS' }),
     ]);
+    const unreadMap = await this.computeUnreadMap(organizationId, actorId, all.map((row) => row.id));
+    const unreadCount = all.filter((row) => unreadMap.get(row.id)).length;
     return {
       total: all.length,
       new: statusNew.length,
       pending: statusNew.length + statusPending.length + statusInProgress.length,
+      unread: unreadCount,
     };
   }
 
@@ -267,14 +278,21 @@ export class ConversationsService {
       .map((mailbox) => mailbox.id);
     await this.syncMailboxes(organizationId, mailboxIdsInScope, actorId);
 
-    const rows = await this.conversations.findAll(organizationId, filter);
+    const { isUnread: wantUnread, ...dbFilter } = filter;
+    const rows = await this.conversations.findAll(organizationId, dbFilter);
     const visible = rows.filter(
       (row) =>
         (row.clientId && assignedClientIds.has(row.clientId)) ||
         row.assignedExecutiveId === userId ||
         assignedMailboxIds.has(row.mailboxId),
     );
-    return Promise.all(visible.map((row) => this.toSummary(row)));
+    // Unread is computed for the actual VIEWER (actorId — an admin acting
+    // "as executive" would still see their own read state, never the
+    // owning executive's), which is why this reads `actorId`, not `userId`.
+    const unreadMap = await this.computeUnreadMap(organizationId, actorId, visible.map((row) => row.id));
+    const filtered =
+      wantUnread === undefined ? visible : visible.filter((row) => (unreadMap.get(row.id) ?? false) === wantUnread);
+    return Promise.all(filtered.map((row) => this.toSummary(row, unreadMap.get(row.id))));
   }
 
   async countersForExecutive(
@@ -290,7 +308,8 @@ export class ConversationsService {
         c.managementStatus as 'NEW' | 'PENDING' | 'IN_PROGRESS',
       ),
     ).length;
-    return { total: all.length, new: newCount, pending: pendingCount };
+    const unreadCount = all.filter((c) => c.isUnread).length;
+    return { total: all.length, new: newCount, pending: pendingCount, unread: unreadCount };
   }
 
   /**
@@ -350,7 +369,10 @@ export class ConversationsService {
           const mailboxNodes = await Promise.all(
             mailboxesInDomain.map(async (mailbox) => {
               const rows = await this.conversations.findAll(organizationId, { mailboxId: mailbox.id });
-              const unreadCount = rows.filter((row) => row.isUnread).length;
+              // Per-user badge (the actual viewer, actorId) — never the
+              // coarse Conversation.isUnread flag (see toSummary's comment).
+              const unreadMap = await this.computeUnreadMap(organizationId, actorId, rows.map((row) => row.id));
+              const unreadCount = rows.filter((row) => unreadMap.get(row.id)).length;
               domainUnread += unreadCount;
               return { id: mailbox.id, email: mailbox.email, unreadCount };
             }),
@@ -405,7 +427,10 @@ export class ConversationsService {
         const mailboxNodes = await Promise.all(
           mailboxesInDomain.map(async (mailbox) => {
             const rows = await this.conversations.findAll(organizationId, { mailboxId: mailbox.id });
-            const unreadCount = rows.filter((row) => row.isUnread).length;
+            // Per-user badge for THIS admin (actorId) — an admin's own
+            // read state, independent of any executive's.
+            const unreadMap = await this.computeUnreadMap(organizationId, actorId, rows.map((row) => row.id));
+            const unreadCount = rows.filter((row) => unreadMap.get(row.id)).length;
             domainUnread += unreadCount;
             return { id: mailbox.id, email: mailbox.email, unreadCount };
           }),
@@ -605,7 +630,14 @@ export class ConversationsService {
         lastReadAt: new Date(),
       });
     }
-    const summary = await this.toSummary(conversation);
+    // options.actorId absent only on the internal "re-fetch right after
+    // create" path (see this method's own doc comment) — no user to
+    // compute a per-user value for, so toSummary falls back to the legacy
+    // coarse flag. Every genuine "user opened this" call has an actorId.
+    const unreadForUser = options.actorId
+      ? await this.computeUnreadForOne(organizationId, options.actorId, conversation.id)
+      : undefined;
+    const summary = await this.toSummary(conversation, unreadForUser);
     const notesWithAuthor = await Promise.all(noteRows.map((note) => this.toNoteSummary(note)));
 
     return {
@@ -670,7 +702,7 @@ export class ConversationsService {
       metadata: { from: existing.managementStatus, to: status },
     });
 
-    return this.toSummary(updated);
+    return this.toSummary(updated, await this.computeUnreadForOne(organizationId, actorId, updated.id));
   }
 
   async updateClassification(
@@ -691,7 +723,7 @@ export class ConversationsService {
       metadata: { from: existing.classification, to: classification },
     });
 
-    return this.toSummary(updated);
+    return this.toSummary(updated, await this.computeUnreadForOne(organizationId, actorId, updated.id));
   }
 
   async updateAssignment(
@@ -718,7 +750,7 @@ export class ConversationsService {
       metadata: { assignedExecutiveId },
     });
 
-    return this.toSummary(updated);
+    return this.toSummary(updated, await this.computeUnreadForOne(organizationId, actorId, updated.id));
   }
 
   async associateManually(
@@ -743,7 +775,7 @@ export class ConversationsService {
       metadata: input,
     });
 
-    return this.toSummary(updated);
+    return this.toSummary(updated, await this.computeUnreadForOne(organizationId, actorId, updated.id));
   }
 
   async addTag(
@@ -1065,7 +1097,45 @@ export class ConversationsService {
     });
   }
 
-  private async toSummary(conversation: Conversation): Promise<ConversationSummary> {
+  /**
+   * Fase "Estado leído/no leído por usuario" — batches the two lookups
+   * (`findLastInboundForConversations`, `findAllForUser`) once for an
+   * entire list rather than once per row, then applies the pure
+   * `isConversationUnreadForUser` policy per conversation. This is the
+   * ONLY place `ConversationSummary.isUnread` should ever be computed
+   * from for a genuine "current user" — never `conversation.isUnread`
+   * (see that field's own doc comment: legacy/coarse, non-authoritative).
+   */
+  private async computeUnreadMap(
+    organizationId: string,
+    userId: string,
+    conversationIds: string[],
+  ): Promise<Map<string, boolean>> {
+    if (conversationIds.length === 0) return new Map();
+    const [lastInboundByConversation, readStates] = await Promise.all([
+      this.messages.findLastInboundForConversations(conversationIds),
+      this.readStates.findAllForUser(organizationId, userId, conversationIds),
+    ]);
+    const readStateByConversation = new Map(readStates.map((state) => [state.conversationId, state]));
+    const result = new Map<string, boolean>();
+    for (const conversationId of conversationIds) {
+      result.set(
+        conversationId,
+        isConversationUnreadForUser(
+          lastInboundByConversation.get(conversationId) ?? null,
+          readStateByConversation.get(conversationId) ?? null,
+        ),
+      );
+    }
+    return result;
+  }
+
+  private async computeUnreadForOne(organizationId: string, userId: string, conversationId: string): Promise<boolean> {
+    const map = await this.computeUnreadMap(organizationId, userId, [conversationId]);
+    return map.get(conversationId) ?? false;
+  }
+
+  private async toSummary(conversation: Conversation, unreadForUser?: boolean): Promise<ConversationSummary> {
     const [mailbox, client, domain, sequence, executive, tagIds, company, originatingStep, enrolledContact] =
       await Promise.all([
         this.mailboxes.findById(conversation.mailboxId),
@@ -1107,7 +1177,10 @@ export class ConversationsService {
       subject: conversation.subject,
       managementStatus: conversation.managementStatus,
       classification: conversation.classification,
-      isUnread: conversation.isUnread,
+      // Legacy fallback (conversation.isUnread) only for the rare internal
+      // caller that has no "current user" to compute against — every
+      // controller-facing call site below passes the real per-user value.
+      isUnread: unreadForUser ?? conversation.isUnread,
       lastMessageAt: conversation.lastMessageAt,
       resolvedAt: conversation.resolvedAt,
       archivedAt: conversation.archivedAt,

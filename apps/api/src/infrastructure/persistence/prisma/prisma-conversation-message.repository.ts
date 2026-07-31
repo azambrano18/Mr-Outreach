@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ConversationMessage as PrismaConversationMessageRow } from '@prisma/client';
+import { ConversationMessage as PrismaConversationMessageRow, Prisma } from '@prisma/client';
 import {
   ConversationMessage,
   CreateConversationMessageInput,
   UpdateConversationMessageInput,
 } from '../../../domain/conversation/conversation-message.entity';
-import { ConversationMessageRepository } from '../../../domain/conversation/conversation-message.repository';
+import {
+  ConversationMessageRepository,
+  LastInboundMessageRow,
+} from '../../../domain/conversation/conversation-message.repository';
 import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
 import { resolveClient } from './prisma-transaction-manager';
@@ -56,6 +59,19 @@ export class PrismaConversationMessageRepository implements ConversationMessageR
       where: { conversationId_emailMessageId: { conversationId, emailMessageId } },
     });
     return row ? toDomain(row) : null;
+  }
+
+  async findLastInboundForConversations(conversationIds: string[]): Promise<Map<string, LastInboundMessageRow>> {
+    if (conversationIds.length === 0) return new Map();
+    const rows = await this.prisma.$queryRaw<Array<{ conversationId: string; id: string; receivedAt: Date }>>(
+      Prisma.sql`
+        SELECT DISTINCT ON ("conversationId") "conversationId", "id", "receivedAt"
+        FROM "conversation_messages"
+        WHERE "conversationId" IN (${Prisma.join(conversationIds)}) AND "direction" = 'INBOUND'
+        ORDER BY "conversationId", "receivedAt" DESC NULLS LAST
+      `,
+    );
+    return new Map(rows.map((row) => [row.conversationId, { id: row.id, receivedAt: row.receivedAt }]));
   }
 
   async findByMessageIdHeader(

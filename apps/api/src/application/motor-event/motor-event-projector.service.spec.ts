@@ -345,6 +345,7 @@ describe('MotorEventProjector', () => {
       findByEmailMessageId: jest.fn().mockResolvedValue(null),
       findByMessageIdHeader: jest.fn().mockResolvedValue(null),
       findByOutboundMessageId: jest.fn().mockResolvedValue(null),
+      findLastInboundForConversations: jest.fn().mockResolvedValue(new Map()),
       create: jest.fn().mockImplementation((input) => Promise.resolve(buildMessage(input as Partial<ConversationMessage>))),
       update: jest.fn().mockImplementation((id, input) => Promise.resolve({ ...buildMessage(), id, ...input })),
     };

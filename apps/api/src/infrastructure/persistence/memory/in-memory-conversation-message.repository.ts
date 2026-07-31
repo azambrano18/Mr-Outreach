@@ -5,7 +5,10 @@ import {
   CreateConversationMessageInput,
   UpdateConversationMessageInput,
 } from '../../../domain/conversation/conversation-message.entity';
-import { ConversationMessageRepository } from '../../../domain/conversation/conversation-message.repository';
+import {
+  ConversationMessageRepository,
+  LastInboundMessageRow,
+} from '../../../domain/conversation/conversation-message.repository';
 import { MemoryStore } from './memory-store';
 
 @Injectable()
@@ -48,6 +51,19 @@ export class InMemoryConversationMessageRepository implements ConversationMessag
         (message) => message.organizationId === organizationId && message.outboundMessageId === outboundMessageId,
       ) ?? null
     );
+  }
+
+  async findLastInboundForConversations(conversationIds: string[]): Promise<Map<string, LastInboundMessageRow>> {
+    const ids = new Set(conversationIds);
+    const result = new Map<string, LastInboundMessageRow>();
+    for (const message of this.store.conversationMessages) {
+      if (message.direction !== 'INBOUND' || !ids.has(message.conversationId) || !message.receivedAt) continue;
+      const current = result.get(message.conversationId);
+      if (!current || message.receivedAt.getTime() > current.receivedAt.getTime()) {
+        result.set(message.conversationId, { id: message.id, receivedAt: message.receivedAt });
+      }
+    }
+    return result;
   }
 
   async update(id: string, input: UpdateConversationMessageInput): Promise<ConversationMessage> {

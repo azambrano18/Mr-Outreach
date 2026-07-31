@@ -115,10 +115,10 @@ describe('ConversationsService — §2 mailbox-assignment-based visibility (admi
 
     service = new ConversationsService(
       conversations as unknown as ConversationRepository,
-      {} as unknown as ConversationMessageRepository,
+      { findLastInboundForConversations: jest.fn().mockResolvedValue(new Map()) } as unknown as ConversationMessageRepository,
       {} as unknown as ConversationTagRepository,
       {} as unknown as ConversationNoteRepository,
-      {} as unknown as ConversationReadStateRepository,
+      { findAllForUser: jest.fn().mockResolvedValue([]) } as unknown as ConversationReadStateRepository,
       mailboxes as unknown as MailboxRepository,
       {} as unknown as SequenceRepository,
       clients as unknown as ManagedClientRepository,

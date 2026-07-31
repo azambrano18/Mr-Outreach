@@ -957,6 +957,8 @@ export interface ConversationCounters {
   total: number;
   new: number;
   pending: number;
+  /** Count of conversations unread for the specific caller, never a global count. */
+  unread: number;
 }
 
 export interface ConversationTagSummary {

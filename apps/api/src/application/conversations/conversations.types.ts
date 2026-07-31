@@ -101,6 +101,8 @@ export interface ConversationCounters {
   total: number;
   new: number;
   pending: number;
+  /** Fase "Estado leído/no leído por usuario" — count of conversations unread for the specific caller, never a global count. */
+  unread: number;
 }
 
 export interface ConversationTagSummary {
