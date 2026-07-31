@@ -1,3 +1,4 @@
+import { TransactionContext } from '../persistence/transaction';
 import {
   CreateSequenceTemplateVersionInput,
   SequenceTemplateVersion,
@@ -17,6 +18,6 @@ export interface SequenceTemplateVersionRepository {
    */
   findLatestAcceptedByTemplate(templateId: string): Promise<SequenceTemplateVersion | null>;
   findByServerTemplateId(serverTemplateId: string): Promise<SequenceTemplateVersion | null>;
-  create(input: CreateSequenceTemplateVersionInput): Promise<SequenceTemplateVersion>;
-  update(id: string, input: UpdateSequenceTemplateVersionInput): Promise<SequenceTemplateVersion>;
+  create(input: CreateSequenceTemplateVersionInput, ctx?: TransactionContext): Promise<SequenceTemplateVersion>;
+  update(id: string, input: UpdateSequenceTemplateVersionInput, ctx?: TransactionContext): Promise<SequenceTemplateVersion>;
 }

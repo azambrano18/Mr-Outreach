@@ -9,7 +9,9 @@ import {
   UpdateSequenceTemplateVersionInput,
 } from '../../../domain/sequence-template/sequence-template-version.entity';
 import { SequenceTemplateVersionRepository } from '../../../domain/sequence-template/sequence-template-version.repository';
+import { TransactionContext } from '../../../domain/persistence/transaction';
 import { PrismaService } from './prisma.service';
+import { resolveClient } from './prisma-transaction-manager';
 
 function toDomain(row: PrismaVersionRow): SequenceTemplateVersion {
   return {
@@ -74,9 +76,13 @@ export class PrismaSequenceTemplateVersionRepository implements SequenceTemplate
     return row ? toDomain(row) : null;
   }
 
-  async create(input: CreateSequenceTemplateVersionInput): Promise<SequenceTemplateVersion> {
-    const latest = await this.findLatestByTemplate(input.templateId);
-    const row = await this.prisma.sequenceTemplateVersion.create({
+  async create(input: CreateSequenceTemplateVersionInput, ctx?: TransactionContext): Promise<SequenceTemplateVersion> {
+    const client = resolveClient(this.prisma, ctx);
+    const latest = await client.sequenceTemplateVersion.findFirst({
+      where: { templateId: input.templateId },
+      orderBy: { versionNumber: 'desc' },
+    });
+    const row = await client.sequenceTemplateVersion.create({
       data: {
         templateId: input.templateId,
         versionNumber: (latest?.versionNumber ?? 0) + 1,
@@ -95,8 +101,8 @@ export class PrismaSequenceTemplateVersionRepository implements SequenceTemplate
     return toDomain(row);
   }
 
-  async update(id: string, input: UpdateSequenceTemplateVersionInput): Promise<SequenceTemplateVersion> {
-    const row = await this.prisma.sequenceTemplateVersion.update({
+  async update(id: string, input: UpdateSequenceTemplateVersionInput, ctx?: TransactionContext): Promise<SequenceTemplateVersion> {
+    const row = await resolveClient(this.prisma, ctx).sequenceTemplateVersion.update({
       where: { id },
       data: {
         status: input.status,

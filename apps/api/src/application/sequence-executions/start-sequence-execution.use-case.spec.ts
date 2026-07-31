@@ -1,13 +1,22 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { IntegrationCommandRepository } from '../../domain/integration/integration-command.repository';
+import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import { SequenceExecutionMotorPort } from '../../domain/sequence-execution-motor/sequence-execution-motor-port';
 import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
 import { ExecutiveMailboxEligibilityService } from '../sequence-templates/executive-mailbox-eligibility.service';
+import { ProspectIdentityResolver } from '../prospect-imports/prospect-identity-resolver.service';
 import { ProspectImportsService } from '../prospect-imports/prospect-imports.service';
 import { SequenceExecutionsService } from './sequence-executions.service';
 import { StartSequenceExecutionUseCase } from './start-sequence-execution.use-case';
+
+class FakeTransactionManager implements TransactionManager {
+  async run<T>(work: (ctx: TransactionContext) => Promise<T>): Promise<T> {
+    return work({ kind: 'fake' });
+  }
+}
 
 describe('StartSequenceExecutionUseCase — §1-7/§12 contrato simplificado', () => {
   let executions: jest.Mocked<Pick<SequenceExecutionRepository, 'conditionalUpdateStatus' | 'update' | 'findByExecutive'>>;
@@ -17,7 +26,9 @@ describe('StartSequenceExecutionUseCase — §1-7/§12 contrato simplificado', (
   let executionsService: jest.Mocked<Pick<SequenceExecutionsService, 'requireOwned' | 'getOwned'>>;
   let eligibility: jest.Mocked<Pick<ExecutiveMailboxEligibilityService, 'requireEligible'>>;
   let prospectImports: jest.Mocked<Pick<ProspectImportsService, 'getImportForExecution' | 'getValidRows' | 'markAccepted'>>;
+  let prospectIdentity: jest.Mocked<Pick<ProspectIdentityResolver, 'resolveForExecution'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
+  let commands: jest.Mocked<Pick<IntegrationCommandRepository, 'findByIdempotencyKey' | 'create' | 'update'>>;
   let useCase: StartSequenceExecutionUseCase;
 
   const orgId = 'org_1';
@@ -82,16 +93,25 @@ describe('StartSequenceExecutionUseCase — §1-7/§12 contrato simplificado', (
       getValidRows: jest.fn().mockResolvedValue([validRow]),
       markAccepted: jest.fn().mockResolvedValue(undefined),
     };
+    prospectIdentity = { resolveForExecution: jest.fn().mockResolvedValue(undefined) };
     secrets = { encrypt: jest.fn().mockReturnValue('enc(exec-token)'), decrypt: jest.fn().mockReturnValue('tpt_plaintext') };
+    commands = {
+      findByIdempotencyKey: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'command_row_1' }),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
 
     useCase = new StartSequenceExecutionUseCase(
       executions as unknown as SequenceExecutionRepository,
       templateVersions as unknown as SequenceTemplateVersionRepository,
       audit as unknown as AuditLogRepository,
       motor as unknown as SequenceExecutionMotorPort,
+      new FakeTransactionManager(),
+      commands as unknown as IntegrationCommandRepository,
       executionsService as unknown as SequenceExecutionsService,
       eligibility as unknown as ExecutiveMailboxEligibilityService,
       prospectImports as unknown as ProspectImportsService,
+      prospectIdentity as unknown as ProspectIdentityResolver,
       secrets as unknown as SecretEncryptionService,
     );
   });
@@ -256,15 +276,19 @@ describe('StartSequenceExecutionUseCase — §1-7/§12 contrato simplificado', (
         receivedAt,
         initialProspectState: 'STEP_01_PENDING',
       }),
+      expect.anything(),
     );
     expect(prospectImports.markAccepted).toHaveBeenCalledWith(executionId, 'STEP_01_PENDING');
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'sequence_execution.accepted' }));
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'sequence_execution.accepted' }),
+      expect.anything(),
+    );
   });
 
   it('defaults to STEP_01_PENDING locally even when the server response omits initialProspectState', async () => {
     motor.startExecution.mockResolvedValue(acceptedResult({ initialProspectState: null }));
     await useCase.execute(baseInput());
-    expect(executions.update).toHaveBeenCalledWith(executionId, expect.objectContaining({ initialProspectState: 'STEP_01_PENDING' }));
+    expect(executions.update).toHaveBeenCalledWith(executionId, expect.objectContaining({ initialProspectState: 'STEP_01_PENDING' }), expect.anything());
     expect(prospectImports.markAccepted).toHaveBeenCalledWith(executionId, 'STEP_01_PENDING');
   });
 
@@ -282,8 +306,11 @@ describe('StartSequenceExecutionUseCase — §1-7/§12 contrato simplificado', (
       rejectionReason: 'Cuenta revocada.',
     });
     await useCase.execute(baseInput());
-    expect(executions.update).toHaveBeenCalledWith(executionId, expect.objectContaining({ status: 'REJECTED', lastError: 'Cuenta revocada.' }));
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'sequence_execution.rejected' }));
+    expect(executions.update).toHaveBeenCalledWith(executionId, expect.objectContaining({ status: 'REJECTED', lastError: 'Cuenta revocada.' }), expect.anything());
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'sequence_execution.rejected' }),
+      expect.anything(),
+    );
     expect(prospectImports.markAccepted).not.toHaveBeenCalled();
   });
 
@@ -320,5 +347,74 @@ describe('StartSequenceExecutionUseCase — §1-7/§12 contrato simplificado', (
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
     expect(motor.startExecution).toHaveBeenCalledTimes(1);
+  });
+
+  describe('durable IntegrationCommand traceability (EXECUTION aggregate — Fase "Comandos y eventos del flujo activo")', () => {
+    it('creates a REQUESTED IntegrationCommand for a fresh submit, before the motor is called', async () => {
+      motor.startExecution.mockResolvedValue(acceptedResult());
+      await useCase.execute(baseInput());
+      expect(commands.findByIdempotencyKey).toHaveBeenCalledWith(orgId, expect.stringContaining('idem_1'), expect.anything());
+      expect(commands.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: orgId,
+          commandType: 'SEQUENCE_EXECUTION_START_REQUESTED',
+          aggregateType: 'EXECUTION',
+          aggregateId: executionId,
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('marks the IntegrationCommand COMPLETED when the motor accepts', async () => {
+      motor.startExecution.mockResolvedValue(acceptedResult());
+      await useCase.execute(baseInput());
+      expect(commands.update).toHaveBeenCalledWith(
+        'command_row_1',
+        expect.objectContaining({ status: 'COMPLETED' }),
+        expect.anything(),
+      );
+    });
+
+    it('marks the IntegrationCommand FAILED when the motor rejects', async () => {
+      motor.startExecution.mockResolvedValue({
+        accepted: false,
+        serverExecutionId: null,
+        executionToken: null,
+        status: 'REJECTED',
+        receivedProspects: 0,
+        acceptedProspects: 0,
+        rejectedProspects: 0,
+        initialProspectState: null,
+        receivedAt: null,
+        rejectionReason: 'Cuenta revocada.',
+      });
+      await useCase.execute(baseInput());
+      expect(commands.update).toHaveBeenCalledWith(
+        'command_row_1',
+        expect.objectContaining({ status: 'FAILED', lastError: 'Cuenta revocada.' }),
+        expect.anything(),
+      );
+    });
+
+    it('leaves the IntegrationCommand REQUESTED (never marks it COMPLETED/FAILED) on a motor timeout — recoverable only by a manual retry', async () => {
+      motor.startExecution.mockRejectedValue(new ServiceUnavailableException('El servidor motor no está disponible.'));
+      await expect(useCase.execute(baseInput())).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(commands.update).not.toHaveBeenCalled();
+    });
+
+    it('reuses the existing IntegrationCommand row on a retry instead of creating a second one', async () => {
+      commands.findByIdempotencyKey.mockResolvedValue({ id: 'existing_command_row' } as never);
+      executionsService.requireOwned.mockResolvedValue({
+        ...draftExecution,
+        status: 'SUBMISSION_UNKNOWN',
+        lastSubmissionIdempotencyKey: 'original_key',
+      } as any);
+      motor.startExecution.mockResolvedValue(acceptedResult());
+
+      await useCase.execute({ ...baseInput(), idempotencyKey: 'a_brand_new_key_from_a_second_click' });
+
+      expect(commands.create).not.toHaveBeenCalled();
+      expect(commands.update).toHaveBeenCalledWith('existing_command_row', expect.objectContaining({ status: 'COMPLETED' }), expect.anything());
+    });
   });
 });

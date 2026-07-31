@@ -13,7 +13,16 @@ export type CommandStatus =
   | 'CANCELLED'
   | 'TIMEOUT';
 
-export type AggregateType = 'MAILBOX' | 'SEQUENCE' | 'SEQUENCE_IMPORT' | 'SEQUENCE_CONTACT' | 'SEQUENCE_COMPANY';
+export type AggregateType =
+  | 'MAILBOX'
+  | 'SEQUENCE'
+  | 'SEQUENCE_IMPORT'
+  | 'SEQUENCE_CONTACT'
+  | 'SEQUENCE_COMPANY'
+  /** Fase "Comandos y eventos del flujo activo" — Alternativa A. aggregateId is a SequenceTemplateVersion.id. */
+  | 'TEMPLATE'
+  /** aggregateId is a SequenceExecution.id. */
+  | 'EXECUTION';
 
 /** The persisted Outbox row — §44. */
 export interface IntegrationCommand {

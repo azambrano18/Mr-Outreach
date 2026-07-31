@@ -1,5 +1,8 @@
 import { BadRequestException, ConflictException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { IntegrationCommandRepository } from '../../domain/integration/integration-command.repository';
+import { TransactionManager } from '../../domain/persistence/transaction';
 import { SequenceExecutionStatus } from '../../domain/sequence-execution/sequence-execution.entity';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import {
@@ -7,10 +10,18 @@ import {
   SequenceExecutionMotorPort,
 } from '../../domain/sequence-execution-motor/sequence-execution-motor-port';
 import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
-import { AUDIT_LOG_REPOSITORY, SEQUENCE_EXECUTION_REPOSITORY, SEQUENCE_TEMPLATE_VERSION_REPOSITORY } from '../../infrastructure/persistence/tokens';
+import {
+  AUDIT_LOG_REPOSITORY,
+  INTEGRATION_COMMAND_REPOSITORY,
+  SEQUENCE_EXECUTION_REPOSITORY,
+  SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
+  TRANSACTION_MANAGER,
+} from '../../infrastructure/persistence/tokens';
+import { buildIdempotencyStorageKey } from '../idempotency/idempotent-operation.service';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
 import { calendarDateInTimezone, generateSequenceName, SANTIAGO_TIMEZONE } from '../sequences/sequence-timing.util';
 import { ExecutiveMailboxEligibilityService } from '../sequence-templates/executive-mailbox-eligibility.service';
+import { ProspectIdentityResolver } from '../prospect-imports/prospect-identity-resolver.service';
 import { ProspectImportsService } from '../prospect-imports/prospect-imports.service';
 import { SequenceExecutionsService } from './sequence-executions.service';
 import { SequenceExecutionSummary } from './sequence-executions.types';
@@ -61,9 +72,12 @@ export class StartSequenceExecutionUseCase {
     @Inject(SEQUENCE_TEMPLATE_VERSION_REPOSITORY) private readonly templateVersions: SequenceTemplateVersionRepository,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly audit: AuditLogRepository,
     @Inject(SEQUENCE_EXECUTION_MOTOR_PORT) private readonly motor: SequenceExecutionMotorPort,
+    @Inject(TRANSACTION_MANAGER) private readonly tx: TransactionManager,
+    @Inject(INTEGRATION_COMMAND_REPOSITORY) private readonly commands: IntegrationCommandRepository,
     private readonly executionsService: SequenceExecutionsService,
     private readonly eligibility: ExecutiveMailboxEligibilityService,
     private readonly prospectImports: ProspectImportsService,
+    private readonly prospectIdentity: ProspectIdentityResolver,
     private readonly secrets: SecretEncryptionService,
   ) {}
 
@@ -101,22 +115,59 @@ export class StartSequenceExecutionUseCase {
     const name = execution.name ?? (await this.generateManagementName(input.organizationId, input.executiveId, new Date()));
 
     const requestedAt = new Date();
+    // Fase "Comandos y eventos del flujo activo" — Alternativa A: durable
+    // traceability layered on top of the existing SequenceExecution.status
+    // state machine, which remains the actual concurrency-control mechanism
+    // (conditionalUpdateStatus below) — this command row never replaces it.
+    const commandStorageKey = buildIdempotencyStorageKey('sequence_execution.start', idempotencyKey);
 
-    if (!isRetry) {
-      const claimed = await this.executions.conditionalUpdateStatus(execution.id, FRESH_SUBMIT_BLOCKED_STATUSES, 'SUBMITTING');
-      if (claimed === 0) {
-        throw new ConflictException('Esta gestión ya fue enviada al servidor.');
+    // ETAPA A — transacción local: reclama el estado SUBMITTING y crea (o
+    // localiza, en un reintento) el IntegrationCommand REQUESTED, todo o
+    // nada. El motor todavía no fue llamado.
+    const commandRowId = await this.tx.run(async (ctx) => {
+      if (!isRetry) {
+        const claimed = await this.executions.conditionalUpdateStatus(
+          execution.id,
+          FRESH_SUBMIT_BLOCKED_STATUSES,
+          'SUBMITTING',
+          ctx,
+        );
+        if (claimed === 0) {
+          throw new ConflictException('Esta gestión ya fue enviada al servidor.');
+        }
       }
-    }
-    await this.executions.update(execution.id, { name, lastSubmissionIdempotencyKey: idempotencyKey, requestedAt });
+      await this.executions.update(execution.id, { name, lastSubmissionIdempotencyKey: idempotencyKey, requestedAt }, ctx);
 
-    await this.audit.record({
-      organizationId: input.organizationId,
-      actorId: input.executiveId,
-      action: 'sequence_execution.submission_requested',
-      entityType: 'SequenceExecution',
-      entityId: execution.id,
-      metadata: { serverTemplateId: version.serverTemplateId, prospectCount: validRows.length, retry: isRetry, correlationId },
+      await this.audit.record(
+        {
+          organizationId: input.organizationId,
+          actorId: input.executiveId,
+          action: 'sequence_execution.submission_requested',
+          entityType: 'SequenceExecution',
+          entityId: execution.id,
+          metadata: { serverTemplateId: version.serverTemplateId, prospectCount: validRows.length, retry: isRetry, correlationId },
+        },
+        ctx,
+      );
+
+      const existingCommand = await this.commands.findByIdempotencyKey(input.organizationId, commandStorageKey, ctx);
+      if (existingCommand) return existingCommand.id;
+      const created = await this.commands.create(
+        {
+          organizationId: input.organizationId,
+          commandId: `cmd_${randomUUID()}`,
+          commandType: 'SEQUENCE_EXECUTION_START_REQUESTED',
+          aggregateType: 'EXECUTION',
+          aggregateId: execution.id,
+          schemaVersion: '1.0',
+          idempotencyKey: commandStorageKey,
+          correlationId,
+          payload: { serverTemplateId: version.serverTemplateId, prospectCount: validRows.length },
+          requestedBy: input.executiveId,
+        },
+        ctx,
+      );
+      return created.id;
     });
 
     try {
@@ -141,49 +192,95 @@ export class StartSequenceExecutionUseCase {
       if (result.accepted) {
         // §2 — the fixed contractual rule holds even if the server's response omits the field.
         const initialProspectState = result.initialProspectState ?? 'STEP_01_PENDING';
-        await this.executions.update(execution.id, {
-          status: 'ACCEPTED',
-          serverExecutionId: result.serverExecutionId,
-          executionTokenCiphertext: result.executionToken ? this.secrets.encrypt(result.executionToken) : null,
-          receivedAt: result.receivedAt,
-          initialProspectState,
-          receivedProspects: result.receivedProspects,
-          acceptedProspects: result.acceptedProspects,
-          rejectedProspects: result.rejectedProspects,
-          lastError: null,
-          lastSyncedAt: new Date(),
+        // ETAPA C — transacción de resultado: entidad + IntegrationCommand +
+        // auditoría, todo o nada. El motor ya respondió; esto solo persiste
+        // su respuesta.
+        await this.tx.run(async (ctx) => {
+          await this.executions.update(
+            execution.id,
+            {
+              status: 'ACCEPTED',
+              serverExecutionId: result.serverExecutionId,
+              executionTokenCiphertext: result.executionToken ? this.secrets.encrypt(result.executionToken) : null,
+              receivedAt: result.receivedAt,
+              initialProspectState,
+              receivedProspects: result.receivedProspects,
+              acceptedProspects: result.acceptedProspects,
+              rejectedProspects: result.rejectedProspects,
+              lastError: null,
+              lastSyncedAt: new Date(),
+            },
+            ctx,
+          );
+          await this.commands.update(
+            commandRowId,
+            { status: 'COMPLETED', completedAt: new Date(), resultSnapshot: { serverExecutionId: result.serverExecutionId } },
+            ctx,
+          );
+          await this.audit.record(
+            {
+              organizationId: input.organizationId,
+              actorId: input.executiveId,
+              action: 'sequence_execution.accepted',
+              entityType: 'SequenceExecution',
+              entityId: execution.id,
+              metadata: {
+                serverExecutionId: result.serverExecutionId,
+                receivedProspects: result.receivedProspects,
+                acceptedProspects: result.acceptedProspects,
+                rejectedProspects: result.rejectedProspects,
+                initialProspectState,
+                receivedAt: result.receivedAt,
+                correlationId,
+              },
+            },
+            ctx,
+          );
         });
         await this.prospectImports.markAccepted(execution.id, initialProspectState);
-        await this.audit.record({
-          organizationId: input.organizationId,
-          actorId: input.executiveId,
-          action: 'sequence_execution.accepted',
-          entityType: 'SequenceExecution',
-          entityId: execution.id,
-          metadata: {
-            serverExecutionId: result.serverExecutionId,
-            receivedProspects: result.receivedProspects,
-            acceptedProspects: result.acceptedProspects,
-            rejectedProspects: result.rejectedProspects,
-            initialProspectState,
-            receivedAt: result.receivedAt,
-            correlationId,
-          },
-        });
+        // Fase "Conversaciones persistentes" — resolve/create Company and
+        // Contact for this Gestión's accepted prospects, reusing the same
+        // tables the legacy import flow already writes to, so a Conversation
+        // created against this execution can carry a real contactId/
+        // companyId. Best-effort: a failure here must never undo an already-
+        // accepted submission — the resolver itself is idempotent, so a
+        // later retry (e.g. a manual re-run, once available) safely catches
+        // up on whatever rows are still unresolved.
+        try {
+          await this.prospectIdentity.resolveForExecution(input.organizationId, execution.id, execution.mailboxId);
+        } catch (identityError) {
+          console.error(
+            JSON.stringify({
+              event: 'start_sequence_execution.identity_resolution_failed',
+              executionId: execution.id,
+              organizationId: input.organizationId,
+              message: identityError instanceof Error ? identityError.message : 'unknown error',
+            }),
+          );
+        }
       } else {
-        await this.executions.update(execution.id, {
-          status: 'REJECTED',
-          serverStatus: 'REJECTED',
-          lastError: result.rejectionReason,
-          lastSyncedAt: new Date(),
-        });
-        await this.audit.record({
-          organizationId: input.organizationId,
-          actorId: input.executiveId,
-          action: 'sequence_execution.rejected',
-          entityType: 'SequenceExecution',
-          entityId: execution.id,
-          metadata: { error: result.rejectionReason, correlationId },
+        await this.tx.run(async (ctx) => {
+          await this.executions.update(
+            execution.id,
+            { status: 'REJECTED', serverStatus: 'REJECTED', lastError: result.rejectionReason, lastSyncedAt: new Date() },
+            ctx,
+          );
+          await this.commands.update(
+            commandRowId,
+            { status: 'FAILED', completedAt: new Date(), lastError: result.rejectionReason },
+            ctx,
+          );
+          await this.audit.record(
+            {
+              organizationId: input.organizationId,
+              actorId: input.executiveId,
+              action: 'sequence_execution.rejected',
+              entityType: 'SequenceExecution',
+              entityId: execution.id,
+              metadata: { error: result.rejectionReason, correlationId },
+            },
+            ctx,
+          );
         });
       }
 

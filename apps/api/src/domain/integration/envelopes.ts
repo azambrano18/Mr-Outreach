@@ -27,7 +27,19 @@ export type CommandType =
   | 'MAILBOX_LINK_REQUESTED'
   | 'MAILBOX_UNLINK_REQUESTED'
   /** Fase 2.1 — purely local idempotency/audit record; never talks to the motor (no token, no client/domain/email change). */
-  | 'MAILBOX_REASSIGN_PRIMARY_REQUESTED';
+  | 'MAILBOX_REASSIGN_PRIMARY_REQUESTED'
+  /**
+   * Fase "Comandos y eventos del flujo activo" — Alternativa A: durable
+   * traceability for the active Plantillas/Gestiones flow, layered on top
+   * of (never replacing) the existing SequenceTemplateVersion.status /
+   * SequenceExecution.status state machines, which remain the actual
+   * concurrency-control mechanism (conditionalUpdateStatus). These rows
+   * are never dispatched through IntegrationService/MailEnginePort — the
+   * motor is called directly via SequenceTemplateMotorPort/
+   * SequenceExecutionMotorPort, strictly outside any open transaction.
+   */
+  | 'TEMPLATE_PUBLISH_REQUESTED'
+  | 'SEQUENCE_EXECUTION_START_REQUESTED';
 
 export type EventType =
   | 'MAILBOX_PROVISION_ACCEPTED'

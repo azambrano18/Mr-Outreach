@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { IntegrationCommandRepository } from '../../domain/integration/integration-command.repository';
+import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
 import { SequenceTemplateRepository } from '../../domain/sequence-template/sequence-template.repository';
 import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
 import { SequenceTemplateMotorPort } from '../../domain/sequence-template-motor/sequence-template-motor-port';
@@ -7,6 +9,12 @@ import { SecretEncryptionService } from '../../infrastructure/security/secret-en
 import { ExecutiveMailboxEligibilityService } from './executive-mailbox-eligibility.service';
 import { PublishSequenceTemplateUseCase } from './publish-sequence-template.use-case';
 import { SequenceTemplatesService } from './sequence-templates.service';
+
+class FakeTransactionManager implements TransactionManager {
+  async run<T>(work: (ctx: TransactionContext) => Promise<T>): Promise<T> {
+    return work({ kind: 'fake' });
+  }
+}
 
 describe('PublishSequenceTemplateUseCase', () => {
   let templates: jest.Mocked<Pick<SequenceTemplateRepository, 'conditionalUpdateStatus' | 'update'>>;
@@ -18,6 +26,7 @@ describe('PublishSequenceTemplateUseCase', () => {
   >;
   let eligibility: jest.Mocked<Pick<ExecutiveMailboxEligibilityService, 'requireEligible'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
+  let commands: jest.Mocked<Pick<IntegrationCommandRepository, 'findByIdempotencyKey' | 'create' | 'update'>>;
   let useCase: PublishSequenceTemplateUseCase;
 
   const orgId = 'org_1';
@@ -105,12 +114,19 @@ describe('PublishSequenceTemplateUseCase', () => {
     };
     eligibility = { requireEligible: jest.fn().mockResolvedValue(mailbox) };
     secrets = { encrypt: jest.fn().mockReturnValue('enc(token)'), decrypt: jest.fn() };
+    commands = {
+      findByIdempotencyKey: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'command_row_1', commandId: 'cmd_1' }),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
 
     useCase = new PublishSequenceTemplateUseCase(
       templates as unknown as SequenceTemplateRepository,
       versions as unknown as SequenceTemplateVersionRepository,
       audit as unknown as AuditLogRepository,
       motor as unknown as SequenceTemplateMotorPort,
+      new FakeTransactionManager(),
+      commands as unknown as IntegrationCommandRepository,
       templatesService as unknown as SequenceTemplatesService,
       eligibility as unknown as ExecutiveMailboxEligibilityService,
       secrets as unknown as SecretEncryptionService,
@@ -146,10 +162,10 @@ describe('PublishSequenceTemplateUseCase', () => {
     expect(templatesService.validateForPublish).toHaveBeenCalledWith(orgId, actorId, templateId);
     expect(eligibility.requireEligible).toHaveBeenCalledWith(orgId, actorId, template.mailboxId);
     expect(secrets.encrypt).toHaveBeenCalledWith('tpt_plaintext');
-    expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ subjectTemplate: template.subjectTemplate }));
+    expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ subjectTemplate: template.subjectTemplate }), expect.anything());
     expect(motor.publishTemplate).toHaveBeenCalledWith(expect.objectContaining({ subjectTemplate: template.subjectTemplate }));
     // Fase Firma — the signature comes straight from the template's own draft field, never re-read from the mailbox at publish time.
-    expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: template.signatureHtml }));
+    expect(versions.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: template.signatureHtml }), expect.anything());
     expect(motor.publishTemplate).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: template.signatureHtml }));
     // Header is per-envío again — never a root-level field on either the version snapshot or the motor payload.
     const versionCall = versions.create.mock.calls[0][0];
@@ -167,7 +183,7 @@ describe('PublishSequenceTemplateUseCase', () => {
       expect(step).not.toHaveProperty('subjectTemplate');
       expect(step).not.toHaveProperty('enabled');
     }
-    expect(templates.update).toHaveBeenCalledWith(templateId, { status: 'PUBLISHED' });
+    expect(templates.update).toHaveBeenCalledWith(templateId, { status: 'PUBLISHED' }, expect.anything());
     expect(result.status).toBe('PUBLISHED');
     expect(result.version.templateTokenMasked).not.toContain('tpt_plaintext');
     expect(result.version.templateTokenMasked).toMatch(/^tpt_\*+/);
@@ -186,14 +202,90 @@ describe('PublishSequenceTemplateUseCase', () => {
 
     const result = await useCase.execute(baseInput());
 
-    expect(templates.update).toHaveBeenCalledWith(templateId, { status: 'PUBLISH_FAILED' });
+    expect(templates.update).toHaveBeenCalledWith(templateId, { status: 'PUBLISH_FAILED' }, expect.anything());
     expect(result.status).toBe('PUBLISH_FAILED');
     expect(secrets.encrypt).not.toHaveBeenCalled();
   });
 
-  it('marks the template PUBLISH_FAILED when the mailbox eligibility check throws during the actual publish', async () => {
+  it('never claims PUBLISHING nor touches the template status when the mailbox eligibility check fails as a pre-flight validation (mirrors StartSequenceExecutionUseCase — a validation failure must never leave the template stuck mid-publish)', async () => {
     eligibility.requireEligible.mockRejectedValue(new ConflictException('no eligible'));
     await expect(useCase.execute(baseInput())).rejects.toBeInstanceOf(ConflictException);
-    expect(templates.update).toHaveBeenCalledWith(templateId, { status: 'PUBLISH_FAILED' });
+    expect(templates.conditionalUpdateStatus).not.toHaveBeenCalled();
+    expect(templates.update).not.toHaveBeenCalled();
+    expect(versions.create).not.toHaveBeenCalled();
+  });
+
+  describe('durable IntegrationCommand traceability (TEMPLATE aggregate — Fase "Comandos y eventos del flujo activo")', () => {
+    it('replays the persisted result instead of publishing again when the same idempotencyKey already completed', async () => {
+      const priorResult = { templateId, status: 'PUBLISHED', version: { id: 'version_1' } };
+      commands.findByIdempotencyKey.mockResolvedValue({ status: 'COMPLETED', resultSnapshot: priorResult } as never);
+      const result = await useCase.execute(baseInput());
+      expect(result).toEqual(priorResult);
+      expect(templates.conditionalUpdateStatus).not.toHaveBeenCalled();
+      expect(motor.publishTemplate).not.toHaveBeenCalled();
+    });
+
+    it('creates a REQUESTED IntegrationCommand for a fresh publish, before the motor is called', async () => {
+      motor.publishTemplate.mockResolvedValue({
+        accepted: true,
+        serverTemplateId: 'tpl_server_1',
+        templateToken: 'tpt_plaintext',
+        version: 1,
+        status: 'ACCEPTED',
+        acceptedAt: new Date(),
+        rejectionReason: null,
+      });
+      await useCase.execute(baseInput());
+      expect(commands.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: orgId,
+          commandType: 'TEMPLATE_PUBLISH_REQUESTED',
+          aggregateType: 'TEMPLATE',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('marks the IntegrationCommand COMPLETED when the motor accepts', async () => {
+      motor.publishTemplate.mockResolvedValue({
+        accepted: true,
+        serverTemplateId: 'tpl_server_1',
+        templateToken: 'tpt_plaintext',
+        version: 1,
+        status: 'ACCEPTED',
+        acceptedAt: new Date(),
+        rejectionReason: null,
+      });
+      await useCase.execute(baseInput());
+      expect(commands.update).toHaveBeenCalledWith(
+        'command_row_1',
+        expect.objectContaining({ status: 'COMPLETED' }),
+        expect.anything(),
+      );
+    });
+
+    it('marks the IntegrationCommand FAILED when the motor rejects', async () => {
+      motor.publishTemplate.mockResolvedValue({
+        accepted: false,
+        serverTemplateId: null,
+        templateToken: null,
+        version: 1,
+        status: 'FAILED',
+        acceptedAt: null,
+        rejectionReason: 'Motor rejected.',
+      });
+      await useCase.execute(baseInput());
+      expect(commands.update).toHaveBeenCalledWith(
+        'command_row_1',
+        expect.objectContaining({ status: 'FAILED', lastError: 'Motor rejected.' }),
+        expect.anything(),
+      );
+    });
+
+    it('leaves the IntegrationCommand REQUESTED (never COMPLETED/FAILED) when the motor call itself throws — recoverable only by a manual retry', async () => {
+      motor.publishTemplate.mockRejectedValue(new Error('network error'));
+      await expect(useCase.execute(baseInput())).rejects.toThrow('network error');
+      expect(commands.update).not.toHaveBeenCalled();
+    });
   });
 });
