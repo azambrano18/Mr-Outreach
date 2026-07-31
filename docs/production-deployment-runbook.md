@@ -52,8 +52,23 @@ migración real contra datos de verdad, no un ajuste incremental).
 
 ## 5. Confirmación del contrato del motor
 
-- [ ] `docs/operational-status-check-motor-handoff.md` enviado al responsable del motor.
-- [ ] **Este paso puede NO estar resuelto y el despliegue puede continuar de todas formas** — `OPERATIONAL_STATUS_CHECK` no está implementado y no lo bloquea; documentar explícitamente en el runbook ejecutado que este contrato sigue pendiente, no fingir que está resuelto.
+**Corrección — bloqueador, no un paso opcional.** `OPERATIONAL_STATUS_CHECK`
+está clasificado como **BLOQUEADOR DE PRODUCTION** en
+`docs/production-blockers.md`, no como deuda aceptable. Este paso no
+puede marcarse como completo hasta que ocurra una de las dos cosas
+siguientes:
+
+- [ ] `docs/operational-status-check-motor-decisions.md` respondido por el
+  responsable del motor, y el contrato implementado y validado; **o**
+- [ ] el responsable del producto aprueba expresa y formalmente, por
+  escrito, operar el despliegue únicamente con el snapshot local
+  (`ManagedClient.externalStatusSnapshot`), aceptando el riesgo de
+  iniciar una Gestión o publicar una Plantilla contra un cliente/dominio/
+  mailbox ya suspendido, revocado o desvinculado sin que el motor lo
+  haya confirmado en tiempo real.
+
+Sin una de las dos, este runbook no debe continuar más allá de este
+punto.
 
 ## 6. Confirmación de variables Railway
 
