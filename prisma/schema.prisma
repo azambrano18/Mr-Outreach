@@ -35,27 +35,32 @@ model Organization {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  users               User[]
-  roles               Role[]
-  auditLogs           AuditLog[]
-  mailboxes           Mailbox[]
-  templates           Template[]
-  variables           Variable[]
-  signatures          Signature[]
-  sequences           Sequence[]
-  managedClients      ManagedClient[]
-  domains             Domain[]
-  integrationCommands IntegrationCommand[]
-  integrationEvents   IntegrationEvent[]
-  companies           Company[]
-  contacts            Contact[]
-  sequenceImports     SequenceImport[]
-  sequenceImportRows  SequenceImportRow[]
-  sequenceContacts    SequenceContact[]
-  scheduledEmails     ScheduledEmail[]
-  sequenceTemplates   SequenceTemplate[]
-  sequenceExecutions  SequenceExecution[]
-  signatureAssets     SignatureAsset[]
+  users                  User[]
+  roles                  Role[]
+  auditLogs              AuditLog[]
+  mailboxes              Mailbox[]
+  templates              Template[]
+  variables              Variable[]
+  signatures             Signature[]
+  sequences              Sequence[]
+  managedClients         ManagedClient[]
+  domains                Domain[]
+  integrationCommands    IntegrationCommand[]
+  integrationEvents      IntegrationEvent[]
+  companies              Company[]
+  contacts               Contact[]
+  sequenceImports        SequenceImport[]
+  sequenceImportRows     SequenceImportRow[]
+  sequenceContacts       SequenceContact[]
+  scheduledEmails        ScheduledEmail[]
+  sequenceTemplates      SequenceTemplate[]
+  sequenceExecutions     SequenceExecution[]
+  signatureAssets        SignatureAsset[]
+  conversations          Conversation[]
+  conversationMessages   ConversationMessage[]
+  conversationTags       ConversationTag[]
+  conversationNotes      ConversationNote[]
+  conversationReadStates ConversationReadState[]
 
   @@map("organizations")
 }
@@ -88,6 +93,9 @@ model User {
   ownedSequenceTemplates     SequenceTemplate[]
   sequenceExecutions         SequenceExecution[]
   signatureAssets            SignatureAsset[]
+  assignedConversations      Conversation[]              @relation("ConversationAssignedExecutive")
+  conversationNotes          ConversationNote[]
+  conversationReadStates     ConversationReadState[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -266,17 +274,19 @@ model Mailbox {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  organization    Organization            @relation(fields: [organizationId], references: [id])
-  client          ManagedClient?          @relation(fields: [clientId], references: [id])
-  domain          Domain?                 @relation(fields: [domainId], references: [id])
-  connectionTests MailboxConnectionTest[]
-  assignments     MailboxAssignment[]
-  signature       Signature?
-  sequences         Sequence[]
-  sequenceImports   SequenceImport[]
-  scheduledEmails   ScheduledEmail[]
-  sequenceTemplates SequenceTemplate[]
-  sequenceExecutions SequenceExecution[]
+  organization         Organization            @relation(fields: [organizationId], references: [id])
+  client               ManagedClient?          @relation(fields: [clientId], references: [id])
+  domain               Domain?                 @relation(fields: [domainId], references: [id])
+  connectionTests      MailboxConnectionTest[]
+  assignments          MailboxAssignment[]
+  signature            Signature?
+  sequences            Sequence[]
+  sequenceImports      SequenceImport[]
+  scheduledEmails      ScheduledEmail[]
+  sequenceTemplates    SequenceTemplate[]
+  sequenceExecutions   SequenceExecution[]
+  conversations        Conversation[]
+  conversationMessages ConversationMessage[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -514,6 +524,7 @@ model Sequence {
   sequenceImports  SequenceImport[]
   sequenceContacts SequenceContact[]
   scheduledEmails  ScheduledEmail[]
+  conversations    Conversation[]
 
   @@index([organizationId])
   @@index([executiveId])
@@ -563,6 +574,7 @@ model SequenceStep {
   sequence        Sequence              @relation(fields: [sequenceId], references: [id])
   versions        SequenceStepVersion[]
   scheduledEmails ScheduledEmail[]
+  conversations   Conversation[]
 
   @@index([organizationId])
   @@index([sequenceId])
@@ -626,34 +638,34 @@ enum ManagedClientSource {
 // Outreach's own operational configuration plus a local snapshot of the
 // externally-reported identity fields.
 model ManagedClient {
-  id                     String              @id @default(uuid())
-  organizationId         String
+  id                      String              @id @default(uuid())
+  organizationId          String
   /// Which system is authoritative for this client's identity/name. SERVER: from a mailbox-link token redemption. MANUAL: reserved, not created by any flow yet.
-  source                 ManagedClientSource @default(SERVER)
+  source                  ManagedClientSource @default(SERVER)
   /// External server client id, set when source = SERVER. Unique so repeated redemptions for the same external client upsert instead of duplicating.
-  serverClientId         String?             @unique
+  serverClientId          String?             @unique
   /// Snapshot local del nombre corporativo reportado por el servidor externo. Ya no editable a mano; lo escribe el upsert.
-  name                   String
-  legalName              String?
-  internalCode           String?
+  name                    String
+  legalName               String?
+  internalCode            String?
   /// Snapshot local del rubro corporativo reportado por el servidor externo. Ya no editable a mano; lo escribe el upsert.
-  industry               String?
-  status                 ManagedClientStatus @default(ACTIVE)
-  logoUrl                String?
-  startDate              DateTime?
-  supervisorUserId       String?
-  notes                  String?
+  industry                String?
+  status                  ManagedClientStatus @default(ACTIVE)
+  logoUrl                 String?
+  startDate               DateTime?
+  supervisorUserId        String?
+  notes                   String?
   /// Último RUT conocido, reportado por el servidor externo al redimir el token.
-  clientRutSnapshot      String?
+  clientRutSnapshot       String?
   /// Último status normalizado conocido del servidor externo (TRIM+UPPER). Distinto de `status` (operativo de Mr Outreach).
-  externalStatusSnapshot String?
+  externalStatusSnapshot  String?
   /// Fecha/hora de la última verificación exitosa contra el servidor externo. Nunca se usa para autorizar operaciones nuevas cuando el servidor no responde.
   externalStatusCheckedAt DateTime?
-  createdBy              String
-  updatedBy              String
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
-  deletedAt              DateTime?
+  createdBy               String
+  updatedBy               String
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  deletedAt               DateTime?
 
   organization               Organization                @relation(fields: [organizationId], references: [id])
   domains                    Domain[]
@@ -662,6 +674,7 @@ model ManagedClient {
   companies                  Company[]
   contacts                   Contact[]
   sequenceImports            SequenceImport[]
+  conversations              Conversation[]
 
   @@index([organizationId])
   @@map("managed_clients")
@@ -682,15 +695,22 @@ model Domain {
   notes          String?
   createdBy      String
   updatedBy      String
+  /// The motor's own identifier for this domain (nested under `domain.serverDomainId` in the redemption payload — conceptually belongs here, not on Mailbox). `Mailbox.serverDomainId` remains a separate, independent snapshot of what the motor reported at link time; this column is the actual identity anchor. Only set when the Domain is created via LinkMailboxUseCase — pre-existing rows keep it null until relinked.
+  serverDomainId String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
 
-  organization Organization  @relation(fields: [organizationId], references: [id])
-  client       ManagedClient @relation(fields: [clientId], references: [id])
-  mailboxes    Mailbox[]
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  client        ManagedClient  @relation(fields: [clientId], references: [id])
+  mailboxes     Mailbox[]
+  conversations Conversation[]
 
   @@unique([organizationId, domainName])
+  // Provisional: no explicit evidence the motor guarantees a global id space
+  // for domains (unlike serverClientId) — composite with organizationId
+  // until a real contract confirms otherwise. See docs/database-architecture.md.
+  @@unique([organizationId, serverDomainId])
   @@index([organizationId])
   @@index([clientId])
   @@map("domains")
@@ -753,6 +773,14 @@ enum IntegrationAggregateType {
   SEQUENCE_IMPORT
   SEQUENCE_CONTACT
   SEQUENCE_COMPANY
+  /// Fase "Comandos y eventos del flujo activo" — Alternativa A: adapts the
+  /// existing Outbox/Inbox instead of a second, parallel mechanism.
+  /// TEMPLATE = SequenceTemplateVersion.id (publish/update); EXECUTION =
+  /// SequenceExecution.id (start). commandId/correlationId for these are
+  /// never duplicated onto the entity itself — query this table by
+  /// (organizationId, aggregateType, aggregateId).
+  TEMPLATE
+  EXECUTION
 }
 
 model IntegrationCommand {
@@ -848,15 +876,23 @@ model Company {
   updatedAt        DateTime  @updatedAt
   deletedAt        DateTime?
 
-  organization     Organization      @relation(fields: [organizationId], references: [id])
-  client           ManagedClient     @relation(fields: [clientId], references: [id])
-  contacts         Contact[]
-  sequenceContacts SequenceContact[]
-  scheduledEmails  ScheduledEmail[]
+  organization       Organization        @relation(fields: [organizationId], references: [id])
+  client             ManagedClient       @relation(fields: [clientId], references: [id])
+  contacts           Contact[]
+  sequenceContacts   SequenceContact[]
+  scheduledEmails    ScheduledEmail[]
+  conversations      Conversation[]
+  prospectImportRows ProspectImportRow[]
 
   // Uniqueness is conditional on "not soft-deleted" — Prisma has no
   // declarative partial-unique-index syntax, so this is added as raw SQL in
   // the migration (see migration.sql's trailing CREATE UNIQUE INDEX).
+  //
+  // Identity used to resolve/upsert a Company (see ProspectIdentityResolver):
+  // no externalId/RUT/corporate-domain column exists on this model today, so
+  // (organizationId, clientId, normalizedName) — already this index — is the
+  // only identity available in practice; a future phase could add those
+  // fields if ProspectImportRow.normalizedData ever carries them.
   @@index([organizationId])
   @@index([organizationId, clientId])
   @@map("companies")
@@ -885,12 +921,14 @@ model Contact {
   updatedAt        DateTime  @updatedAt
   deletedAt        DateTime?
 
-  organization     Organization        @relation(fields: [organizationId], references: [id])
-  client           ManagedClient       @relation(fields: [clientId], references: [id])
-  company          Company?            @relation(fields: [companyId], references: [id])
-  sequenceContacts SequenceContact[]
-  scheduledEmails  ScheduledEmail[]
-  importRows       SequenceImportRow[]
+  organization       Organization        @relation(fields: [organizationId], references: [id])
+  client             ManagedClient       @relation(fields: [clientId], references: [id])
+  company            Company?            @relation(fields: [companyId], references: [id])
+  sequenceContacts   SequenceContact[]
+  scheduledEmails    ScheduledEmail[]
+  importRows         SequenceImportRow[]
+  conversations      Conversation[]
+  prospectImportRows ProspectImportRow[]
 
   // Email uniqueness is case-insensitive AND conditional on "not
   // soft-deleted" — same raw-SQL-in-migration treatment as Company above.
@@ -1050,6 +1088,7 @@ model SequenceContact {
   company         Company?         @relation(fields: [companyId], references: [id])
   sourceImport    SequenceImport?  @relation(fields: [sourceImportId], references: [id])
   scheduledEmails ScheduledEmail[]
+  conversations   Conversation[]
 
   // §26 — prevents the same contact from being accidentally enrolled twice
   // in the same sequence (the in-memory adapter already enforces this via
@@ -1116,6 +1155,7 @@ model ScheduledEmail {
   company         Company?        @relation(fields: [companyId], references: [id])
   sequenceStep    SequenceStep    @relation(fields: [sequenceStepId], references: [id])
   mailbox         Mailbox         @relation(fields: [mailboxId], references: [id])
+  conversations   Conversation[]
 
   // §25 — sequenceContactId+sequenceStepId+stepVersion uniqueness is
   // enforced by the repository's create() (see the domain entity's own
@@ -1174,9 +1214,9 @@ model SequenceTemplate {
   /// §11 — logical delete for an archived template; never a hard delete (preserves historical FK integrity for executions/versions).
   deletedAt           DateTime?
 
-  organization Organization               @relation(fields: [organizationId], references: [id])
-  owner        User                       @relation(fields: [ownerUserId], references: [id])
-  mailbox      Mailbox                    @relation(fields: [mailboxId], references: [id])
+  organization Organization              @relation(fields: [organizationId], references: [id])
+  owner        User                      @relation(fields: [ownerUserId], references: [id])
+  mailbox      Mailbox                   @relation(fields: [mailboxId], references: [id])
   steps        SequenceTemplateStep[]
   versions     SequenceTemplateVersion[]
   executions   SequenceExecution[]
@@ -1206,22 +1246,22 @@ model SequenceTemplateStep {
   stepNumber      Int
   name            String
   enabled         Boolean                            @default(true)
-  subjectTemplate String                              @default("")
+  subjectTemplate String                             @default("")
   /// Vestigial — never read/written since the shared-header revision; superseded by headerText below.
   headerHtml      String?
   /// §4 (revised) — individual, optional header per envío, plain text (no HTML editor); see SequenceTemplatesService.
   headerText      String?
-  bodyHtml        String                              @default("")
-  bodyText        String                              @default("")
+  bodyHtml        String                             @default("")
+  bodyText        String                             @default("")
   delayValue      Int                                @default(0)
-  delayUnit       SequenceTemplateStepDelayUnit       @default(BUSINESS_DAYS)
-  delayReference  SequenceTemplateStepDelayReference  @default(PREVIOUS_STEP)
+  delayUnit       SequenceTemplateStepDelayUnit      @default(BUSINESS_DAYS)
+  delayReference  SequenceTemplateStepDelayReference @default(PREVIOUS_STEP)
   /// String array of Weekday values (MONDAY..SUNDAY).
   allowedWeekdays Json                               @default("[\"MONDAY\",\"TUESDAY\",\"WEDNESDAY\",\"THURSDAY\",\"FRIDAY\"]")
-  sendWindowStart String                              @default("09:00")
-  sendWindowEnd   String                              @default("17:00")
-  createdAt       DateTime                            @default(now())
-  updatedAt       DateTime                            @updatedAt
+  sendWindowStart String                             @default("09:00")
+  sendWindowEnd   String                             @default("17:00")
+  createdAt       DateTime                           @default(now())
+  updatedAt       DateTime                           @updatedAt
 
   template SequenceTemplate @relation(fields: [templateId], references: [id])
 
@@ -1260,7 +1300,7 @@ model SequenceTemplateVersion {
   lastPublishCommandId    String?
   lastError               String?
   /// §12-17 — populated only when this version resulted from "Editar plantilla publicada" (a new TEMPLATE_VERSION_PUBLISH carrying previousServerTemplateId), never on the first publish.
-  previousVersionNumber     Int?
+  previousVersionNumber   Int?
   createdBy               String
   createdAt               DateTime                      @default(now())
 
@@ -1295,43 +1335,43 @@ enum SequenceExecutionServerStatus {
 }
 
 model SequenceExecution {
-  id                            String                          @id @default(uuid())
-  organizationId                String
-  executiveId                   String
-  mailboxId                     String
-  templateId                    String
-  templateVersionId             String
+  id                           String                         @id @default(uuid())
+  organizationId               String
+  executiveId                  String
+  mailboxId                    String
+  templateId                   String
+  templateVersionId            String
   /// §3 — null while DRAFT; generated as "Gestión_DDMMYYYY[_n]" only when the start command is actually sent.
-  name                          String?
-  timezone                      String
-  status                        SequenceExecutionStatus        @default(DRAFT)
-  prospectImportId              String?                         @unique
+  name                         String?
+  timezone                     String
+  status                       SequenceExecutionStatus        @default(DRAFT)
+  prospectImportId             String?                        @unique
   /// §5 — real submission-lifecycle instants; never a manually-picked date, never sent to the server.
-  requestedAt                   DateTime?
-  receivedAt                    DateTime?
-  estimatedStartAt              DateTime?
-  startedAt                     DateTime?
-  completedAt                   DateTime?
-  failedAt                      DateTime?
-  serverStatus                  SequenceExecutionServerStatus?
-  currentStepNumber             Int?
-  sentCount                     Int?
-  pendingCount                  Int?
-  failedCount                   Int?
-  receivedProspects             Int?
-  acceptedProspects             Int?
-  rejectedProspects             Int?
+  requestedAt                  DateTime?
+  receivedAt                   DateTime?
+  estimatedStartAt             DateTime?
+  startedAt                    DateTime?
+  completedAt                  DateTime?
+  failedAt                     DateTime?
+  serverStatus                 SequenceExecutionServerStatus?
+  currentStepNumber            Int?
+  sentCount                    Int?
+  pendingCount                 Int?
+  failedCount                  Int?
+  receivedProspects            Int?
+  acceptedProspects            Int?
+  rejectedProspects            Int?
   /// §2 — the server's own initial per-prospect state on acceptance (contractually STEP_01_PENDING).
-  initialProspectState          ProspectExecutionState?
-  lastSyncedAt                  DateTime?
-  lastError                     String?
-  serverExecutionId             String?                         @unique
-  executionTokenCiphertext      String?
+  initialProspectState         ProspectExecutionState?
+  lastSyncedAt                 DateTime?
+  lastError                    String?
+  serverExecutionId            String?                        @unique
+  executionTokenCiphertext     String?
   /// §11 — the idempotencyKey used for the most recent /start attempt; reused verbatim on retry.
-  lastSubmissionIdempotencyKey  String?
-  createdBy                     String
-  createdAt                     DateTime                        @default(now())
-  updatedAt                     DateTime                        @updatedAt
+  lastSubmissionIdempotencyKey String?
+  createdBy                    String
+  createdAt                    DateTime                       @default(now())
+  updatedAt                    DateTime                       @updatedAt
 
   organization    Organization            @relation(fields: [organizationId], references: [id])
   executive       User                    @relation(fields: [executiveId], references: [id])
@@ -1339,6 +1379,7 @@ model SequenceExecution {
   template        SequenceTemplate        @relation(fields: [templateId], references: [id])
   templateVersion SequenceTemplateVersion @relation(fields: [templateVersionId], references: [id])
   prospectImport  ProspectImport?
+  conversations   Conversation[]
 
   @@index([organizationId])
   @@index([organizationId, executiveId])
@@ -1356,23 +1397,23 @@ enum ProspectImportStatus {
 }
 
 model ProspectImport {
-  id             String                @id @default(uuid())
+  id             String               @id @default(uuid())
   organizationId String
-  executionId    String                @unique
+  executionId    String               @unique
   fileName       String
   storageKey     String
   checksum       String
-  status         ProspectImportStatus  @default(UPLOADED)
+  status         ProspectImportStatus @default(UPLOADED)
   /// ProspectColumnMapping | null.
   columnMapping  Json?
-  totalRows      Int                   @default(0)
-  validRows      Int                   @default(0)
-  invalidRows    Int                   @default(0)
-  duplicateRows  Int                   @default(0)
-  excludedRows   Int                   @default(0)
+  totalRows      Int                  @default(0)
+  validRows      Int                  @default(0)
+  invalidRows    Int                  @default(0)
+  duplicateRows  Int                  @default(0)
+  excludedRows   Int                  @default(0)
   createdBy      String
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   execution SequenceExecution   @relation(fields: [executionId], references: [id])
   rows      ProspectImportRow[]
@@ -1403,7 +1444,7 @@ enum ProspectExecutionState {
 }
 
 model ProspectImportRow {
-  id               String                             @id @default(uuid())
+  id               String                            @id @default(uuid())
   organizationId   String
   importId         String
   rowNumber        Int
@@ -1411,16 +1452,311 @@ model ProspectImportRow {
   /// NormalizedProspectData | null.
   normalizedData   Json?
   validationStatus ProspectImportRowValidationStatus
-  validationErrors Json                               @default("[]")
+  validationErrors Json                              @default("[]")
   /// Null until the Gestión this row belongs to is accepted by the server.
   executionState   ProspectExecutionState?
-  createdAt        DateTime                           @default(now())
+  /// Fase "Conversaciones persistentes" — resolved/created by ProspectIdentityResolver
+  /// once the row is accepted, reusing the same companies/contacts tables the
+  /// legacy import flow already writes to (never a parallel identity table).
+  /// Null until resolution runs; never overwritten with an empty value once set.
+  companyId        String?
+  contactId        String?
+  resolvedAt       DateTime?
+  createdAt        DateTime                          @default(now())
 
-  import ProspectImport @relation(fields: [importId], references: [id])
+  import        ProspectImport @relation(fields: [importId], references: [id])
+  company       Company?       @relation(fields: [companyId], references: [id])
+  contact       Contact?       @relation(fields: [contactId], references: [id])
+  conversations Conversation[]
 
   @@unique([importId, rowNumber])
   @@index([organizationId])
   @@index([importId])
   @@index([importId, validationStatus])
+  @@index([companyId])
+  @@index([contactId])
   @@map("prospect_import_rows")
+}
+
+// ---------------------------------------------------------------------------
+// Conversaciones — previously in-memory only (unconditionally, even with
+// PERSISTENCE_DRIVER=postgres; see persistence.module.ts's prior
+// CONVERSATION_REPOSITORY-family wiring). Field names mirror the existing
+// domain entities in domain/conversation/* as closely as possible so
+// ConversationsService/ReplySimulationService/ResponseOutcomeService need no
+// unrelated renames — only additive fields for the active-flow attribution
+// (sequenceExecutionId, prospectImportRowId, origin) and for per-user read
+// state (ConversationReadState, new) were introduced.
+//
+// isUnread on Conversation is kept as-is (a coarse, non-authoritative signal)
+// — ConversationReadState is the source of truth for "has user X read this",
+// so a read by one user never marks it read for anyone else.
+// ---------------------------------------------------------------------------
+
+enum ConversationManagementStatus {
+  NEW
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  ARCHIVED
+}
+
+enum ConversationClassification {
+  INTERESTED
+  NOT_INTERESTED
+  REQUESTS_INFORMATION
+  FOLLOW_UP_LATER
+  WRONG_CONTACT
+  OUT_OF_OFFICE
+  AUTOMATIC_REPLY
+  HARD_BOUNCE
+  SOFT_BOUNCE
+  UNSUBSCRIBE
+  UNCLASSIFIED
+}
+
+/// The executive's deliberate business decision about a reply — distinct
+/// from ConversationClassification (auto-detected). Mirrors
+/// domain/conversation/conversation.entity.ts's ResponseOutcome exactly.
+enum ConversationResponseOutcome {
+  NOT_INTERESTED
+  DO_NOT_CONTACT
+  INTERESTED
+  REFERRED
+}
+
+/// Which system produced this Conversation — makes the source explicit
+/// instead of leaving it to be inferred from which legacy/active foreign
+/// keys happen to be non-null.
+enum ConversationOrigin {
+  /// Created by the active Plantillas/Gestiones flow (sequenceExecutionId/prospectImportRowId populated).
+  ACTIVE_EXECUTION
+  /// Created by ReplySimulationService against the legacy Sequence/SequenceContact/ScheduledEmail aggregate.
+  LEGACY_SEQUENCE
+  /// Created by ConversationsService.syncMailbox from a raw IMAP thread with no matching Contact/SequenceContact/SequenceExecution at all.
+  EXTERNAL_INBOUND
+}
+
+model Conversation {
+  id             String  @id @default(uuid())
+  organizationId String
+  clientId       String?
+  domainId       String?
+  mailboxId      String
+
+  /// The engine's thread id for EXTERNAL_INBOUND; a synthetic `sim-thread-*` id for LEGACY_SEQUENCE/ACTIVE_EXECUTION — both are how sync/simulation find the row again idempotently.
+  emailThreadId       String
+  contactEmail        String
+  contactName         String?
+  /// Denormalized fallback for when no companyId is resolved yet (e.g. before ProspectIdentityResolver runs, or for EXTERNAL_INBOUND conversations with no import row at all).
+  companyNameSnapshot String?
+  contactId           String?
+  companyId           String?
+
+  /// Which flow created this row — never inferred from which FKs are non-null.
+  origin ConversationOrigin
+
+  // --- Legacy attribution (Secuencias) — nullable, kept only for historical
+  // conversations; new ACTIVE_EXECUTION rows must never populate these.
+  sequenceContactId           String?
+  originatingScheduledEmailId String?
+  sequenceId                  String?
+  sequenceStepId              String?
+
+  // --- Active-flow attribution (Plantillas/Gestiones) — nullable; new
+  // conversations should populate these instead of the legacy fields above.
+  sequenceExecutionId String?
+  prospectImportRowId String?
+
+  assignedExecutiveId String?
+  subject             String
+  managementStatus    ConversationManagementStatus @default(NEW)
+  classification      ConversationClassification   @default(UNCLASSIFIED)
+  responseOutcome     ConversationResponseOutcome?
+  /// Coarse signal only — see file header comment. Not per-user.
+  isUnread            Boolean                      @default(true)
+  lastMessageAt       DateTime
+  resolvedAt          DateTime?
+  resolvedBy          String?
+  archivedAt          DateTime?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+  deletedAt           DateTime?
+
+  organization      Organization                @relation(fields: [organizationId], references: [id])
+  client            ManagedClient?              @relation(fields: [clientId], references: [id])
+  domain            Domain?                     @relation(fields: [domainId], references: [id])
+  mailbox           Mailbox                     @relation(fields: [mailboxId], references: [id])
+  contact           Contact?                    @relation(fields: [contactId], references: [id])
+  company           Company?                    @relation(fields: [companyId], references: [id])
+  sequenceContact   SequenceContact?            @relation(fields: [sequenceContactId], references: [id])
+  originatingEmail  ScheduledEmail?             @relation(fields: [originatingScheduledEmailId], references: [id])
+  sequence          Sequence?                   @relation(fields: [sequenceId], references: [id])
+  sequenceStep      SequenceStep?               @relation(fields: [sequenceStepId], references: [id])
+  sequenceExecution SequenceExecution?          @relation(fields: [sequenceExecutionId], references: [id])
+  prospectImportRow ProspectImportRow?          @relation(fields: [prospectImportRowId], references: [id])
+  assignedExecutive User?                       @relation("ConversationAssignedExecutive", fields: [assignedExecutiveId], references: [id])
+  messages          ConversationMessage[]
+  notes             ConversationNote[]
+  tagAssignments    ConversationTagAssignment[]
+  readStates        ConversationReadState[]
+
+  @@unique([mailboxId, emailThreadId])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([mailboxId])
+  @@index([assignedExecutiveId])
+  @@index([organizationId, classification])
+  @@index([organizationId, managementStatus])
+  @@index([sequenceExecutionId])
+  @@index([prospectImportRowId])
+  @@index([sequenceContactId])
+  @@map("conversations")
+}
+
+enum ConversationDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum ConversationMessageType {
+  HUMAN_REPLY
+  OUTREACH_EMAIL
+  AUTO_REPLY
+  OUT_OF_OFFICE
+  HARD_BOUNCE
+  SOFT_BOUNCE
+  UNSUBSCRIBE
+  UNKNOWN
+}
+
+model ConversationMessage {
+  id             String @id @default(uuid())
+  organizationId String
+  conversationId String
+  mailboxId      String
+
+  /// The engine's message id (existing dedup key — see findByEmailMessageId, scoped by conversationId, not renamed).
+  emailMessageId    String
+  direction         ConversationDirection
+  /// Fase "active flow" additions — the motor's own message identifier and, for an OUTBOUND send, the id that anchors a later reply's In-Reply-To/References back to this exact message. Neither has contractual evidence of global uniqueness yet — scoped by organizationId, not global (see docs/database-architecture.md's identifier matrix).
+  serverMessageId   String?
+  outboundMessageId String?
+  /// RFC 2822 headers, copied verbatim — never parsed into a relational structure (references is a single text blob, not its own table; see Fase 2 design note on why no MessageExternalIdentifier table exists).
+  messageIdHeader   String?
+  inReplyTo         String?
+  references        String?
+
+  senderEmail String
+  senderName  String?
+  /// Denormalized email address lists — never queried relationally (no "all conversations where X was cc'd"), so JSON is sufficient.
+  recipients  Json    @default("[]")
+  cc          Json    @default("[]")
+  bcc         Json    @default("[]")
+
+  subject       String
+  htmlBody      String
+  plainTextBody String
+  /// Which envío (1/2/3) of the active-flow template this message corresponds to, when known.
+  stepNumber    Int?
+  receivedAt    DateTime?
+  sentAt        DateTime?
+  messageType   ConversationMessageType
+  createdAt     DateTime                @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  mailbox      Mailbox      @relation(fields: [mailboxId], references: [id])
+
+  @@unique([conversationId, emailMessageId])
+  // Provisional: no motor contract confirms global uniqueness for any of
+  // these — composite with organizationId until one does. Postgres treats
+  // every NULL as distinct, so nullable rows never collide with each other.
+  @@unique([organizationId, messageIdHeader])
+  @@unique([organizationId, serverMessageId])
+  @@unique([organizationId, outboundMessageId])
+  @@index([organizationId])
+  @@index([conversationId])
+  @@map("conversation_messages")
+}
+
+model ConversationTag {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  color          String
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization                @relation(fields: [organizationId], references: [id])
+  assignments  ConversationTagAssignment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("conversation_tags")
+}
+
+/// Bridge table — administered entirely through ConversationRepository's
+/// existing addTag/removeTag/listTagIds methods (see conversation.repository.ts);
+/// deliberately not its own repository, per "no crear siete repositorios
+/// artificiales" — this is a join, not an independent aggregate.
+model ConversationTagAssignment {
+  conversationId   String
+  tagId            String
+  organizationId   String
+  assignedByUserId String
+  createdAt        DateTime @default(now())
+
+  conversation Conversation    @relation(fields: [conversationId], references: [id])
+  tag          ConversationTag @relation(fields: [tagId], references: [id])
+
+  @@id([conversationId, tagId])
+  @@index([organizationId])
+  @@index([tagId])
+  @@map("conversation_tag_assignments")
+}
+
+model ConversationNote {
+  id              String                       @id @default(uuid())
+  organizationId  String
+  conversationId  String
+  authorUserId    String
+  content         String
+  /// Set when auto-created from the "Resultado de la respuesta" modal — null for manually-added notes. Never sent to the contact or to the motor.
+  responseOutcome ConversationResponseOutcome?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  deletedAt       DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  author       User         @relation(fields: [authorUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([conversationId])
+  @@map("conversation_notes")
+}
+
+/// Per-user read state — the source of truth for "has user X read this
+/// conversation" (Conversation.isUnread is a coarser, non-authoritative
+/// signal only). A read by one user never marks it read for anyone else.
+model ConversationReadState {
+  organizationId    String
+  conversationId    String
+  userId            String
+  lastReadMessageId String?
+  lastReadAt        DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@id([conversationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("conversation_read_states")
 }

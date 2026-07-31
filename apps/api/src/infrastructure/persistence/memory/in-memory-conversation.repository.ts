@@ -57,6 +57,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
     if (filter.sequenceId) {
       results = results.filter((c) => c.sequenceId === filter.sequenceId);
     }
+    if (filter.sequenceExecutionId) {
+      results = results.filter((c) => c.sequenceExecutionId === filter.sequenceExecutionId);
+    }
+    if (filter.origin) {
+      results = results.filter((c) => c.origin === filter.origin);
+    }
     if (filter.dateFrom) {
       const from = new Date(filter.dateFrom).getTime();
       results = results.filter((c) => c.lastMessageAt.getTime() >= from);
@@ -116,12 +122,16 @@ export class InMemoryConversationRepository implements ConversationRepository {
       emailThreadId: input.emailThreadId,
       contactEmail: input.contactEmail,
       contactName: input.contactName,
+      companyNameSnapshot: input.companyNameSnapshot ?? null,
       contactId: input.contactId ?? null,
       companyId: input.companyId ?? null,
+      origin: input.origin,
       sequenceContactId: input.sequenceContactId ?? null,
       originatingScheduledEmailId: input.originatingScheduledEmailId ?? null,
       sequenceId: input.sequenceId ?? null,
       sequenceStepId: input.sequenceStepId ?? null,
+      sequenceExecutionId: input.sequenceExecutionId ?? null,
+      prospectImportRowId: input.prospectImportRowId ?? null,
       assignedExecutiveId: input.assignedExecutiveId ?? null,
       subject: input.subject,
       managementStatus: 'NEW',

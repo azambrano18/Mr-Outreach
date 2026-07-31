@@ -208,6 +208,7 @@ export class ReplySimulationService {
         ([contactEntity?.firstName, contactEntity?.lastName].filter(Boolean).join(' ') || null),
       contactId: scheduledEmail.contactId,
       companyId: scheduledEmail.companyId,
+      origin: 'LEGACY_SEQUENCE',
       sequenceContactId: scheduledEmail.sequenceContactId,
       originatingScheduledEmailId: scheduledEmail.id,
       sequenceId: scheduledEmail.sequenceId,

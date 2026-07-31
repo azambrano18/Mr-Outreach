@@ -5,6 +5,7 @@ import { ManagedClientRepository } from '../../domain/client/managed-client.repo
 import { CompanyRepository } from '../../domain/company/company.repository';
 import { ConversationMessageRepository } from '../../domain/conversation/conversation-message.repository';
 import { ConversationNoteRepository } from '../../domain/conversation/conversation-note.repository';
+import { ConversationReadStateRepository } from '../../domain/conversation/conversation-read-state.repository';
 import { ConversationTagRepository } from '../../domain/conversation/conversation-tag.repository';
 import { Conversation } from '../../domain/conversation/conversation.entity';
 import { ConversationRepository } from '../../domain/conversation/conversation.repository';
@@ -58,12 +59,16 @@ describe('ConversationsService — §2 mailbox-assignment-based visibility (admi
       emailThreadId: 'thread_1',
       contactEmail: 'contacto@empresa.cl',
       contactName: null,
+      companyNameSnapshot: null,
       contactId: null,
       companyId: null,
+      origin: 'LEGACY_SEQUENCE',
       sequenceContactId: null,
       originatingScheduledEmailId: null,
       sequenceId: null,
       sequenceStepId: null,
+      sequenceExecutionId: null,
+      prospectImportRowId: null,
       assignedExecutiveId: null,
       subject: 'Asunto',
       managementStatus: 'NEW',
@@ -113,6 +118,7 @@ describe('ConversationsService — §2 mailbox-assignment-based visibility (admi
       {} as unknown as ConversationMessageRepository,
       {} as unknown as ConversationTagRepository,
       {} as unknown as ConversationNoteRepository,
+      {} as unknown as ConversationReadStateRepository,
       mailboxes as unknown as MailboxRepository,
       {} as unknown as SequenceRepository,
       clients as unknown as ManagedClientRepository,

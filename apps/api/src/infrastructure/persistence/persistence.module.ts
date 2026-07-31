@@ -8,6 +8,7 @@ import {
   CONTACT_REPOSITORY,
   CONVERSATION_MESSAGE_REPOSITORY,
   CONVERSATION_NOTE_REPOSITORY,
+  CONVERSATION_READ_STATE_REPOSITORY,
   CONVERSATION_REPOSITORY,
   CONVERSATION_TAG_REPOSITORY,
   DOMAIN_REPOSITORY,
@@ -65,6 +66,12 @@ import { InMemoryConversationRepository } from './memory/in-memory-conversation.
 import { InMemoryConversationMessageRepository } from './memory/in-memory-conversation-message.repository';
 import { InMemoryConversationTagRepository } from './memory/in-memory-conversation-tag.repository';
 import { InMemoryConversationNoteRepository } from './memory/in-memory-conversation-note.repository';
+import { InMemoryConversationReadStateRepository } from './memory/in-memory-conversation-read-state.repository';
+import { PrismaConversationRepository } from './prisma/prisma-conversation.repository';
+import { PrismaConversationMessageRepository } from './prisma/prisma-conversation-message.repository';
+import { PrismaConversationTagRepository } from './prisma/prisma-conversation-tag.repository';
+import { PrismaConversationNoteRepository } from './prisma/prisma-conversation-note.repository';
+import { PrismaConversationReadStateRepository } from './prisma/prisma-conversation-read-state.repository';
 import { InMemoryIntegrationCommandRepository } from './memory/in-memory-integration-command.repository';
 import { InMemoryIntegrationEventRepository } from './memory/in-memory-integration-event.repository';
 import { InMemoryCompanyRepository } from './memory/in-memory-company.repository';
@@ -301,24 +308,47 @@ const repositoryProviders: Provider[] = [
     inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   {
+    // Fase "Conversaciones persistentes" — previously bound unconditionally
+    // to the in-memory adapter regardless of PERSISTENCE_DRIVER; now
+    // branches like every other repository in this module.
     provide: CONVERSATION_REPOSITORY,
-    useFactory: (store: MemoryStore) => new InMemoryConversationRepository(store),
-    inject: [MemoryStore],
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaConversationRepository(prisma!)
+        : new InMemoryConversationRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   {
     provide: CONVERSATION_MESSAGE_REPOSITORY,
-    useFactory: (store: MemoryStore) => new InMemoryConversationMessageRepository(store),
-    inject: [MemoryStore],
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaConversationMessageRepository(prisma!)
+        : new InMemoryConversationMessageRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   {
     provide: CONVERSATION_TAG_REPOSITORY,
-    useFactory: (store: MemoryStore) => new InMemoryConversationTagRepository(store),
-    inject: [MemoryStore],
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaConversationTagRepository(prisma!)
+        : new InMemoryConversationTagRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   {
     provide: CONVERSATION_NOTE_REPOSITORY,
-    useFactory: (store: MemoryStore) => new InMemoryConversationNoteRepository(store),
-    inject: [MemoryStore],
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaConversationNoteRepository(prisma!)
+        : new InMemoryConversationNoteRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
+  {
+    provide: CONVERSATION_READ_STATE_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaConversationReadStateRepository(prisma!)
+        : new InMemoryConversationReadStateRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
   // Fase 1 — the simulated-engine integration layer (§54) and the
   // import/contact/company/scheduling model it drives now have real Prisma
@@ -481,6 +511,7 @@ const repositoryProviders: Provider[] = [
     CONVERSATION_MESSAGE_REPOSITORY,
     CONVERSATION_TAG_REPOSITORY,
     CONVERSATION_NOTE_REPOSITORY,
+    CONVERSATION_READ_STATE_REPOSITORY,
     INTEGRATION_COMMAND_REPOSITORY,
     INTEGRATION_EVENT_REPOSITORY,
     COMPANY_REPOSITORY,

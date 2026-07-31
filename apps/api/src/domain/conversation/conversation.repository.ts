@@ -2,6 +2,7 @@ import {
   Conversation,
   ConversationClassification,
   ConversationManagementStatus,
+  ConversationOrigin,
   CreateConversationInput,
   ResponseOutcome,
   UpdateConversationInput,
@@ -13,6 +14,8 @@ export interface ConversationFilter {
   mailboxId?: string;
   assignedExecutiveId?: string;
   sequenceId?: string;
+  sequenceExecutionId?: string;
+  origin?: ConversationOrigin;
   managementStatus?: ConversationManagementStatus;
   classification?: ConversationClassification;
   /** §7 — 'UNCLASSIFIED' is the "Sin clasificar" sentinel (matches `responseOutcome === null`); undefined means no filter. */

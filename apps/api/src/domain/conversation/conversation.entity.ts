@@ -25,6 +25,13 @@ export type ConversationClassification =
 export type ResponseOutcome = 'NOT_INTERESTED' | 'DO_NOT_CONTACT' | 'INTERESTED' | 'REFERRED';
 
 /**
+ * Which system produced this Conversation — set explicitly at creation,
+ * never inferred from which legacy/active foreign keys happen to be
+ * non-null. See docs/database-architecture.md.
+ */
+export type ConversationOrigin = 'ACTIVE_EXECUTION' | 'LEGACY_SEQUENCE' | 'EXTERNAL_INBOUND';
+
+/**
  * Two paths create Conversation rows and both are still current:
  * (1) `ConversationsService.syncMailbox()`, the Fase 11 on-demand
  * IMAP-thread pull — no real `Contact` row backs those (the engine returns
@@ -45,14 +52,21 @@ export interface Conversation {
   emailThreadId: string;
   contactEmail: string;
   contactName: string | null;
+  /** Fallback for when no companyId is resolved yet — never overwritten once a real Company exists. */
+  companyNameSnapshot: string | null;
   /** Set only by path (2) — see class comment. */
   contactId: string | null;
   companyId: string | null;
+  /** Which flow created this row — see ConversationOrigin. */
+  origin: ConversationOrigin;
   sequenceContactId: string | null;
   /** The exact ScheduledEmail (step + send) this reply is attributed to — §34's "originada desde Step N". */
   originatingScheduledEmailId: string | null;
   sequenceId: string | null;
   sequenceStepId: string | null;
+  /** Active-flow attribution (Plantillas/Gestiones) — populated instead of the legacy fields above for ACTIVE_EXECUTION conversations. */
+  sequenceExecutionId: string | null;
+  prospectImportRowId: string | null;
   assignedExecutiveId: string | null;
   subject: string;
   managementStatus: ConversationManagementStatus;
@@ -76,12 +90,17 @@ export interface CreateConversationInput {
   emailThreadId: string;
   contactEmail: string;
   contactName: string | null;
+  companyNameSnapshot?: string | null;
   contactId?: string | null;
   companyId?: string | null;
+  /** Required — every creation call site must state explicitly which flow produced this row. */
+  origin: ConversationOrigin;
   sequenceContactId?: string | null;
   originatingScheduledEmailId?: string | null;
   sequenceId?: string | null;
   sequenceStepId?: string | null;
+  sequenceExecutionId?: string | null;
+  prospectImportRowId?: string | null;
   assignedExecutiveId?: string | null;
   subject: string;
   classification?: ConversationClassification;
@@ -94,6 +113,12 @@ export interface UpdateConversationInput {
   domainId?: string | null;
   sequenceId?: string | null;
   sequenceStepId?: string | null;
+  sequenceExecutionId?: string | null;
+  prospectImportRowId?: string | null;
+  /** Links a previously-unmatched EXTERNAL_INBOUND conversation to a real Contact/Company after the fact — never clears an existing value back to null. */
+  contactId?: string | null;
+  companyId?: string | null;
+  companyNameSnapshot?: string | null;
   assignedExecutiveId?: string | null;
   managementStatus?: ConversationManagementStatus;
   classification?: ConversationClassification;

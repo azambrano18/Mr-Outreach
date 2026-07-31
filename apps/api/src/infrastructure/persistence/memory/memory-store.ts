@@ -6,6 +6,7 @@ import { Company } from '../../../domain/company/company.entity';
 import { Contact } from '../../../domain/contact/contact.entity';
 import { ConversationMessage } from '../../../domain/conversation/conversation-message.entity';
 import { ConversationNote } from '../../../domain/conversation/conversation-note.entity';
+import { ConversationReadState } from '../../../domain/conversation/conversation-read-state.entity';
 import { ConversationTag } from '../../../domain/conversation/conversation-tag.entity';
 import { Conversation } from '../../../domain/conversation/conversation.entity';
 import { Domain } from '../../../domain/domain-entity/domain.entity';
@@ -76,6 +77,8 @@ export class MemoryStore {
     appliedBy: string;
     appliedAt: Date;
   }> = [];
+  /** key: `${conversationId}:${userId}` */
+  readonly conversationReadStates = new Map<string, ConversationReadState>();
   readonly integrationCommands = new Map<string, IntegrationCommand>();
   readonly integrationEvents = new Map<string, IntegrationEvent>();
   readonly companies = new Map<string, Company>();
@@ -119,6 +122,7 @@ export class MemoryStore {
     this.conversationTags.clear();
     this.conversationNotes.length = 0;
     this.conversationTagAssignments.length = 0;
+    this.conversationReadStates.clear();
     this.integrationCommands.clear();
     this.integrationEvents.clear();
     this.companies.clear();

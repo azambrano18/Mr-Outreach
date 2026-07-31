@@ -1343,6 +1343,7 @@ export class DevSeedService implements OnApplicationBootstrap {
       contactName: `${contact.firstName} ${contact.lastName}`,
       contactId: contact.id,
       companyId: params.company.id,
+      origin: 'LEGACY_SEQUENCE',
       sequenceContactId: sequenceContact.id,
       originatingScheduledEmailId: scheduledEmail.id,
       sequenceId: params.sequence.id,

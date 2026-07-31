@@ -5,6 +5,7 @@ import { ManagedClientRepository } from '../../domain/client/managed-client.repo
 import { CompanyRepository } from '../../domain/company/company.repository';
 import { ConversationMessageRepository } from '../../domain/conversation/conversation-message.repository';
 import { ConversationNoteRepository } from '../../domain/conversation/conversation-note.repository';
+import { ConversationReadStateRepository } from '../../domain/conversation/conversation-read-state.repository';
 import { ConversationTagRepository } from '../../domain/conversation/conversation-tag.repository';
 import {
   Conversation,
@@ -30,6 +31,7 @@ import {
   COMPANY_REPOSITORY,
   CONVERSATION_MESSAGE_REPOSITORY,
   CONVERSATION_NOTE_REPOSITORY,
+  CONVERSATION_READ_STATE_REPOSITORY,
   CONVERSATION_REPOSITORY,
   CONVERSATION_TAG_REPOSITORY,
   DOMAIN_REPOSITORY,
@@ -68,6 +70,7 @@ export class ConversationsService {
     private readonly messages: ConversationMessageRepository,
     @Inject(CONVERSATION_TAG_REPOSITORY) private readonly tags: ConversationTagRepository,
     @Inject(CONVERSATION_NOTE_REPOSITORY) private readonly notes: ConversationNoteRepository,
+    @Inject(CONVERSATION_READ_STATE_REPOSITORY) private readonly readStates: ConversationReadStateRepository,
     @Inject(MAILBOX_REPOSITORY) private readonly mailboxes: MailboxRepository,
     @Inject(SEQUENCE_REPOSITORY) private readonly sequences: SequenceRepository,
     @Inject(MANAGED_CLIENT_REPOSITORY) private readonly clients: ManagedClientRepository,
@@ -137,6 +140,11 @@ export class ConversationsService {
           emailThreadId: thread.id,
           contactEmail: participant?.email ?? 'desconocido@sin-datos.test',
           contactName: participant?.name ?? null,
+          // Attributed to a legacy Sequence when the heuristic match found
+          // one; otherwise a genuinely unidentified sender — persisted with
+          // contactId left null, never rejected, linkable to a real Contact
+          // later (see ResponseOutcomeService/manual-association flow).
+          origin: associatedSequence ? 'LEGACY_SEQUENCE' : 'EXTERNAL_INBOUND',
           sequenceId: associatedSequence?.id ?? null,
           sequenceStepId: null,
           assignedExecutiveId: associatedSequence?.executiveId ?? null,
@@ -557,6 +565,10 @@ export class ConversationsService {
     options: { markAsRead?: boolean; actorId?: string } = {},
   ): Promise<ConversationDetail> {
     let conversation = await this.getOwnedConversation(organizationId, conversationId);
+    const [messageRows, noteRows] = await Promise.all([
+      this.messages.findByConversation(conversation.id),
+      this.notes.findByConversation(conversation.id),
+    ]);
     if (options.markAsRead && conversation.isUnread) {
       conversation = await this.conversations.update(conversation.id, { isUnread: false });
       // Keeps the engine's own view of this thread in sync — for a mailbox still on the
@@ -578,10 +590,21 @@ export class ConversationsService {
         }
       }
     }
-    const [messageRows, noteRows] = await Promise.all([
-      this.messages.findByConversation(conversation.id),
-      this.notes.findByConversation(conversation.id),
-    ]);
+    // Fase "Conversaciones persistentes" — the per-user source of truth for
+    // read/unread, independent of the coarse `isUnread` flag above: recorded
+    // on every genuine "user opened this conversation" call (not on the
+    // internal re-fetch-after-create path, same guard as the block above),
+    // so a read by one user never marks it read for anyone else.
+    if (options.markAsRead && options.actorId) {
+      const lastMessage = messageRows[messageRows.length - 1];
+      await this.readStates.markRead({
+        organizationId,
+        conversationId: conversation.id,
+        userId: options.actorId,
+        lastReadMessageId: lastMessage?.id ?? null,
+        lastReadAt: new Date(),
+      });
+    }
     const summary = await this.toSummary(conversation);
     const notesWithAuthor = await Promise.all(noteRows.map((note) => this.toNoteSummary(note)));
 
