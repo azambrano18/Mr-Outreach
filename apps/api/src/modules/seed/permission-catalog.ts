@@ -214,6 +214,16 @@ export const PERMISSION_CATALOG: Permission[] = [
     key: 'dev_tools.simulate_execution_state',
     description: 'Dev-only: force a Gestión into a simulated terminal/in-flight state for local visual validation (never a real motor call).',
   },
+
+  // Dev-only tool — Fase "Recepción de eventos del motor" simulator. Never
+  // reachable when SEQUENCE_MOTOR_MODE=http or in production (see
+  // DevMotorEventsController). Distinct from dev_tools.simulate_execution_state:
+  // that one mutates a SequenceExecution row directly, this one emits real
+  // versioned MotorEvent envelopes through ProcessMotorEventUseCase.
+  {
+    key: 'dev_tools.simulate_motor_events',
+    description: 'Dev-only: emit a versioned motor event (EXECUTION_ACCEPTED, OUTBOUND_MESSAGE_CREATED, etc.) through the same ingestion pipeline the real motor will use.',
+  },
 ];
 
 /**
