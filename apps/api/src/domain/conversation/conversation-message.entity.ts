@@ -64,3 +64,12 @@ export interface CreateConversationMessageInput {
   sentAt?: Date | null;
   messageType: ConversationMessageType;
 }
+
+/** OUTBOUND_MESSAGE_SENT applies this to the row OUTBOUND_MESSAGE_CREATED made. */
+export interface UpdateConversationMessageInput {
+  serverMessageId?: string | null;
+  messageIdHeader?: string | null;
+  sentAt?: Date | null;
+  htmlBody?: string;
+  plainTextBody?: string;
+}

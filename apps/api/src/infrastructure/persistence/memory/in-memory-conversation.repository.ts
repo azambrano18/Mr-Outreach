@@ -63,6 +63,10 @@ export class InMemoryConversationRepository implements ConversationRepository {
     if (filter.origin) {
       results = results.filter((c) => c.origin === filter.origin);
     }
+    if (filter.contactEmail) {
+      const needle = filter.contactEmail.toLowerCase();
+      results = results.filter((c) => c.contactEmail.toLowerCase() === needle);
+    }
     if (filter.dateFrom) {
       const from = new Date(filter.dateFrom).getTime();
       results = results.filter((c) => c.lastMessageAt.getTime() >= from);

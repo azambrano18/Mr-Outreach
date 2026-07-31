@@ -17,6 +17,13 @@ export class InMemorySequenceExecutionRepository implements SequenceExecutionRep
     return this.store.sequenceExecutions.get(id) ?? null;
   }
 
+  async findByServerExecutionId(serverExecutionId: string): Promise<SequenceExecution | null> {
+    for (const execution of this.store.sequenceExecutions.values()) {
+      if (execution.serverExecutionId === serverExecutionId) return execution;
+    }
+    return null;
+  }
+
   async findByExecutive(organizationId: string, executiveId: string): Promise<SequenceExecution[]> {
     return [...this.store.sequenceExecutions.values()].filter(
       (e) => e.organizationId === organizationId && e.executiveId === executiveId,

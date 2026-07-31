@@ -61,6 +61,11 @@ export class PrismaSequenceExecutionRepository implements SequenceExecutionRepos
     return row ? toDomain(row) : null;
   }
 
+  async findByServerExecutionId(serverExecutionId: string, ctx?: TransactionContext): Promise<SequenceExecution | null> {
+    const row = await resolveClient(this.prisma, ctx).sequenceExecution.findUnique({ where: { serverExecutionId } });
+    return row ? toDomain(row) : null;
+  }
+
   async findByExecutive(organizationId: string, executiveId: string): Promise<SequenceExecution[]> {
     const rows = await this.prisma.sequenceExecution.findMany({ where: { organizationId, executiveId } });
     return rows.map(toDomain);

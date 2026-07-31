@@ -1,3 +1,4 @@
+import { TransactionContext } from '../persistence/transaction';
 import {
   Conversation,
   ConversationClassification,
@@ -16,6 +17,8 @@ export interface ConversationFilter {
   sequenceId?: string;
   sequenceExecutionId?: string;
   origin?: ConversationOrigin;
+  /** Last-resort INBOUND_MESSAGE_RECEIVED resolution fallback — exact, case-insensitive match. */
+  contactEmail?: string;
   managementStatus?: ConversationManagementStatus;
   classification?: ConversationClassification;
   /** §7 — 'UNCLASSIFIED' is the "Sin clasificar" sentinel (matches `responseOutcome === null`); undefined means no filter. */
@@ -32,12 +35,12 @@ export interface ConversationFilter {
 }
 
 export interface ConversationRepository {
-  findById(id: string): Promise<Conversation | null>;
-  findByMailboxAndThread(mailboxId: string, emailThreadId: string): Promise<Conversation | null>;
+  findById(id: string, ctx?: TransactionContext): Promise<Conversation | null>;
+  findByMailboxAndThread(mailboxId: string, emailThreadId: string, ctx?: TransactionContext): Promise<Conversation | null>;
   findAll(organizationId: string, filter?: ConversationFilter): Promise<Conversation[]>;
-  create(input: CreateConversationInput): Promise<Conversation>;
-  update(id: string, input: UpdateConversationInput): Promise<Conversation>;
-  addTag(conversationId: string, tagId: string, appliedBy: string): Promise<void>;
-  removeTag(conversationId: string, tagId: string): Promise<void>;
+  create(input: CreateConversationInput, ctx?: TransactionContext): Promise<Conversation>;
+  update(id: string, input: UpdateConversationInput, ctx?: TransactionContext): Promise<Conversation>;
+  addTag(conversationId: string, tagId: string, appliedBy: string, ctx?: TransactionContext): Promise<void>;
+  removeTag(conversationId: string, tagId: string, ctx?: TransactionContext): Promise<void>;
   listTagIds(conversationId: string): Promise<string[]>;
 }

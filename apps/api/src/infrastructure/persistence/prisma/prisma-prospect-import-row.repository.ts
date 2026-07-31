@@ -34,6 +34,11 @@ function toDomain(row: PrismaRowRow): ProspectImportRow {
 export class PrismaProspectImportRowRepository implements ProspectImportRowRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async findById(id: string, ctx?: TransactionContext): Promise<ProspectImportRow | null> {
+    const row = await resolveClient(this.prisma, ctx).prospectImportRow.findUnique({ where: { id } });
+    return row ? toDomain(row) : null;
+  }
+
   async findByImport(importId: string): Promise<ProspectImportRow[]> {
     const rows = await this.prisma.prospectImportRow.findMany({
       where: { importId },

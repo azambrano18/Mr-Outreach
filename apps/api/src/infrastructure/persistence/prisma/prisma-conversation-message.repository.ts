@@ -3,6 +3,7 @@ import { ConversationMessage as PrismaConversationMessageRow } from '@prisma/cli
 import {
   ConversationMessage,
   CreateConversationMessageInput,
+  UpdateConversationMessageInput,
 } from '../../../domain/conversation/conversation-message.entity';
 import { ConversationMessageRepository } from '../../../domain/conversation/conversation-message.repository';
 import { TransactionContext } from '../../../domain/persistence/transaction';
@@ -55,6 +56,33 @@ export class PrismaConversationMessageRepository implements ConversationMessageR
       where: { conversationId_emailMessageId: { conversationId, emailMessageId } },
     });
     return row ? toDomain(row) : null;
+  }
+
+  async findByMessageIdHeader(
+    organizationId: string,
+    messageIdHeader: string,
+    ctx?: TransactionContext,
+  ): Promise<ConversationMessage | null> {
+    const row = await resolveClient(this.prisma, ctx).conversationMessage.findUnique({
+      where: { organizationId_messageIdHeader: { organizationId, messageIdHeader } },
+    });
+    return row ? toDomain(row) : null;
+  }
+
+  async findByOutboundMessageId(
+    organizationId: string,
+    outboundMessageId: string,
+    ctx?: TransactionContext,
+  ): Promise<ConversationMessage | null> {
+    const row = await resolveClient(this.prisma, ctx).conversationMessage.findUnique({
+      where: { organizationId_outboundMessageId: { organizationId, outboundMessageId } },
+    });
+    return row ? toDomain(row) : null;
+  }
+
+  async update(id: string, input: UpdateConversationMessageInput, ctx?: TransactionContext): Promise<ConversationMessage> {
+    const row = await resolveClient(this.prisma, ctx).conversationMessage.update({ where: { id }, data: input });
+    return toDomain(row);
   }
 
   async create(input: CreateConversationMessageInput, ctx?: TransactionContext): Promise<ConversationMessage> {

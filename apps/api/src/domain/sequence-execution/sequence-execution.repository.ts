@@ -8,6 +8,8 @@ import {
 
 export interface SequenceExecutionRepository {
   findById(id: string, ctx?: TransactionContext): Promise<SequenceExecution | null>;
+  /** Fase "Recepción de eventos del motor" — resolves the motor's own execution id back to the local row, for events that arrive keyed by serverExecutionId rather than aggregateId. */
+  findByServerExecutionId(serverExecutionId: string, ctx?: TransactionContext): Promise<SequenceExecution | null>;
   /** The executive's own "Gestiones" list. */
   findByExecutive(organizationId: string, executiveId: string): Promise<SequenceExecution[]>;
   /** Every execution in the org, regardless of executive — the admin read-only monitor's source list. */

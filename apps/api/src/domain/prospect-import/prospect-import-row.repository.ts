@@ -2,6 +2,7 @@ import { TransactionContext } from '../persistence/transaction';
 import { CreateProspectImportRowInput, ProspectExecutionState, ProspectImportRow } from './prospect-import-row.entity';
 
 export interface ProspectImportRowRepository {
+  findById(id: string, ctx?: TransactionContext): Promise<ProspectImportRow | null>;
   findByImport(importId: string): Promise<ProspectImportRow[]>;
   createMany(inputs: CreateProspectImportRowInput[]): Promise<ProspectImportRow[]>;
   /** Replaces every row for this import — used when the executive re-maps columns. */

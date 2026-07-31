@@ -71,6 +71,7 @@ export class PrismaConversationRepository implements ConversationRepository {
     if (filter.sequenceId) where.sequenceId = filter.sequenceId;
     if (filter.sequenceExecutionId) where.sequenceExecutionId = filter.sequenceExecutionId;
     if (filter.origin) where.origin = filter.origin as never;
+    if (filter.contactEmail) where.contactEmail = { equals: filter.contactEmail, mode: 'insensitive' };
     if (filter.managementStatus) where.managementStatus = filter.managementStatus as never;
     if (filter.classification) where.classification = filter.classification as never;
     if (filter.responseOutcome === 'UNCLASSIFIED') {

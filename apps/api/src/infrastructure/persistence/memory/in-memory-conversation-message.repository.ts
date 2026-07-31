@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
   ConversationMessage,
   CreateConversationMessageInput,
+  UpdateConversationMessageInput,
 } from '../../../domain/conversation/conversation-message.entity';
 import { ConversationMessageRepository } from '../../../domain/conversation/conversation-message.repository';
 import { MemoryStore } from './memory-store';
@@ -31,6 +32,30 @@ export class InMemoryConversationMessageRepository implements ConversationMessag
           message.conversationId === conversationId && message.emailMessageId === emailMessageId,
       ) ?? null
     );
+  }
+
+  async findByMessageIdHeader(organizationId: string, messageIdHeader: string): Promise<ConversationMessage | null> {
+    return (
+      this.store.conversationMessages.find(
+        (message) => message.organizationId === organizationId && message.messageIdHeader === messageIdHeader,
+      ) ?? null
+    );
+  }
+
+  async findByOutboundMessageId(organizationId: string, outboundMessageId: string): Promise<ConversationMessage | null> {
+    return (
+      this.store.conversationMessages.find(
+        (message) => message.organizationId === organizationId && message.outboundMessageId === outboundMessageId,
+      ) ?? null
+    );
+  }
+
+  async update(id: string, input: UpdateConversationMessageInput): Promise<ConversationMessage> {
+    const index = this.store.conversationMessages.findIndex((message) => message.id === id);
+    if (index === -1) throw new NotFoundException('Conversation message not found.');
+    const updated = { ...this.store.conversationMessages[index], ...input };
+    this.store.conversationMessages[index] = updated;
+    return updated;
   }
 
   async create(input: CreateConversationMessageInput): Promise<ConversationMessage> {

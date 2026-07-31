@@ -12,6 +12,10 @@ import { MemoryStore } from './memory-store';
 export class InMemoryProspectImportRowRepository implements ProspectImportRowRepository {
   constructor(private readonly store: MemoryStore) {}
 
+  async findById(id: string): Promise<ProspectImportRow | null> {
+    return this.store.prospectImportRows.get(id) ?? null;
+  }
+
   async findByImport(importId: string): Promise<ProspectImportRow[]> {
     return [...this.store.prospectImportRows.values()]
       .filter((row) => row.importId === importId)
