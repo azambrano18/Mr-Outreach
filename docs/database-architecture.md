@@ -360,3 +360,101 @@ Ninguna de estas tablas fue eliminada, ni se planea eliminarla en esta fase.
 - Evaluar en una fase posterior, con más evidencia de uso real, si el
   sistema "Secuencias" (congelado) puede retirarse una vez que Conversaciones
   deje de depender de él para atribución.
+
+## 20. Fase "Conversaciones persistentes y atribución al flujo activo" — cambios aplicados
+
+Migración `20260731000000_persist_conversations_and_active_flow_attribution`
+(aditiva, aplicada en `development` y `test`, nunca en `production`).
+
+### 20.1 Conversaciones — de memoria a Postgres
+
+6 tablas nuevas: `conversations`, `conversation_messages`, `conversation_tags`,
+`conversation_tag_assignments`, `conversation_notes`, `conversation_read_states`.
+`ConversationRepository`/`ConversationMessageRepository`/`ConversationTagRepository`/
+`ConversationNoteRepository` ahora se ramifican por `PERSISTENCE_DRIVER` en
+`persistence.module.ts`, igual que el resto de repositorios — antes estaban
+cableados incondicionalmente a la implementación en memoria.
+
+`ConversationReadState` (nueva) es la fuente de verdad de leído/no-leído
+**por usuario**; `Conversation.isUnread` se mantiene como señal global no
+autoritativa (documentado en el propio modelo Prisma). `ConversationsService.
+getById` ahora registra el estado de lectura del usuario que abrió la
+conversación, sin afectar el de los demás.
+
+Atribución: `Conversation` agrega `sequenceExecutionId`/`prospectImportRowId`
+(flujo activo) junto a los campos legacy ya existentes
+(`sequenceContactId`/`originatingScheduledEmailId`/`sequenceId`/`sequenceStepId`),
+todos nullable, más un enum `ConversationOrigin` (`ACTIVE_EXECUTION` |
+`LEGACY_SEQUENCE` | `EXTERNAL_INBOUND`) que cada punto de creación fija
+explícitamente — nunca se infiere del origen por qué FKs están pobladas.
+
+### 20.2 Company/Contact en el flujo activo — `ProspectIdentityResolver`
+
+Nuevo servicio (`application/prospect-imports/prospect-identity-resolver.service.ts`)
+que, tras la aceptación de una Gestión, resuelve/crea `Company`/`Contact`
+reutilizando exactamente las mismas tablas e índices únicos case-insensitive
+que ya usa el flujo legado — nunca una tabla paralela. `ProspectImportRow`
+gana `companyId`/`contactId`/`resolvedAt` (nullable, nunca se sobrescriben
+una vez resueltos). Sin correo válido, la fila queda sin resolver, nunca
+rechazada.
+
+### 20.3 `IntegrationCommand` para el flujo activo (Alternativa A)
+
+`IntegrationAggregateType` gana `TEMPLATE` y `EXECUTION`. `PublishSequenceTemplateUseCase`
+y `StartSequenceExecutionUseCase` ahora crean/actualizan una fila `IntegrationCommand`
+(`TEMPLATE_PUBLISH_REQUESTED`/`SEQUENCE_EXECUTION_START_REQUESTED`) durable,
+sin duplicar `commandId`/`correlationId` como columnas propias — se consultan
+por `(organizationId, aggregateType, aggregateId)`. Patrón de 3 etapas:
+Etapa A (transacción local: claim de estado + IntegrationCommand REQUESTED),
+Etapa B (llamada al motor, fuera de cualquier transacción), Etapa C
+(transacción de resultado: entidad + IntegrationCommand + auditoría). Un
+fallo entre Etapa A y B deja el comando en `REQUESTED` — recuperación
+manual únicamente (un nuevo intento reutiliza la misma `idempotencyKey`),
+nunca automática.
+
+### 20.4 `Domain.serverDomainId`
+
+Campo nuevo en `Domain` (antes solo existía como snapshot en
+`Mailbox.serverDomainId`) con `@@unique([organizationId, serverDomainId])`
+provisional — sin evidencia contractual de unicidad global del motor.
+Poblado por `LinkMailboxUseCase` al crear el `Domain`; filas preexistentes
+quedan `null` hasta un futuro relink.
+
+### 20.5 Contrato `OPERATIONAL_STATUS_CHECK` — documentado, NO implementado
+
+Por instrucción expresa, este bloqueador permanece abierto. No se creó
+ningún puerto, adaptador HTTP, ni respuesta simulada. Contrato propuesto
+para aprobación futura del equipo del servidor:
+
+| Elemento | Propuesta |
+|---|---|
+| Endpoint/comando | `POST /operational-status/check` (o `OPERATIONAL_STATUS_CHECK` si el motor usa un bus de comandos) |
+| Request | `{ serverClientId, serverDomainId?, serverMailboxId?, correlationId, idempotencyKey }` |
+| Response | `{ serverClientId, serverDomainId, serverMailboxId, clientStatus, domainStatus, mailboxStatus, checkedAt, blockReasonCode, blockReason, motorStatusCode }` |
+| Timeout | 5s, igual al resto de adaptadores HTTP existentes |
+| Reintentos | 1, solo en timeout/5xx |
+| Fail-closed | timeout, 5xx, estado desconocido, o cualquier entidad inactiva → bloquear, nunca asumir elegibilidad |
+| Transacción | La llamada al motor nunca ocurre dentro de una transacción Postgres abierta; el snapshot se actualiza en una transacción nueva, posterior a la respuesta |
+
+`ClientEligibilityService.assertEligibleForPublish` sigue evaluando solo el
+snapshot local — este bloqueador **no se marca como resuelto**.
+
+## 21. Matriz final de identificadores externos
+
+| Identificador | Entidad | Unicidad actual | Evidencia contractual | Recomendación |
+|---|---|---|---|---|
+| `serverClientId` | ManagedClient | `@unique` global | Explícita (Fase 2.1) | Sin cambio |
+| `serverDomainId` | Domain (nuevo) | `@@unique([organizationId, serverDomainId])` | Ninguna | Provisional, revisar si el motor confirma unicidad global |
+| `serverMailboxId` | Mailbox | `@unique` global | Parcial (enforced+testeado, sin declaración del motor) | Sin cambio, riesgo documentado |
+| `serverTemplateId` | SequenceTemplateVersion | `@unique` global | Ninguna | Provisional |
+| `serverExecutionId` | SequenceExecution | `@unique` global | Ninguna | Provisional |
+| `serverMessageId` | ConversationMessage (nuevo) | `@@unique([organizationId, serverMessageId])` | Ninguna | Provisional |
+| `outboundMessageId` | ConversationMessage (nuevo) | `@@unique([organizationId, outboundMessageId])` | Ninguna | Provisional |
+| `messageIdHeader` | ConversationMessage (nuevo) | `@@unique([organizationId, messageIdHeader])` | N/A (header RFC822, no del motor) | Conservadora por diseño |
+| `commandId` | IntegrationCommand | `@unique` (legacy); no columna propia en TEMPLATE/EXECUTION | N/A — interno | Se consulta por `(organizationId, aggregateType, aggregateId)` |
+| `correlationId` | IntegrationCommand | Indexada, no única | N/A — interno | Sin cambio |
+| `idempotencyKey` | IntegrationCommand | `@@unique([organizationId, idempotencyKey])` | N/A — interno | Sin cambio |
+
+Ningún esquema fue modificado más allá de lo explícitamente listado en la
+sección 20 — todas las demás filas de esta matriz permanecen como
+recomendaciones para cuando exista evidencia real del motor.
