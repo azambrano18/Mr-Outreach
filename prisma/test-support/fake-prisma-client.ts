@@ -224,6 +224,26 @@ export class FakePrismaClient {
         this.store.permissions.push(row);
         return row;
       },
+      findMany: async ({ select }: { select?: Record<string, boolean> } = {}) => {
+        this.track('permission.findMany');
+        return this.store.permissions.map((p) => pick(p, select));
+      },
+      createMany: async ({
+        data,
+      }: {
+        data: { key: string; description: string }[];
+        skipDuplicates?: boolean;
+      }) => {
+        this.track('permission.createMany');
+        let count = 0;
+        for (const entry of data) {
+          if (!this.store.permissions.some((p) => p.key === entry.key)) {
+            this.store.permissions.push({ key: entry.key, description: entry.description });
+            count += 1;
+          }
+        }
+        return { count };
+      },
     };
   }
 

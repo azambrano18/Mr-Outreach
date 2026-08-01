@@ -385,12 +385,19 @@ async function runApply(client: PrismaClient, config: BootstrapConfig): Promise<
         throw new Error(`Blocked: ${diagnosis.reasons.join(' ')}`);
       }
 
-      for (const permission of PERMISSION_CATALOG) {
-        await tx.permission.upsert({
-          where: { key: permission.key },
-          create: permission,
-          update: { description: permission.description },
-        });
+      // A per-row `upsert()` loop (111 sequential round-trips inside one
+      // interactive transaction) proved unreliable against Neon staging —
+      // failed with "Transaction not found" both on the pooled and the
+      // direct connection. findMany + a single createMany cuts this to 1-2
+      // round-trips. Trade-off: an existing permission's description is no
+      // longer updated on a later run (only missing keys get inserted) —
+      // acceptable since catalog descriptions are effectively static once
+      // seeded, unlike reliably creating the admin at all.
+      const existingCatalogPermissions = await tx.permission.findMany({ select: { key: true } });
+      const existingCatalogKeys = new Set(existingCatalogPermissions.map((p) => p.key));
+      const missingCatalogPermissions = PERMISSION_CATALOG.filter((p) => !existingCatalogKeys.has(p.key));
+      if (missingCatalogPermissions.length > 0) {
+        await tx.permission.createMany({ data: missingCatalogPermissions, skipDuplicates: true });
       }
 
       const organizationId =
