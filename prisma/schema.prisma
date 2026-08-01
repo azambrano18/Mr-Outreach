@@ -56,6 +56,7 @@ model Organization {
   sequenceTemplates      SequenceTemplate[]
   sequenceExecutions     SequenceExecution[]
   signatureAssets        SignatureAsset[]
+  emailBodyAssets        EmailBodyAsset[]
   conversations          Conversation[]
   conversationMessages   ConversationMessage[]
   conversationTags       ConversationTag[]
@@ -93,6 +94,7 @@ model User {
   ownedSequenceTemplates     SequenceTemplate[]
   sequenceExecutions         SequenceExecution[]
   signatureAssets            SignatureAsset[]
+  emailBodyAssets            EmailBodyAsset[]
   assignedConversations      Conversation[]              @relation("ConversationAssignedExecutive")
   conversationNotes          ConversationNote[]
   conversationReadStates     ConversationReadState[]
@@ -203,6 +205,17 @@ enum MailboxEncryption {
   NONE
 }
 
+/// Fase 2 (R2) — tracks the async purge of `firmas/{correo-normalizado}/`
+/// from Cloudflare R2 once a mailbox is definitively deleted. Deliberately
+/// persisted (never in-memory only) so a failed cleanup survives a service
+/// restart and can be retried — see RetryMailboxAssetCleanupUseCase.
+enum MailboxAssetCleanupStatus {
+  NOT_NEEDED
+  PENDING
+  FAILED
+  COMPLETED
+}
+
 model Mailbox {
   id             String  @id @default(uuid())
   organizationId String
@@ -270,6 +283,15 @@ model Mailbox {
   revocationId          String?
   lastLinkCommandId     String?
 
+  // Fase 2 (R2) — §20-22. NOT_NEEDED for every mailbox that was never
+  // deleted; flips to PENDING the instant DeleteMailboxUseCase commits,
+  // then COMPLETED or FAILED after the (best-effort, post-commit) R2 purge
+  // attempt. A mailbox stuck in FAILED can be retried via
+  // POST /mailboxes/:id/retry-asset-cleanup — never automatically.
+  assetCleanupStatus    MailboxAssetCleanupStatus @default(NOT_NEEDED)
+  assetCleanupAttempts  Int                       @default(0)
+  lastAssetCleanupError String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -280,6 +302,7 @@ model Mailbox {
   connectionTests      MailboxConnectionTest[]
   assignments          MailboxAssignment[]
   signature            Signature?
+  signatureAssets      SignatureAsset[]
   sequences            Sequence[]
   sequenceImports      SequenceImport[]
   scheduledEmails      ScheduledEmail[]
@@ -447,11 +470,19 @@ enum SignatureAssetStatus {
   DELETED
 }
 
-/// Fase Firma — one row per uploaded signature image; never the binary itself (see SignatureAssetStoragePort).
+/// Fase Firma / Fase 2 (R2) — one row per uploaded signature image; never the
+/// binary itself (see SignatureAssetStoragePort). `objectKey` is now
+/// `firmas/{correo-normalizado}/{id}.{ext}` (keyed by the owning mailbox's
+/// own email, §4-5) rather than by organizationId/ownerUserId.
 model SignatureAsset {
   id               String               @id @default(uuid())
   organizationId   String
   ownerUserId      String
+  /// Fase 2 (R2), §13 — nullable only so pre-existing rows (uploaded before
+  /// this column existed) don't block the migration; every asset uploaded
+  /// from here on always has one (enforced in SignatureAssetsService, not
+  /// the DB — see its class comment).
+  mailboxId        String?
   objectKey        String               @unique
   publicUrl        String
   contentType      String
@@ -466,10 +497,51 @@ model SignatureAsset {
 
   organization Organization @relation(fields: [organizationId], references: [id])
   owner        User         @relation(fields: [ownerUserId], references: [id])
+  mailbox      Mailbox?     @relation(fields: [mailboxId], references: [id])
+
+  @@index([organizationId])
+  @@index([mailboxId])
+  @@index([status])
+  @@map("signature_assets")
+}
+
+enum EmailBodyAssetStatus {
+  AVAILABLE
+  REFERENCED
+  ORPHANED
+  DELETED
+}
+
+/// Fase 2 (R2), §7 — images inserted into a Plantilla step's body HTML.
+/// Deliberately a separate table/type from SignatureAsset (§7 of the spec:
+/// "cada asset debe tener un tipo explícito", "no mezclar imágenes de firma
+/// con imágenes del cuerpo") rather than one polymorphic table — keyed by
+/// `organizationId`/`ownerUserId` (never a mailbox), object key convention
+/// `email-body/{organizationId}/{ownerUserId}/{id}.{ext}`. Never purged by
+/// mailbox deletion — only by explicit, reference-checked deletion (see
+/// EmailBodyAssetsService.deleteUnreferencedImage).
+model EmailBodyAsset {
+  id               String               @id @default(uuid())
+  organizationId   String
+  ownerUserId      String
+  objectKey        String               @unique
+  publicUrl        String
+  contentType      String
+  originalFileName String
+  sizeBytes        Int
+  width            Int
+  height           Int
+  sha256           String
+  status           EmailBodyAssetStatus @default(AVAILABLE)
+  createdAt        DateTime             @default(now())
+  deletedAt        DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  owner        User         @relation(fields: [ownerUserId], references: [id])
 
   @@index([organizationId])
   @@index([status])
-  @@map("signature_assets")
+  @@map("email_body_assets")
 }
 
 enum SequenceStatus {

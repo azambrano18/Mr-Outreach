@@ -22,13 +22,12 @@ export interface SequenceTemplate {
   /** Vestigial — header moved back to per-envío (SequenceTemplateStep.headerText). Never read/written. */
   headerText: string | null;
   /**
-   * Fase Firma — the Plantilla's own editable signature draft, authored
-   * inside this template's editor (never the mailbox's). Sanitized HTML,
-   * frozen into `SequenceTemplateVersion.signatureHtml` at publish time;
-   * editing it afterward never touches an already-published version. See
-   * SequenceTemplatesService.create() for the one-time migration snapshot
-   * taken from the mailbox's legacy Signature, for templates that predate
-   * this field.
+   * Vestigial — written once at creation (SequenceTemplatesService.create),
+   * never read or updated again since Fase 2 (R2). A Plantilla no longer
+   * owns an independent signature draft: `SequenceTemplatesService.getDetail`
+   * and the publish/update use-cases always read the mailbox's current
+   * signature live instead (`getSignatureHtmlForMailbox`), since a mailbox
+   * has exactly one signature shared by every one of its Plantillas.
    */
   signatureHtml: string;
   status: SequenceTemplateStatus;

@@ -2,9 +2,10 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import type { UserSummary } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../../lib/api';
+import { isProtectedSystemAccount } from '../../../../lib/protected-system-account';
 import { getCurrentUser } from '../../../../lib/session';
 import { AccessDenied } from '../../access-denied';
-import { DeleteExecutiveButton } from '../delete-executive-button';
+import { DeleteUserButton } from '../delete-user-button';
 import { ResetPasswordButton } from '../reset-password-button';
 import { ToggleStatusButton } from '../toggle-status-button';
 import { ExecutiveProfileSummary } from './executive-profile-summary';
@@ -32,8 +33,13 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
   const canUpdate = currentUser.permissions.includes('users.update');
   const canDisable = currentUser.permissions.includes('users.disable');
   const canResetPassword = currentUser.permissions.includes('users.reset_password');
-  // Only ever offered for EXECUTIVE users — the backend rejects deleting an ADMIN through this endpoint too.
-  const canDelete = currentUser.permissions.includes('users.delete') && executive.roleName === 'EXECUTIVE';
+  // Available for both ADMIN and EXECUTIVE users now — never for the protected
+  // system account or for one's own account. Both exclusions are cosmetic
+  // here; the backend (UsersService.remove) rejects them independently.
+  const canDelete =
+    currentUser.permissions.includes('users.delete') &&
+    !isProtectedSystemAccount(executive.email) &&
+    executive.id !== currentUser.id;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -56,7 +62,12 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
           )}
           {canResetPassword && <ResetPasswordButton userId={executive.id} />}
           {canDelete && (
-            <DeleteExecutiveButton userId={executive.id} name={executive.name} email={executive.email} />
+            <DeleteUserButton
+              userId={executive.id}
+              name={executive.name}
+              email={executive.email}
+              roleName={executive.roleName}
+            />
           )}
         </div>
       </div>

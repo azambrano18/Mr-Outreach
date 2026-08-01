@@ -52,6 +52,9 @@ export type MailboxLinkStatus = 'LINK_PENDING' | 'ACTIVE' | 'UNLINK_REQUESTED' |
 /** Fase 2.1 — mirrors MailboxTechnicalStatus in domain/mailbox-motor/mailbox-motor.types.ts exactly. */
 export type MailboxServerTechnicalStatus = 'CONNECTED' | 'DEGRADED' | 'DISCONNECTED' | 'DISABLED' | 'UNKNOWN';
 
+/** Fase 2 (R2), §20-22 — tracks the async purge of `firmas/{correo-normalizado}/` from Cloudflare R2 once a mailbox is definitively deleted. Persisted so a failed cleanup survives a service restart. */
+export type MailboxAssetCleanupStatus = 'NOT_NEEDED' | 'PENDING' | 'FAILED' | 'COMPLETED';
+
 export interface MailboxProtocolConfig {
   host: string;
   port: number;
@@ -123,6 +126,10 @@ export interface Mailbox {
   revokedAt: Date | null;
   revocationId: string | null;
   lastLinkCommandId: string | null;
+  /** Fase 2 (R2), §20-22 — see MailboxAssetCleanupStatus. */
+  assetCleanupStatus: MailboxAssetCleanupStatus;
+  assetCleanupAttempts: number;
+  lastAssetCleanupError: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -194,6 +201,10 @@ export interface UpdateMailboxInput {
   revokedAt?: Date | null;
   revocationId?: string | null;
   lastLinkCommandId?: string | null;
+  /** Fase 2 (R2), §20-22 — written by DeleteMailboxUseCase/RetryMailboxAssetCleanupUseCase only. */
+  assetCleanupStatus?: MailboxAssetCleanupStatus;
+  assetCleanupAttempts?: number;
+  lastAssetCleanupError?: string | null;
   /** Set once, on deletion — see DeleteMailboxUseCase. Every read path already filters `deletedAt: null`. */
   deletedAt?: Date;
 }

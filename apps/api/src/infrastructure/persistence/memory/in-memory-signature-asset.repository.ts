@@ -16,6 +16,7 @@ export class InMemorySignatureAssetRepository implements SignatureAssetRepositor
       id: input.id,
       organizationId: input.organizationId,
       ownerUserId: input.ownerUserId,
+      mailboxId: input.mailboxId,
       objectKey: input.objectKey,
       publicUrl: input.publicUrl,
       contentType: input.contentType,

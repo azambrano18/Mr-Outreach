@@ -138,6 +138,9 @@ describe('MotorEventProjector', () => {
     revokedAt: null,
     revocationId: null,
     lastLinkCommandId: null,
+    assetCleanupStatus: 'NOT_NEEDED',
+    assetCleanupAttempts: 0,
+    lastAssetCleanupError: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -316,6 +319,7 @@ describe('MotorEventProjector', () => {
     } as unknown as jest.Mocked<ProspectImportRowRepository>;
     mailboxes = {
       findById: jest.fn().mockResolvedValue(mailbox),
+      findByIdIncludingDeleted: jest.fn(),
       findByEmail: jest.fn(),
       findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),

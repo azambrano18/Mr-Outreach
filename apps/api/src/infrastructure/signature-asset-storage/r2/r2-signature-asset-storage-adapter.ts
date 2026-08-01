@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
   S3ServiceException,
@@ -13,14 +15,17 @@ import {
   SignatureAssetUploadFailed,
 } from '../../../domain/signature-asset-storage/signature-asset-storage.errors';
 import {
+  DeleteObjectsByPrefixResult,
   SignatureAssetHeadResult,
   SignatureAssetStoragePort,
   UploadedSignatureAsset,
   UploadSignatureAssetInput,
 } from '../../../domain/signature-asset-storage/signature-asset-storage.port';
 
-/** Immutable per §7 — a signature asset object key is never reused/overwritten, so a very long, cacheable lifetime is safe. */
+/** Immutable per §7 — an asset object key is never reused/overwritten, so a very long, cacheable lifetime is safe. */
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+/** S3/R2's own hard limit per DeleteObjects call — §8 requires supporting batches larger than this via pagination. */
+const DELETE_BATCH_SIZE = 1000;
 
 /**
  * Production adapter (SIGNATURE_ASSET_STORAGE_MODE=r2). Talks to Cloudflare
@@ -29,12 +34,13 @@ const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
  * https://developers.cloudflare.com/r2/api/s3/api/).
  *
  * The `S3Client` is built lazily (see `client` getter) and ONLY the first
- * time one of uploadImage/deleteUnreferencedImage/validateAssetExistence
- * actually runs — never in the constructor, and therefore never at all
- * when `SIGNATURE_ASSET_STORAGE_MODE=simulated` (Nest still instantiates
- * this class as a provider in every mode, since `SignatureAssetStorageModule`
- * picks the active port at factory time, but a class merely existing must
- * never open a network client that mode doesn't need).
+ * time one of uploadImage/deleteUnreferencedImage/validateAssetExistence/
+ * deleteObjectsByPrefix actually runs — never in the constructor, and
+ * therefore never at all when `SIGNATURE_ASSET_STORAGE_MODE=simulated`
+ * (Nest still instantiates this class as a provider in every mode, since
+ * `SignatureAssetStorageModule` picks the active port at factory time, but
+ * a class merely existing must never open a network client that mode
+ * doesn't need).
  */
 @Injectable()
 export class R2SignatureAssetStorageAdapter implements SignatureAssetStoragePort {
@@ -58,13 +64,11 @@ export class R2SignatureAssetStorageAdapter implements SignatureAssetStoragePort
   }
 
   async uploadImage(input: UploadSignatureAssetInput): Promise<UploadedSignatureAsset> {
-    const objectKey = buildObjectKey(this.config.r2SignaturePrefix, input.organizationId, input.ownerUserId, input.assetId, input.extension);
-
     try {
       await this.client.send(
         new PutObjectCommand({
           Bucket: this.config.r2BucketName,
-          Key: objectKey,
+          Key: input.objectKey,
           Body: input.buffer,
           ContentType: input.contentType,
           ContentLength: input.buffer.length,
@@ -72,10 +76,10 @@ export class R2SignatureAssetStorageAdapter implements SignatureAssetStoragePort
         }),
       );
     } catch (error) {
-      throw this.toSanitizedError(error, 'uploadImage', objectKey);
+      throw this.toSanitizedError(error, 'uploadImage', input.objectKey);
     }
 
-    return { objectKey, publicUrl: this.getPublicUrl(objectKey) };
+    return { objectKey: input.objectKey, publicUrl: this.getPublicUrl(input.objectKey) };
   }
 
   getPublicUrl(objectKey: string): string {
@@ -113,6 +117,51 @@ export class R2SignatureAssetStorageAdapter implements SignatureAssetStoragePort
   }
 
   /**
+   * Fase 2 (R2), §8/§20-22 — lists every object under `prefix` via
+   * paginated ListObjectsV2 (following `NextContinuationToken` until
+   * exhausted, so this supports more than 1,000 objects), then deletes them
+   * in batches of at most 1,000 keys via DeleteObjects (S3/R2's own hard
+   * limit per call). A prefix with zero objects is a successful no-op,
+   * never an error — idempotent, safe to retry after a partial failure
+   * (deleting an already-gone object is never an error either).
+   */
+  async deleteObjectsByPrefix(prefix: string): Promise<DeleteObjectsByPrefixResult> {
+    let deletedCount = 0;
+    let continuationToken: string | undefined;
+
+    try {
+      do {
+        const listed = await this.client.send(
+          new ListObjectsV2Command({
+            Bucket: this.config.r2BucketName,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        const keys = (listed.Contents ?? []).map((object) => object.Key).filter((key): key is string => Boolean(key));
+
+        for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
+          const batch = keys.slice(i, i + DELETE_BATCH_SIZE);
+          if (batch.length === 0) continue;
+          await this.client.send(
+            new DeleteObjectsCommand({
+              Bucket: this.config.r2BucketName,
+              Delete: { Objects: batch.map((key) => ({ Key: key })), Quiet: true },
+            }),
+          );
+          deletedCount += batch.length;
+        }
+
+        continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+      } while (continuationToken);
+    } catch (error) {
+      throw this.toSanitizedError(error, 'deleteObjectsByPrefix', prefix);
+    }
+
+    return { deletedCount };
+  }
+
+  /**
    * §12 — the ONLY place a raw AWS SDK error is ever inspected in this
    * adapter. Logs a normalized, credential-free summary; throws a
    * sanitized domain error that never carries the SDK's own message,
@@ -132,11 +181,6 @@ export class R2SignatureAssetStorageAdapter implements SignatureAssetStoragePort
     }
     return new SignatureAssetStorageUnavailable();
   }
-}
-
-function buildObjectKey(prefix: string, organizationId: string, ownerUserId: string, assetId: string, extension: string): string {
-  const safePrefix = prefix.replace(/^\/+|\/+$/g, '');
-  return `${safePrefix}/${organizationId}/${ownerUserId}/${assetId}.${extension}`;
 }
 
 function errorCode(error: unknown): string {

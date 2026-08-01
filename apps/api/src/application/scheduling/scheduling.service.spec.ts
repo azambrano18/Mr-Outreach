@@ -148,7 +148,7 @@ describe('SchedulingService.createBatch', () => {
       remove: jest.fn(),
     };
     stepVersions = { create: jest.fn(), findByStep: jest.fn().mockResolvedValue([{ versionNumber: 3 }]) };
-    mailboxes = { findById: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn(), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
+    mailboxes = { findById: jest.fn(), findByIdIncludingDeleted: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn(), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
     sequences = {
       findById: jest.fn().mockResolvedValue({ timezone: 'America/Santiago' }),

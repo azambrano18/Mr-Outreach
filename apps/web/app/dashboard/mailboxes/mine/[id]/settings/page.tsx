@@ -5,9 +5,12 @@ import { apiFetch } from '../../../../../../lib/api';
 import { getCurrentUser } from '../../../../../../lib/session';
 
 /**
- * Fase Firma — the signature no longer belongs to the mailbox: it moved
- * into each Plantilla's own editor (§11 of the account-restructuring
- * follow-up). This screen no longer shows a "Firma" tab at all.
+ * Fase 2 (R2) — the signature belongs to the mailbox again: one signature
+ * per account, shared by every one of its Plantillas (see
+ * SequenceTemplatesService.getSignatureHtmlForMailbox). Editing it lives on
+ * its own dedicated screen (`/signature`), linked from the "General" tab
+ * below — not a tab of its own here, to avoid touching this tab list's
+ * existing routing/searchParams contract.
  */
 type SettingsTab = 'general' | 'connection' | 'assignments' | 'limits' | 'sync' | 'diagnostics';
 
@@ -133,7 +136,12 @@ export default async function MyMailboxSettingsPage({
           <InfoField label="Zona horaria" value="No disponible en esta fase" />
           <p className="col-span-full text-xs text-slate-400">
             La edición de estos datos, límites de envío, sincronización y credenciales corresponde
-            al administrador. La firma de tus correos se configura dentro de cada Plantilla, no aquí.
+            al administrador.
+          </p>
+          <p className="col-span-full text-sm">
+            <Link href={`/dashboard/mailboxes/mine/${mailbox.id}/signature`} className="font-medium text-brand-700 hover:underline">
+              Editar la firma de esta cuenta →
+            </Link>
           </p>
         </div>
       )}

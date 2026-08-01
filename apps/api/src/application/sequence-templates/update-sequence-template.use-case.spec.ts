@@ -14,7 +14,7 @@ describe('UpdateSequenceTemplateUseCase', () => {
   let audit: jest.Mocked<Pick<AuditLogRepository, 'record'>>;
   let motor: jest.Mocked<Pick<SequenceTemplateMotorPort, 'publishTemplate'>>;
   let templatesService: jest.Mocked<
-    Pick<SequenceTemplatesService, 'requireOwned' | 'getStepsForPublish' | 'validateForPublish'>
+    Pick<SequenceTemplatesService, 'requireOwned' | 'getStepsForPublish' | 'validateForPublish' | 'getSignatureHtmlForMailbox'>
   >;
   let eligibility: jest.Mocked<Pick<ExecutiveMailboxEligibilityService, 'requireEligible'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
@@ -102,6 +102,7 @@ describe('UpdateSequenceTemplateUseCase', () => {
       requireOwned: jest.fn().mockResolvedValue(publishedTemplate),
       getStepsForPublish: jest.fn().mockResolvedValue([validStep(1), validStep(2), validStep(3)]),
       validateForPublish: jest.fn().mockResolvedValue({ valid: true, errors: [] }),
+      getSignatureHtmlForMailbox: jest.fn().mockResolvedValue(publishedTemplate.signatureHtml),
     };
     eligibility = { requireEligible: jest.fn().mockResolvedValue(mailbox) };
     secrets = { encrypt: jest.fn().mockReturnValue('enc(token)'), decrypt: jest.fn() };

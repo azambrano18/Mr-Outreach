@@ -1838,7 +1838,8 @@ para los pasos externos de Cloudflare R2.
 
 ```env
 SIGNATURE_ASSET_STORAGE_MODE=simulated   # valor por defecto — SimulatedSignatureAssetStorageAdapter,
-                                          # escribe en apps/api/uploads/signatures/ (mismo mount /uploads/*).
+                                          # escribe en apps/api/uploads/firmas/ y apps/api/uploads/email-body/
+                                          # (mismo mount /uploads/*).
 # SIGNATURE_ASSET_STORAGE_MODE=r2        # requiere las 4 variables R2_* de abajo (la API rechaza
                                           # arrancar si falta cualquiera).
 R2_ACCOUNT_ID=
@@ -1846,8 +1847,9 @@ R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET_NAME=
 R2_PUBLIC_BASE_URL=https://assets.mejoreferido.com   # siempre requerida — el sanitizador de la
-                                                       # firma solo permite <img> apuntando a este host.
-R2_SIGNATURE_PREFIX=signatures
+                                                       # firma/cuerpo solo permite <img> apuntando a este host.
+R2_SIGNATURE_PREFIX=firmas             # firmas/{correo-normalizado-de-la-cuenta}/{assetId}.{ext}
+R2_EMAIL_BODY_PREFIX=email-body        # email-body/{organizationId}/{ownerUserId}/{assetId}.{ext}
 ```
 
 Ningún servicio de negocio conoce cuál de las dos está activa: todos dependen de **interfaces**
@@ -1964,13 +1966,14 @@ SEQUENCE_MOTOR_BASE_URL=      # obligatoria solo si SEQUENCE_MOTOR_MODE=http
 SEQUENCE_MOTOR_API_KEY=       # obligatoria solo si SEQUENCE_MOTOR_MODE=http
 SEQUENCE_MOTOR_TIMEOUT_MS=10000
 
-SIGNATURE_ASSET_STORAGE_MODE=simulated  # simulated | r2 — imágenes embebidas en la firma de una Plantilla
+SIGNATURE_ASSET_STORAGE_MODE=simulated  # simulated | r2 — imágenes de la firma de una cuenta y del cuerpo de una Plantilla
 R2_ACCOUNT_ID=                # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
 R2_ACCESS_KEY_ID=              # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
 R2_SECRET_ACCESS_KEY=          # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
 R2_BUCKET_NAME=                # obligatoria solo si SIGNATURE_ASSET_STORAGE_MODE=r2
 R2_PUBLIC_BASE_URL=https://assets.mejoreferido.com  # siempre requerida (con valor por defecto)
-R2_SIGNATURE_PREFIX=signatures
+R2_SIGNATURE_PREFIX=firmas
+R2_EMAIL_BODY_PREFIX=email-body
 
 API_PUBLIC_URL=               # opcional; base para las URLs públicas de /uploads (default http://localhost:<PORT>)
 

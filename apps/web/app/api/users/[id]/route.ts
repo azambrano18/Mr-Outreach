@@ -37,11 +37,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
+  const body = await request.json().catch(() => ({}));
   try {
-    await apiFetch<void>(`/users/${params.id}`, { method: 'DELETE' });
+    await apiFetch<void>(`/users/${params.id}`, { method: 'DELETE', body: JSON.stringify(body) });
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     if (error instanceof ApiError) {

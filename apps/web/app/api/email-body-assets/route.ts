@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getApiUrl, SESSION_COOKIE } from '../../../lib/session';
 
 /**
- * Fase Firma — same multipart BFF pattern as /api/uploads/images: a
+ * Fase 2 (R2), §7/§10 — same multipart BFF pattern as /api/uploads/images: a
  * multipart boundary must come from fetch() reading the FormData body
  * itself, never set by hand, so this can't go through lib/api.ts's
  * apiFetch() (which forces Content-Type: application/json).
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const outgoingForm = new FormData();
   outgoingForm.append('file', file, (file as File).name ?? 'imagen');
 
-  const response = await fetch(`${getApiUrl()}/signature-assets`, {
+  const response = await fetch(`${getApiUrl()}/email-body-assets`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: outgoingForm,

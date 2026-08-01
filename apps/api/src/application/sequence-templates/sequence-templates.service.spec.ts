@@ -170,20 +170,20 @@ describe('SequenceTemplatesService', () => {
       expect(steps.create).toHaveBeenCalledWith(expect.objectContaining({ stepNumber: 3 }));
     });
 
-    it('Fase Firma, §14 — snapshots the mailbox\'s current legacy signature into the new template\'s own signatureHtml draft, exactly once', async () => {
+    it('Fase 2 (R2) — snapshots the mailbox\'s current signature into the new template\'s signatureHtml column once, for display/debugging only (never read back afterward — see getDetail)', async () => {
       await service.create(orgId, executiveId, { mailboxId, name: 'Prospección Gerentes de RRHH' });
       expect(signatures.getByMailbox).toHaveBeenCalledWith(orgId, mailboxId);
       expect(templates.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: '<p>Firma</p>' }));
     });
 
-    it('Fase Firma — a mailbox with no legacy signature yields an empty (never undefined/null) signatureHtml draft', async () => {
+    it('a mailbox with no signature yet yields an empty (never undefined/null) snapshot', async () => {
       signatures.getByMailbox.mockRejectedValue(new Error('not found'));
       await service.create(orgId, executiveId, { mailboxId, name: 'Prospección Gerentes de RRHH' });
       expect(templates.create).toHaveBeenCalledWith(expect.objectContaining({ signatureHtml: '' }));
     });
   });
 
-  describe('update — Fase Firma, §11-13 the template owns its own editable signature draft', () => {
+  describe('update / getDetail — Fase 2 (R2), a Plantilla has no independent signature anymore', () => {
     const existingTemplate = {
       id: 'tpl_1',
       organizationId: orgId,
@@ -191,7 +191,7 @@ describe('SequenceTemplatesService', () => {
       mailboxId,
       name: 'Prospección Gerentes de RRHH',
       subjectTemplate: 'Hola {contact_name}',
-      signatureHtml: '<p>Firma anterior</p>',
+      signatureHtml: '<p>Firma anterior (columna sin usar)</p>',
       status: 'DRAFT',
       currentDraftVersion: 1,
       createdAt: new Date(),
@@ -204,49 +204,32 @@ describe('SequenceTemplatesService', () => {
       templates.update.mockResolvedValue(existingTemplate as any);
     });
 
-    it('sanitizes signatureHtml the same way a step body is sanitized, and persists it', async () => {
-      await service.update(orgId, executiveId, 'tpl_1', {
-        signatureHtml: '<p onclick="alert(1)">Firma <script>evil()</script>nueva</p>',
-      });
-      expect(templates.update).toHaveBeenCalledWith(
-        'tpl_1',
-        expect.objectContaining({ signatureHtml: '<p>Firma nueva</p>' }),
-      );
+    it('update() no longer accepts a signatureHtml input at all — it is not part of UpdateSequenceTemplateInput', async () => {
+      // @ts-expect-error — signatureHtml is intentionally not a valid key anymore.
+      await service.update(orgId, executiveId, 'tpl_1', { subjectTemplate: 'Nuevo asunto', signatureHtml: '<p>Ignorada</p>' });
+      const patch = templates.update.mock.calls[0][1];
+      expect(patch).not.toHaveProperty('signatureHtml');
     });
 
-    it('Fase Firma, §9 — keeps an <img> pointing at the configured allowed asset host, over HTTP, since the mocked config allows insecure (simulated dev mode)', async () => {
-      await service.update(orgId, executiveId, 'tpl_1', {
-        signatureHtml: '<img src="http://localhost/uploads/signatures/org_1/exec_1/asset_1.png" alt="Logo">',
-      });
-      expect(templates.update).toHaveBeenCalledWith(
-        'tpl_1',
-        expect.objectContaining({ signatureHtml: expect.stringContaining('http://localhost/uploads/signatures/org_1/exec_1/asset_1.png') }),
-      );
-    });
-
-    it('Fase Firma, §9 — strips an <img> pointing at any other host (never trusts an arbitrary external URL)', async () => {
-      await service.update(orgId, executiveId, 'tpl_1', {
-        signatureHtml: '<img src="https://evil.example.com/logo.png" alt="Logo">',
-      });
-      expect(templates.update).toHaveBeenCalledWith('tpl_1', expect.objectContaining({ signatureHtml: '' }));
-    });
-
-    it('Fase Firma, §9 — strips a data: URL image (never embeds binary content inline)', async () => {
-      await service.update(orgId, executiveId, 'tpl_1', {
-        signatureHtml: '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Logo">',
-      });
-      expect(templates.update).toHaveBeenCalledWith('tpl_1', expect.objectContaining({ signatureHtml: '' }));
-    });
-
-    it('leaves signatureHtml untouched when the caller does not send it', async () => {
-      await service.update(orgId, executiveId, 'tpl_1', { subjectTemplate: 'Nuevo asunto' });
-      expect(templates.update).toHaveBeenCalledWith('tpl_1', expect.objectContaining({ signatureHtml: undefined }));
-    });
-
-    it('getDetail returns the template\'s own signatureHtml field directly, never re-querying the mailbox\'s legacy signature', async () => {
+    it('getDetail always resolves the mailbox\'s current live signature, ignoring the stored (now vestigial) column', async () => {
+      signatures.getByMailbox.mockResolvedValue({ activeVersion: { htmlContent: '<p>Firma vigente de la cuenta</p>' } } as any);
       const detail = await service.getDetail(orgId, executiveId, 'tpl_1');
-      expect(detail.signatureHtml).toBe('<p>Firma anterior</p>');
-      expect(signatures.getByMailbox).not.toHaveBeenCalled();
+      expect(detail.signatureHtml).toBe('<p>Firma vigente de la cuenta</p>');
+      expect(signatures.getByMailbox).toHaveBeenCalledWith(orgId, mailboxId);
+    });
+
+    it('two templates on the same mailbox reflect the exact same signature — there is only one to reflect', async () => {
+      signatures.getByMailbox.mockResolvedValue({ activeVersion: { htmlContent: '<p>Firma compartida</p>' } } as any);
+      const detailA = await service.getDetail(orgId, executiveId, 'tpl_1');
+      const detailB = await service.getDetail(orgId, executiveId, 'tpl_1');
+      expect(detailA.signatureHtml).toBe('<p>Firma compartida</p>');
+      expect(detailB.signatureHtml).toBe('<p>Firma compartida</p>');
+    });
+
+    it('a mailbox with no signature yet resolves to an empty string, never throwing', async () => {
+      signatures.getByMailbox.mockRejectedValue(new Error('not found'));
+      const detail = await service.getDetail(orgId, executiveId, 'tpl_1');
+      expect(detail.signatureHtml).toBe('');
     });
   });
 
@@ -293,6 +276,23 @@ describe('SequenceTemplatesService', () => {
     it('accepts a delayValue at each boundary', async () => {
       await expect(service.updateStep(orgId, executiveId, 'tpl_1', 2, { delayValue: 1 })).resolves.toBeDefined();
       await expect(service.updateStep(orgId, executiveId, 'tpl_1', 2, { delayValue: 20 })).resolves.toBeDefined();
+    });
+
+    it('Fase 2 (R2), §15 — keeps an <img> pointing at the configured allowed asset host, over HTTP, since the mocked config allows insecure (simulated dev mode)', async () => {
+      await service.updateStep(orgId, executiveId, 'tpl_1', 2, {
+        bodyHtml: '<img src="http://localhost/uploads/email-body/org_1/exec_1/asset_1.png" alt="Logo">',
+      });
+      expect(steps.update).toHaveBeenCalledWith(
+        'step_2',
+        expect.objectContaining({ bodyHtml: expect.stringContaining('http://localhost/uploads/email-body/org_1/exec_1/asset_1.png') }),
+      );
+    });
+
+    it('Fase 2 (R2), §15 — strips a <img> pointing at any other host in the body, same restriction as the signature', async () => {
+      await service.updateStep(orgId, executiveId, 'tpl_1', 2, {
+        bodyHtml: '<img src="https://evil.example.com/logo.png" alt="Logo">',
+      });
+      expect(steps.update).toHaveBeenCalledWith('step_2', expect.objectContaining({ bodyHtml: '' }));
     });
   });
 

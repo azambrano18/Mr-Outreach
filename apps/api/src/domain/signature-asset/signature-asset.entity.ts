@@ -19,7 +19,9 @@ export interface SignatureAsset {
   id: string;
   organizationId: string;
   ownerUserId: string;
-  /** Immutable — `signatures/{organizationId}/{ownerUserId}/{id}.{extension}`. Never reused across uploads. */
+  /** Fase 2 (R2), §4 — nullable only for rows uploaded before this column existed; every upload from now on always sets it. */
+  mailboxId: string | null;
+  /** Immutable — `firmas/{correo-normalizado}/{id}.{extension}` (Fase 2, R2). Never reused across uploads. */
   objectKey: string;
   publicUrl: string;
   contentType: 'image/png' | 'image/jpeg' | 'image/gif';
@@ -39,6 +41,7 @@ export interface CreateSignatureAssetInput {
   id: string;
   organizationId: string;
   ownerUserId: string;
+  mailboxId: string;
   objectKey: string;
   publicUrl: string;
   contentType: 'image/png' | 'image/jpeg' | 'image/gif';

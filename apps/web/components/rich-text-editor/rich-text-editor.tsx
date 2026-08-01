@@ -23,12 +23,19 @@ export function RichTextEditor({
   editable = true,
   placeholder,
   variables,
+  imageUploadUrl,
+  imageMaxBytes,
+  imageAccept,
 }: {
   value: string;
   onChange: (html: string) => void;
   editable?: boolean;
   placeholder?: string;
   variables?: EditorVariable[];
+  /** Fase 2 (R2) — which BFF proxy route the toolbar's "insertar imagen" button uploads to; defaults to the generic uploads endpoint (see ImageUploadButton). */
+  imageUploadUrl?: string;
+  imageMaxBytes?: number;
+  imageAccept?: string;
 }) {
   const [htmlSourceMode, setHtmlSourceMode] = useState(false);
   const [sourceDraft, setSourceDraft] = useState(value);
@@ -94,6 +101,9 @@ export function RichTextEditor({
           editor={editor}
           htmlSourceMode={htmlSourceMode}
           onToggleHtmlSourceMode={toggleHtmlSourceMode}
+          imageUploadUrl={imageUploadUrl}
+          imageMaxBytes={imageMaxBytes}
+          imageAccept={imageAccept}
         />
         {htmlSourceMode ? (
           <textarea

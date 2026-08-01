@@ -42,7 +42,8 @@ en el código, no por inferencia).
 | `R2_SECRET_ACCESS_KEY` | Solo si `SIGNATURE_ASSET_STORAGE_MODE=r2` | **Sí** | Cloudflare → Railway | `***` | `Joi.min(1).required()` condicional |
 | `R2_BUCKET_NAME` | Solo si `SIGNATURE_ASSET_STORAGE_MODE=r2` | No | Railway | `mr-outreach-production-assets` | `Joi.min(1).required()` condicional |
 | `R2_PUBLIC_BASE_URL` | Sí (todo modo) | No | Railway | `https://assets.***.cl` | Debe ser HTTPS y **nunca** un dominio `*.r2.dev` en modo `r2` (validado explícitamente) |
-| `R2_SIGNATURE_PREFIX` | No (default `signatures`) | No | Railway | `signatures` | Patrón de segmento de ruta seguro (sin `..`, sin espacios) |
+| `R2_SIGNATURE_PREFIX` | No (default `firmas`) | No | Railway | `firmas` | Patrón de segmento de ruta seguro (sin `..`, sin espacios) — object key: `firmas/{correo-normalizado}/{assetId}.{ext}` |
+| `R2_EMAIL_BODY_PREFIX` | No (default `email-body`) | No | Railway | `email-body` | Mismo patrón de validación — object key: `email-body/{organizationId}/{ownerUserId}/{assetId}.{ext}` |
 | — `R2_ENDPOINT` | **No existe como variable** | — | — | — | El endpoint se deriva de `R2_ACCOUNT_ID` (`https://<account>.r2.cloudflarestorage.com`) — no inventar esta variable |
 | — `R2_REGION` | **No existe como variable** | — | — | — | Hardcodeado a `"auto"` en el adaptador — no inventar esta variable |
 | `AUTH_SECRET` | Sí | **Sí** | Railway | `***` (mínimo 16 caracteres) | `Joi.min(16).required()` |

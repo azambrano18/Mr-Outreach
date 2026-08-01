@@ -64,12 +64,19 @@ export interface CreateSequenceTemplateInput {
   description?: string | null;
 }
 
-/** §1/§5 (Fase 1.7) — `name` is now user-editable (see validateTemplateName); subject stays shared across the 3 envíos. Header is per-envío again (see UpdateSequenceTemplateStepInput). Fase Firma — `signatureHtml` is the template's own editable signature draft, sanitized here exactly like a step's `bodyHtml`. */
+/**
+ * §1/§5 (Fase 1.7) — `name` is now user-editable (see validateTemplateName);
+ * subject stays shared across the 3 envíos. Header is per-envío again (see
+ * UpdateSequenceTemplateStepInput). Fase 2 (R2) — no `signatureHtml` here
+ * anymore: a Plantilla no longer owns an independent signature draft, it
+ * always reflects its mailbox's current signature (see
+ * SequenceTemplatesService.getDetail/getSignatureHtmlForMailbox) — editing
+ * it happens only on the mailbox's own signature screen.
+ */
 export interface UpdateSequenceTemplateInput {
   name?: string;
   description?: string | null;
   subjectTemplate?: string;
-  signatureHtml?: string;
 }
 
 /**
@@ -240,7 +247,10 @@ export class SequenceTemplatesService {
       steps: stepSummaries,
       variablesUsed,
       versions: versionRows.map((v) => this.toVersionSummary(v)),
-      signatureHtml: template.signatureHtml,
+      // Fase 2 (R2) — always the mailbox's current signature, never the
+      // stored (now write-once-at-creation, otherwise unused) column — a
+      // Plantilla has no independent signature draft anymore.
+      signatureHtml: await this.getSignatureHtmlForMailbox(organizationId, template.mailboxId),
     };
   }
 
@@ -262,20 +272,10 @@ export class SequenceTemplatesService {
         ? await this.validateTemplateName(organizationId, ownerUserId, template.mailboxId, input.name, id)
         : undefined;
 
-    const signatureHtml =
-      input.signatureHtml !== undefined
-        ? this.sanitizer.sanitizeSignatureHtml(
-            input.signatureHtml,
-            this.config.signatureAssetAllowedImageHost,
-            this.config.signatureAssetAllowInsecureImageHost,
-          )
-        : undefined;
-
     await this.templates.update(id, {
       name,
       description: input.description,
       subjectTemplate: input.subjectTemplate,
-      signatureHtml,
       currentDraftVersion: template.currentDraftVersion + 1,
     });
     await this.audit.record({
@@ -315,7 +315,19 @@ export class SequenceTemplatesService {
       }
     }
 
-    const bodyHtml = input.bodyHtml !== undefined ? this.sanitizer.sanitize(input.bodyHtml) : undefined;
+    // Fase 2 (R2), §15 — host-restricted, same as a mailbox's signature: an
+    // <img src> in the body may only point at our own R2 public host, never
+    // an arbitrary external URL (previously used the unrestricted
+    // `sanitize()`, which is exactly the gap documented in
+    // docs/email-body-images-r2-phase2-plan.md §1).
+    const bodyHtml =
+      input.bodyHtml !== undefined
+        ? this.sanitizer.sanitizeSignatureHtml(
+            input.bodyHtml,
+            this.config.signatureAssetAllowedImageHost,
+            this.config.signatureAssetAllowInsecureImageHost,
+          )
+        : undefined;
     const bodyText = input.plainTextBody?.trim() || (bodyHtml !== undefined ? htmlToPlainText(bodyHtml) : undefined);
     const headerText = input.headerText !== undefined ? input.headerText?.trim() || null : undefined;
 

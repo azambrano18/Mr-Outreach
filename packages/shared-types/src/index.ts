@@ -50,6 +50,18 @@ export interface ResetPasswordResult {
   temporaryPassword: string;
 }
 
+/** Preview shown in the "Eliminar usuario" confirmation modal — see apps/api's UsersService.getDeletionImpact, which is the only place these numbers are actually computed and re-checked. */
+export interface DeletionImpact {
+  roleName: string;
+  isProtectedSystemAccount: boolean;
+  isSelf: boolean;
+  isLastActiveAdmin: boolean;
+  primaryMailboxCount: number;
+  secondaryMailboxCount: number;
+  activeExecutionCount: number;
+  canDelete: boolean;
+}
+
 export interface RoleSummary {
   id: string;
   organizationId: string;

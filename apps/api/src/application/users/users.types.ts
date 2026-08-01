@@ -37,3 +37,15 @@ export interface UpdateExecutiveInput {
   email?: string;
   roleId?: string;
 }
+
+/** Preview shown in the "Eliminar usuario" confirmation modal before the actual DELETE call — never used to enforce anything by itself, `UsersService.remove` re-derives and re-checks every one of these independently. */
+export interface DeletionImpact {
+  roleName: string;
+  isProtectedSystemAccount: boolean;
+  isSelf: boolean;
+  isLastActiveAdmin: boolean;
+  primaryMailboxCount: number;
+  secondaryMailboxCount: number;
+  activeExecutionCount: number;
+  canDelete: boolean;
+}

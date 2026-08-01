@@ -9,6 +9,7 @@ describe('Users (e2e) — memory + mock', () => {
   let executiveToken: string;
   let executiveRoleId: string;
   let adminRoleId: string;
+  let adminUserId: string;
 
   const adminEmail = process.env.DEV_ADMIN_EMAIL as string;
   const adminPassword = process.env.DEV_ADMIN_PASSWORD as string;
@@ -33,6 +34,9 @@ describe('Users (e2e) — memory + mock', () => {
       .set('Authorization', `Bearer ${adminToken}`);
     executiveRoleId = roles.body.find((role: { name: string }) => role.name === 'EXECUTIVE').id;
     adminRoleId = roles.body.find((role: { name: string }) => role.name === 'ADMIN').id;
+
+    const me = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${adminToken}`);
+    adminUserId = me.body.id;
   });
 
   afterAll(async () => {
@@ -300,7 +304,7 @@ describe('Users (e2e) — memory + mock', () => {
       expect(response.status).toBe(403);
     });
 
-    it('an admin cannot delete another ADMIN through this endpoint', async () => {
+    it('an admin can delete another admin while at least one other active admin remains', async () => {
       const created = await request(app.getHttpServer())
         .post('/users')
         .set('Authorization', `Bearer ${adminToken}`)
@@ -310,7 +314,38 @@ describe('Users (e2e) — memory + mock', () => {
         .delete(`/users/${created.body.id}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
-      expect(response.status).toBe(409);
+      expect(response.status).toBe(204);
+
+      const listResponse = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(listResponse.body.map((u: { email: string }) => u.email)).not.toContain('otro.admin@mejoreferido.cl');
+    });
+
+    it('an admin cannot delete their own account', async () => {
+      const response = await request(app.getHttpServer())
+        .delete(`/users/${adminUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects deleting the protected system account (sistema@mejoreferido.cl) through the API, even as a direct request', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Sistema', lastName: 'Protegido', email: 'sistema@mejoreferido.cl', roleId: adminRoleId });
+      expect(created.status).toBe(201);
+
+      const response = await request(app.getHttpServer())
+        .delete(`/users/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(response.status).toBe(403);
+
+      const listResponse = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(listResponse.body.map((u: { email: string }) => u.email)).toContain('sistema@mejoreferido.cl');
     });
 
     it('an admin deletes an executive with no dependencies: it disappears from listings and can no longer log in', async () => {
@@ -368,6 +403,56 @@ describe('Users (e2e) — memory + mock', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(secondDelete.status).toBe(404);
+    });
+  });
+
+  describe('GET /users/:id/deletion-impact', () => {
+    it('previews zero counts and canDelete=true for a clean executive', async () => {
+      const { id } = await createReadyExecutive(app, adminToken, {
+        name: 'Sin Dependencias',
+        email: 'sin.dependencias@mejoreferido.cl',
+        roleId: executiveRoleId,
+      });
+
+      const response = await request(app.getHttpServer())
+        .get(`/users/${id}/deletion-impact`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        roleName: 'EXECUTIVE',
+        isProtectedSystemAccount: false,
+        isSelf: false,
+        isLastActiveAdmin: false,
+        primaryMailboxCount: 0,
+        secondaryMailboxCount: 0,
+        activeExecutionCount: 0,
+        canDelete: true,
+      });
+    });
+
+    it('flags isSelf=true and canDelete=false when previewing the caller’s own account', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/users/${adminUserId}/deletion-impact`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.isSelf).toBe(true);
+      expect(response.body.canDelete).toBe(false);
+    });
+
+    it('an executive (no users.delete permission) cannot preview a deletion impact', async () => {
+      const { id } = await createReadyExecutive(app, adminToken, {
+        name: 'Sin Permiso',
+        email: 'sin.permiso@mejoreferido.cl',
+        roleId: executiveRoleId,
+      });
+
+      const response = await request(app.getHttpServer())
+        .get(`/users/${id}/deletion-impact`)
+        .set('Authorization', `Bearer ${executiveToken}`);
+
+      expect(response.status).toBe(403);
     });
   });
 });

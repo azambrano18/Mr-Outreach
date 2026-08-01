@@ -207,10 +207,16 @@ describe('envValidationSchema', () => {
     expect(error?.message).toMatch(/R2_SIGNATURE_PREFIX/);
   });
 
-  it('Fase Firma — accepts the default R2_SIGNATURE_PREFIX', () => {
+  it('Fase 2 (R2) — accepts the default R2_SIGNATURE_PREFIX and R2_EMAIL_BODY_PREFIX', () => {
     const { error, value } = envValidationSchema.validate(BASE_MEMORY_ENV);
     expect(error).toBeUndefined();
-    expect(value.R2_SIGNATURE_PREFIX).toBe('signatures');
+    expect(value.R2_SIGNATURE_PREFIX).toBe('firmas');
+    expect(value.R2_EMAIL_BODY_PREFIX).toBe('email-body');
+  });
+
+  it('Fase 2 (R2) — rejects an unsafe R2_EMAIL_BODY_PREFIX (path traversal / leading slash)', () => {
+    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, R2_EMAIL_BODY_PREFIX: '../etc' });
+    expect(error?.message).toMatch(/R2_EMAIL_BODY_PREFIX/);
   });
 
   it('rejects a CREDENTIALS_ENCRYPTION_KEY that does not decode to exactly 32 bytes', () => {

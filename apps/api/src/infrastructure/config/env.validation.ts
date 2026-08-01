@@ -140,7 +140,11 @@ export const envValidationSchema = Joi.object({
   // Safe path segment only — no leading/trailing slash, no "..", no spaces.
   R2_SIGNATURE_PREFIX: Joi.string()
     .pattern(/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/)
-    .default('signatures'),
+    .default('firmas'),
+  // Fase 2 (R2), §7 — a separate prefix for email-body images, never mixed with R2_SIGNATURE_PREFIX.
+  R2_EMAIL_BODY_PREFIX: Joi.string()
+    .pattern(/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/)
+    .default('email-body'),
 
   AUTH_SECRET: Joi.string().min(16).required(),
 

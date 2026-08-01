@@ -7,6 +7,10 @@ import { AuditLogEntry } from '../../domain/audit/audit-log.entity';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { AUDIT_LOG_REPOSITORY } from '../../infrastructure/persistence/tokens';
 import { DeleteMailboxUseCase } from '../../application/mailboxes/delete-mailbox.use-case';
+import {
+  RetryMailboxAssetCleanupResult,
+  RetryMailboxAssetCleanupUseCase,
+} from '../../application/mailboxes/retry-mailbox-asset-cleanup.use-case';
 import { IntrospectLinkTokenResult, LinkMailboxResult, LinkMailboxUseCase } from '../../application/mailboxes/link-mailbox.use-case';
 import {
   ReassignMailboxPrimaryExecutiveResult,
@@ -61,6 +65,7 @@ export class MailboxesController {
     private readonly reassignPrimaryExecutive: ReassignMailboxPrimaryExecutiveUseCase,
     private readonly unlinkMailboxUseCase: UnlinkMailboxUseCase,
     private readonly deleteMailboxUseCase: DeleteMailboxUseCase,
+    private readonly retryAssetCleanupUseCase: RetryMailboxAssetCleanupUseCase,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
   ) {}
 
@@ -110,6 +115,16 @@ export class MailboxesController {
   @RequirePermissions('mailboxes.delete')
   async remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
     await this.deleteMailboxUseCase.execute({ organizationId: user.organizationId, mailboxId: id, actorId: user.id });
+  }
+
+  /** Fase 2 (R2), §22 — retries a failed R2 asset-folder purge for an already-deleted mailbox. Idempotent. */
+  @Post(':id/retry-asset-cleanup')
+  @RequirePermissions('mailboxes.delete')
+  async retryAssetCleanup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<RetryMailboxAssetCleanupResult> {
+    return this.retryAssetCleanupUseCase.execute(user.organizationId, id, user.id);
   }
 
   /**

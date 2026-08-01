@@ -1,9 +1,24 @@
 import { INestApplication } from '@nestjs/common';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
 import { ConversationRepository } from '../src/domain/conversation/conversation.repository';
 import { CONVERSATION_REPOSITORY } from '../src/infrastructure/persistence/tokens';
 import { SimulatedMailboxMotorAdapter } from '../src/infrastructure/mailbox-motor/simulated/simulated-mailbox-motor-adapter';
+
+/** Fase 2 (R2) — a real, valid single-color PNG (correct IHDR width/height), so getImageDimensions() can parse it — not just magic-byte-recognizable. */
+function validPng(width: number, height: number): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(13, 0);
+  const chunkType = Buffer.from('IHDR', 'ascii');
+  const widthBuf = Buffer.alloc(4);
+  widthBuf.writeUInt32BE(width, 0);
+  const heightBuf = Buffer.alloc(4);
+  heightBuf.writeUInt32BE(height, 0);
+  return Buffer.concat([signature, length, chunkType, widthBuf, heightBuf, Buffer.alloc(8)]);
+}
 
 /**
  * Fase 2.1 (e2e) — the 5 admin-facing HTTP endpoints for token-based
@@ -510,6 +525,113 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
 
       const response = await request(app.getHttpServer())
         .delete(`/mailboxes/${linkResponse.body.mailboxId}`)
+        .set('Authorization', `Bearer ${executiveToken}`);
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe('Fase 2 (R2) — signature-asset upload + mailbox deletion purges firmas/{correo}/ only', () => {
+    async function linkUnlinkableMailbox(email: string, idempotencySuffix: string) {
+      const token = issueToken({ email });
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-r2-link-${idempotencySuffix}`)
+        .send({ token, primaryExecutiveId: executiveId });
+      return linkResponse.body.mailboxId as string;
+    }
+
+    async function unlinkMailbox(mailboxId: string, idempotencySuffix: string) {
+      await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-r2-unlink-${idempotencySuffix}`)
+        .send({ reason: 'Cuenta dada de baja en e2e (R2)' });
+    }
+
+    async function uploadSignatureAsset(mailboxId: string) {
+      const response = await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/signature-assets`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .attach('file', validPng(240, 90), 'logo.png');
+      expect(response.status).toBe(201);
+      return response.body as { assetId: string; publicUrl: string };
+    }
+
+    it('uploads a signature image keyed under firmas/{correo-normalizado}/ and the file exists on disk (simulated adapter)', async () => {
+      const email = `firma-e2e-${stamp}-a@e2e.test`;
+      const mailboxId = await linkUnlinkableMailbox(email, `${stamp}-a`);
+
+      const asset = await uploadSignatureAsset(mailboxId);
+
+      expect(asset.publicUrl).toContain(`firmas/${email}/`);
+      const objectKey = `firmas/${email}/${asset.assetId}.png`;
+      expect(existsSync(join(process.cwd(), 'uploads', objectKey))).toBe(true);
+    });
+
+    it('deleting the mailbox purges its entire firmas/{correo}/ folder, but leaves a different mailbox\'s folder untouched', async () => {
+      const emailToDelete = `firma-e2e-${stamp}-b@e2e.test`;
+      const emailToKeep = `firma-e2e-${stamp}-c@e2e.test`;
+      const mailboxToDelete = await linkUnlinkableMailbox(emailToDelete, `${stamp}-b`);
+      const mailboxToKeep = await linkUnlinkableMailbox(emailToKeep, `${stamp}-c`);
+
+      const assetToDelete = await uploadSignatureAsset(mailboxToDelete);
+      const assetToKeep = await uploadSignatureAsset(mailboxToKeep);
+      const keyToDelete = `firmas/${emailToDelete}/${assetToDelete.assetId}.png`;
+      const keyToKeep = `firmas/${emailToKeep}/${assetToKeep.assetId}.png`;
+      expect(existsSync(join(process.cwd(), 'uploads', keyToDelete))).toBe(true);
+      expect(existsSync(join(process.cwd(), 'uploads', keyToKeep))).toBe(true);
+
+      await unlinkMailbox(mailboxToDelete, `${stamp}-b`);
+      const deleteResponse = await request(app.getHttpServer())
+        .delete(`/mailboxes/${mailboxToDelete}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deleteResponse.status).toBe(204);
+
+      expect(existsSync(join(process.cwd(), 'uploads', keyToDelete))).toBe(false);
+      // §21 — a sibling mailbox's folder must never be touched by another account's deletion.
+      expect(existsSync(join(process.cwd(), 'uploads', keyToKeep))).toBe(true);
+    });
+
+    it('records mailbox.asset_cleanup_completed in the audit log after a successful deletion', async () => {
+      const email = `firma-e2e-${stamp}-d@e2e.test`;
+      const mailboxId = await linkUnlinkableMailbox(email, `${stamp}-d`);
+      await uploadSignatureAsset(mailboxId);
+      await unlinkMailbox(mailboxId, `${stamp}-d`);
+
+      await request(app.getHttpServer()).delete(`/mailboxes/${mailboxId}`).set('Authorization', `Bearer ${adminToken}`);
+
+      const auditResponse = await request(app.getHttpServer())
+        .get(`/mailboxes/${mailboxId}/audit-log`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      const actions = auditResponse.body.map((entry: { action: string }) => entry.action);
+      expect(actions).toContain('mailbox.delete');
+      expect(actions).toContain('mailbox.asset_cleanup_completed');
+    });
+
+    it('POST /mailboxes/:id/retry-asset-cleanup is idempotent — retrying an already-COMPLETED cleanup succeeds without re-purging', async () => {
+      const email = `firma-e2e-${stamp}-e@e2e.test`;
+      const mailboxId = await linkUnlinkableMailbox(email, `${stamp}-e`);
+      await unlinkMailbox(mailboxId, `${stamp}-e`);
+      await request(app.getHttpServer()).delete(`/mailboxes/${mailboxId}`).set('Authorization', `Bearer ${adminToken}`);
+
+      const retryResponse = await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/retry-asset-cleanup`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(retryResponse.status).toBe(201);
+      expect(retryResponse.body.assetCleanupStatus).toBe('COMPLETED');
+    });
+
+    it('an executive without mailboxes.delete cannot retry an asset cleanup', async () => {
+      const email = `firma-e2e-${stamp}-f@e2e.test`;
+      const mailboxId = await linkUnlinkableMailbox(email, `${stamp}-f`);
+      await unlinkMailbox(mailboxId, `${stamp}-f`);
+      await request(app.getHttpServer()).delete(`/mailboxes/${mailboxId}`).set('Authorization', `Bearer ${adminToken}`);
+
+      const response = await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/retry-asset-cleanup`)
         .set('Authorization', `Bearer ${executiveToken}`);
 
       expect(response.status).toBe(403);

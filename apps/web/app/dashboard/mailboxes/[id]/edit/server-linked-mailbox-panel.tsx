@@ -487,6 +487,11 @@ export function ServerLinkedMailboxPanel({
             Esta acción elimina la cuenta de Mr Outreach: dejará de aparecer en Cuentas de Correo y en cualquier
             selector. No es reversible desde la interfaz. El historial de auditoría se conserva.
           </p>
+          <p className="text-sm text-red-800">
+            Al eliminar esta cuenta también se eliminarán definitivamente las imágenes de su firma
+            almacenadas en Cloudflare R2. Las imágenes podrían dejar de visualizarse en correos
+            históricos que ya las incluyan.
+          </p>
           {!confirmingDelete ? (
             <button
               type="button"

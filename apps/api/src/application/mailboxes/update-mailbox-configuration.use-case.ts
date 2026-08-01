@@ -18,6 +18,7 @@ import {
   SIGNATURE_VERSION_REPOSITORY,
   TRANSACTION_MANAGER,
 } from '../../infrastructure/persistence/tokens';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { htmlToPlainText } from '../../infrastructure/security/html-to-plain-text';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
@@ -99,6 +100,7 @@ export class UpdateMailboxConfigurationUseCase {
     private readonly eligibility: ClientEligibilityService,
     private readonly secrets: SecretEncryptionService,
     private readonly htmlSanitizer: HtmlSanitizerService,
+    private readonly config: AppConfigService,
     private readonly idempotency: IdempotentOperationService,
     private readonly integration: IntegrationService,
     private readonly executiveValidator: MailboxExecutiveAssignmentValidator,
@@ -411,7 +413,11 @@ export class UpdateMailboxConfigurationUseCase {
 
   private normalizeSignatureHtml(signatureHtml: string | null | undefined): string | null {
     if (!signatureHtml) return null;
-    const sanitized = this.htmlSanitizer.sanitize(signatureHtml);
+    const sanitized = this.htmlSanitizer.sanitizeSignatureHtml(
+      signatureHtml,
+      this.config.signatureAssetAllowedImageHost,
+      this.config.signatureAssetAllowInsecureImageHost,
+    );
     const plain = htmlToPlainText(sanitized).trim();
     return plain.length > 0 ? sanitized : null;
   }

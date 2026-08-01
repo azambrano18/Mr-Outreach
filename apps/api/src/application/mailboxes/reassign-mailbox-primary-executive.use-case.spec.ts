@@ -41,7 +41,7 @@ describe('ReassignMailboxPrimaryExecutiveUseCase', () => {
   }
 
   beforeEach(() => {
-    mailboxes = { findById: jest.fn().mockResolvedValue(mailbox), findByEmail: jest.fn(), findByServerMailboxId: jest.fn(), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
+    mailboxes = { findById: jest.fn().mockResolvedValue(mailbox), findByIdIncludingDeleted: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn(), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
     assignments = {
       upsert: jest.fn(),
       remove: jest.fn(),

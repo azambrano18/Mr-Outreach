@@ -87,8 +87,12 @@ export class PublishSequenceTemplateUseCase {
     // §3 — fail-closed re-check, even though validateForPublish above already checked it moments ago.
     const mailbox = await this.eligibility.requireEligible(input.organizationId, input.actorId, template.mailboxId);
     const stepRows = (await this.templatesService.getStepsForPublish(template.id)).sort((a, b) => a.stepNumber - b.stepNumber);
-    // Fase Firma — the template's own signature draft, authored in its editor; never re-read from the mailbox at publish time anymore.
-    const signatureHtml = template.signatureHtml;
+    // Fase 2 (R2) — reverted back to the mailbox's live signature: a mailbox
+    // has exactly one signature, shared by every one of its Plantillas: the
+    // template no longer owns an independent, divergeable draft (see
+    // SequenceTemplatesService.update). Frozen into this immutable version
+    // right now, same as every other publish-time snapshot.
+    const signatureHtml = await this.templatesService.getSignatureHtmlForMailbox(input.organizationId, template.mailboxId);
 
     const variableKeys = [
       ...new Set([

@@ -56,7 +56,7 @@ describe('LinkMailboxUseCase', () => {
 
   beforeEach(() => {
     domains = { findById: jest.fn(), findByClient: jest.fn(), findByName: jest.fn().mockResolvedValue(null), findAll: jest.fn(), create: jest.fn(), update: jest.fn() };
-    mailboxes = { findById: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn().mockResolvedValue(null), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
+    mailboxes = { findById: jest.fn(), findByIdIncludingDeleted: jest.fn(), findByEmail: jest.fn(), findByServerMailboxId: jest.fn().mockResolvedValue(null), findAll: jest.fn(), create: jest.fn(), createLinked: jest.fn(), update: jest.fn() };
     assignments = { upsert: jest.fn(), remove: jest.fn(), findByMailbox: jest.fn(), findByUser: jest.fn(), findAllByOrganization: jest.fn().mockResolvedValue([]) };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
     motor = {

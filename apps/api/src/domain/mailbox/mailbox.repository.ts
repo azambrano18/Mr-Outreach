@@ -3,6 +3,8 @@ import { CreateLinkedMailboxInput, CreateMailboxInput, Mailbox, UpdateMailboxInp
 
 export interface MailboxRepository {
   findById(id: string, ctx?: TransactionContext): Promise<Mailbox | null>;
+  /** Fase 2 (R2), §22 — the only lookup that DOES return an already-deleted mailbox; used exclusively by RetryMailboxAssetCleanupUseCase, since a deleted mailbox's failed R2 cleanup must still be retryable. */
+  findByIdIncludingDeleted(id: string, ctx?: TransactionContext): Promise<Mailbox | null>;
   findByEmail(organizationId: string, email: string, ctx?: TransactionContext): Promise<Mailbox | null>;
   /** Fase 2.1 — lookup by the motor's own identifier, used to enforce "one Mr Outreach mailbox per serverMailboxId" before creating one. */
   findByServerMailboxId(serverMailboxId: string, ctx?: TransactionContext): Promise<Mailbox | null>;

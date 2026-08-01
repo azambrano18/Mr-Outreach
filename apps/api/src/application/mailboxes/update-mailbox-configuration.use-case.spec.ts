@@ -6,6 +6,7 @@ import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
 import { SignatureVersionRepository } from '../../domain/signature/signature-version.repository';
 import { SignatureRepository } from '../../domain/signature/signature.repository';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
 import { ClientEligibilityService } from '../clients/client-eligibility.service';
@@ -31,7 +32,8 @@ describe('UpdateMailboxConfigurationUseCase', () => {
   let auditLogs: jest.Mocked<AuditLogRepository>;
   let eligibility: jest.Mocked<Pick<ClientEligibilityService, 'assertEligibleForPublish'>>;
   let secrets: jest.Mocked<Pick<SecretEncryptionService, 'encrypt' | 'decrypt'>>;
-  let htmlSanitizer: jest.Mocked<Pick<HtmlSanitizerService, 'sanitize'>>;
+  let htmlSanitizer: jest.Mocked<Pick<HtmlSanitizerService, 'sanitize' | 'sanitizeSignatureHtml'>>;
+  let config: Pick<AppConfigService, 'signatureAssetAllowedImageHost' | 'signatureAssetAllowInsecureImageHost'>;
   let idempotency: jest.Mocked<Pick<IdempotentOperationService, 'checkExisting' | 'claim' | 'refreshResultSnapshot'>>;
   let integration: jest.Mocked<Pick<IntegrationService, 'dispatchExistingCommand' | 'advance'>>;
   let executiveValidator: jest.Mocked<Pick<MailboxExecutiveAssignmentValidator, 'plan' | 'validate'>>;
@@ -68,6 +70,7 @@ describe('UpdateMailboxConfigurationUseCase', () => {
   beforeEach(() => {
     mailboxes = {
       findById: jest.fn().mockResolvedValue(baseMailbox),
+      findByIdIncludingDeleted: jest.fn(),
       findByEmail: jest.fn(),
       findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),
@@ -88,7 +91,11 @@ describe('UpdateMailboxConfigurationUseCase', () => {
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
     eligibility = { assertEligibleForPublish: jest.fn().mockResolvedValue(undefined) };
     secrets = { encrypt: jest.fn((v: string) => `enc(${v})`), decrypt: jest.fn() };
-    htmlSanitizer = { sanitize: jest.fn((html: string) => html) };
+    htmlSanitizer = {
+      sanitize: jest.fn((html: string) => html),
+      sanitizeSignatureHtml: jest.fn((html: string, _host: string, _allowInsecure?: boolean) => html),
+    };
+    config = { signatureAssetAllowedImageHost: 'localhost', signatureAssetAllowInsecureImageHost: true };
     idempotency = {
       checkExisting: jest.fn().mockResolvedValue(null),
       claim: jest.fn(),
@@ -141,6 +148,7 @@ describe('UpdateMailboxConfigurationUseCase', () => {
       eligibility as unknown as ClientEligibilityService,
       secrets as unknown as SecretEncryptionService,
       htmlSanitizer as unknown as HtmlSanitizerService,
+      config as unknown as AppConfigService,
       idempotency as unknown as IdempotentOperationService,
       integration as unknown as IntegrationService,
       executiveValidator as unknown as MailboxExecutiveAssignmentValidator,
@@ -255,7 +263,7 @@ describe('UpdateMailboxConfigurationUseCase', () => {
 
   it('signature explicitly sent empty (normalizes to nothing) archives the existing signature — never a hard delete', async () => {
     signatures.findByMailbox.mockResolvedValue({ id: 'sig_1', organizationId: orgId, mailboxId: 'mailbox_1', status: 'ACTIVE', activeVersionId: 'v1' } as never);
-    htmlSanitizer.sanitize.mockReturnValue('');
+    htmlSanitizer.sanitizeSignatureHtml.mockReturnValue('');
 
     await useCase.execute(baseInput({ signatureHtml: '' }));
 

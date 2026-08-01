@@ -3,17 +3,29 @@
 import { ImagePlus } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-export function ImageUploadButton({ onUploaded }: { onUploaded: (url: string) => void }) {
+export function ImageUploadButton({
+  onUploaded,
+  uploadUrl = '/api/uploads/images',
+  maxBytes = DEFAULT_MAX_IMAGE_BYTES,
+  accept = 'image/png,image/jpeg,image/gif,image/webp',
+}: {
+  onUploaded: (url: string) => void;
+  /** Fase 2 (R2) — which BFF proxy route to POST the multipart file to; defaults to the generic (legacy) uploads endpoint. */
+  uploadUrl?: string;
+  /** Client-side hint only (UX) — the server always re-validates for real. */
+  maxBytes?: number;
+  accept?: string;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleFile(file: File): Promise<void> {
     setError(null);
-    if (file.size > MAX_IMAGE_BYTES) {
-      setError('La imagen supera el tamaño máximo permitido (5 MB).');
+    if (file.size > maxBytes) {
+      setError(`La imagen supera el tamaño máximo permitido (${Math.round(maxBytes / (1024 * 1024))} MB).`);
       return;
     }
 
@@ -21,14 +33,16 @@ export function ImageUploadButton({ onUploaded }: { onUploaded: (url: string) =>
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const response = await fetch('/api/uploads/images', { method: 'POST', body: formData });
+      const response = await fetch(uploadUrl, { method: 'POST', body: formData });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setError(body.error ?? 'No se pudo subir la imagen.');
         return;
       }
-      const { url } = await response.json();
-      onUploaded(url);
+      const body = await response.json();
+      // The generic /uploads/images endpoint returns { url }; the
+      // signature/email-body asset endpoints return { publicUrl, ... }.
+      onUploaded(body.url ?? body.publicUrl);
     } catch {
       setError('No se pudo contactar la API. Intenta nuevamente.');
     } finally {
@@ -52,7 +66,7 @@ export function ImageUploadButton({ onUploaded }: { onUploaded: (url: string) =>
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
+        accept={accept}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];

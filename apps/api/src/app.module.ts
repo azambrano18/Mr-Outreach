@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { DomainsModule } from './modules/domains/domains.module';
+import { EmailBodyAssetsModule } from './modules/email-body-assets/email-body-assets.module';
 import { HealthModule } from './modules/health/health.module';
 import { IntegrationMonitorModule } from './modules/integration-monitor/integration-monitor.module';
 import { MailboxesModule } from './modules/mailboxes/mailboxes.module';
@@ -54,6 +55,7 @@ const NODE_ENV = process.env.NODE_ENV ?? 'development';
     SignaturesModule,
     UploadsModule,
     SignatureAssetsModule,
+    EmailBodyAssetsModule,
     SequencesModule,
     SequenceImportsModule,
     SequenceContactsModule,

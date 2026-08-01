@@ -18,6 +18,10 @@ export class InMemoryMailboxRepository implements MailboxRepository {
     return mailbox && !mailbox.deletedAt ? mailbox : null;
   }
 
+  async findByIdIncludingDeleted(id: string): Promise<Mailbox | null> {
+    return this.store.mailboxes.get(id) ?? null;
+  }
+
   async findByEmail(organizationId: string, email: string): Promise<Mailbox | null> {
     const normalized = email.toLowerCase();
     for (const mailbox of this.store.mailboxes.values()) {
@@ -99,6 +103,9 @@ export class InMemoryMailboxRepository implements MailboxRepository {
       revokedAt: null,
       revocationId: null,
       lastLinkCommandId: null,
+      assetCleanupStatus: 'NOT_NEEDED',
+      assetCleanupAttempts: 0,
+      lastAssetCleanupError: null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -155,6 +162,9 @@ export class InMemoryMailboxRepository implements MailboxRepository {
       revokedAt: null,
       revocationId: null,
       lastLinkCommandId: input.lastLinkCommandId,
+      assetCleanupStatus: 'NOT_NEEDED',
+      assetCleanupAttempts: 0,
+      lastAssetCleanupError: null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -165,9 +175,14 @@ export class InMemoryMailboxRepository implements MailboxRepository {
 
   async update(id: string, input: UpdateMailboxInput): Promise<Mailbox> {
     const existing = this.store.mailboxes.get(id);
-    if (!existing || existing.deletedAt) {
+    if (!existing) {
       throw new ConflictException('Mailbox not found.');
     }
+    // Fase 2 (R2) — an already-deleted mailbox must still be updatable for
+    // its assetCleanupStatus/Attempts/lastAssetCleanupError fields (see
+    // DeleteMailboxUseCase's post-commit cleanup and
+    // RetryMailboxAssetCleanupUseCase). Matches PrismaMailboxRepository.update,
+    // which never filtered by deletedAt either.
 
     const updated: Mailbox = {
       ...existing,

@@ -8,6 +8,7 @@ import { MailboxProvisioningEventApplier } from '../../application/mailboxes/mai
 import { MailboxProvisioningService } from '../../application/mailboxes/mailbox-provisioning.service';
 import { MailboxesService } from '../../application/mailboxes/mailboxes.service';
 import { ReassignMailboxPrimaryExecutiveUseCase } from '../../application/mailboxes/reassign-mailbox-primary-executive.use-case';
+import { RetryMailboxAssetCleanupUseCase } from '../../application/mailboxes/retry-mailbox-asset-cleanup.use-case';
 import { UnlinkMailboxUseCase } from '../../application/mailboxes/unlink-mailbox.use-case';
 import { UpdateMailboxConfigurationUseCase } from '../../application/mailboxes/update-mailbox-configuration.use-case';
 import { IdempotencyModule } from '../../application/idempotency/idempotency.module';
@@ -15,6 +16,7 @@ import { EngineModule } from '../../infrastructure/engine/engine.module';
 import { MailboxMotorModule } from '../../infrastructure/mailbox-motor/mailbox-motor.module';
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { SecurityModule } from '../../infrastructure/security/security.module';
+import { SignatureAssetStorageModule } from '../../infrastructure/signature-asset-storage/signature-asset-storage.module';
 import { AuthModule } from '../auth/auth.module';
 import { ClientEligibilityModule } from '../clients/client-eligibility.module';
 import { ClientsModule } from '../clients/clients.module';
@@ -35,6 +37,7 @@ import { MeController } from './me.controller';
     ClientEligibilityModule,
     IdempotencyModule,
     MailboxMotorModule,
+    SignatureAssetStorageModule,
     // Fase 2.1 §17 — only link-token/introspect uses @UseGuards(ThrottlerGuard); every
     // other route here is unaffected since ThrottlerGuard is never registered as a global APP_GUARD.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
@@ -51,6 +54,7 @@ import { MeController } from './me.controller';
     ReassignMailboxPrimaryExecutiveUseCase,
     UnlinkMailboxUseCase,
     DeleteMailboxUseCase,
+    RetryMailboxAssetCleanupUseCase,
   ],
   exports: [
     MailboxesService,
@@ -63,6 +67,7 @@ import { MeController } from './me.controller';
     ReassignMailboxPrimaryExecutiveUseCase,
     UnlinkMailboxUseCase,
     DeleteMailboxUseCase,
+    RetryMailboxAssetCleanupUseCase,
   ],
 })
 export class MailboxesModule {}

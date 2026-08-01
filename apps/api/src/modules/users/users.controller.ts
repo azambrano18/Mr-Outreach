@@ -3,13 +3,14 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ManagedClientSummary } from '../../application/clients/clients.types';
 import { ClientsService } from '../../application/clients/clients.service';
 import { UsersService } from '../../application/users/users.service';
-import { CreateUserResult, ResetPasswordResult, UserSummary } from '../../application/users/users.types';
+import { CreateUserResult, DeletionImpact, ResetPasswordResult, UserSummary } from '../../application/users/users.types';
 import { AuthenticatedUser } from '../../application/auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { CreateUserDto } from './dto/create-user.dto';
+import { DeleteUserDto } from './dto/delete-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @ApiTags('users')
@@ -74,11 +75,17 @@ export class UsersController {
     return this.usersService.resetPassword(user.organizationId, id, user.id);
   }
 
+  @Get(':id/deletion-impact')
+  @RequirePermissions('users.delete')
+  getDeletionImpact(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<DeletionImpact> {
+    return this.usersService.getDeletionImpact(user.organizationId, id, user.id);
+  }
+
   @Delete(':id')
   @HttpCode(204)
   @RequirePermissions('users.delete')
-  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
-    return this.usersService.remove(user.organizationId, id, user.id);
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: DeleteUserDto): Promise<void> {
+    return this.usersService.remove(user.organizationId, id, user.id, dto?.reason);
   }
 
   @Get(':id/clients')

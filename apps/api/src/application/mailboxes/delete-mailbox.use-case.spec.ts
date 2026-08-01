@@ -7,6 +7,8 @@ import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
 import { SequenceExecution, SequenceExecutionStatus } from '../../domain/sequence-execution/sequence-execution.entity';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
+import { SignatureAssetStoragePort } from '../../domain/signature-asset-storage/signature-asset-storage.port';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { DeleteMailboxUseCase } from './delete-mailbox.use-case';
 
 class FakeTransactionManager implements TransactionManager {
@@ -20,6 +22,8 @@ describe('DeleteMailboxUseCase', () => {
   let assignments: jest.Mocked<MailboxAssignmentRepository>;
   let sequenceExecutions: jest.Mocked<SequenceExecutionRepository>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
+  let storage: jest.Mocked<Pick<SignatureAssetStoragePort, 'deleteObjectsByPrefix'>>;
+  let config: Pick<AppConfigService, 'r2SignaturePrefix'>;
   let useCase: DeleteMailboxUseCase;
 
   const orgId = 'org_1';
@@ -31,6 +35,9 @@ describe('DeleteMailboxUseCase', () => {
       organizationId: orgId,
       email: 'ventas@example.com',
       linkStatus: 'REVOKED' as MailboxLinkStatus,
+      assetCleanupStatus: 'NOT_NEEDED',
+      assetCleanupAttempts: 0,
+      lastAssetCleanupError: null,
       ...overrides,
     }) as Mailbox;
 
@@ -57,12 +64,16 @@ describe('DeleteMailboxUseCase', () => {
   beforeEach(() => {
     mailboxes = {
       findById: jest.fn().mockResolvedValue(buildMailbox()),
+      findByIdIncludingDeleted: jest.fn(),
       findByEmail: jest.fn(),
       findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
       createLinked: jest.fn(),
-      update: jest.fn(),
+      update: jest.fn().mockImplementation(async (id: string, patch: Partial<Mailbox>) => {
+        const base = (await mailboxes.findById(id)) ?? buildMailbox();
+        return { ...base, ...patch };
+      }),
     };
     assignments = {
       upsert: jest.fn(),
@@ -82,6 +93,8 @@ describe('DeleteMailboxUseCase', () => {
       conditionalUpdateStatus: jest.fn(),
     };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
+    storage = { deleteObjectsByPrefix: jest.fn().mockResolvedValue({ deletedCount: 0 }) };
+    config = { r2SignaturePrefix: 'firmas' };
 
     useCase = new DeleteMailboxUseCase(
       new FakeTransactionManager(),
@@ -89,20 +102,54 @@ describe('DeleteMailboxUseCase', () => {
       assignments,
       sequenceExecutions,
       auditLogs,
+      storage as unknown as SignatureAssetStoragePort,
+      config as unknown as AppConfigService,
     );
   });
 
-  it('soft-deletes a REVOKED mailbox with no dependencies and audits the action', async () => {
+  it('soft-deletes a REVOKED mailbox with no dependencies, audits the action, and marks cleanup PENDING then COMPLETED', async () => {
     await useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' });
 
     expect(mailboxes.update).toHaveBeenCalledWith(
       'mailbox_1',
-      { deletedAt: expect.any(Date) },
+      { deletedAt: expect.any(Date), assetCleanupStatus: 'PENDING' },
       expect.anything(),
     );
+    expect(mailboxes.update).toHaveBeenCalledWith('mailbox_1', { assetCleanupStatus: 'COMPLETED' });
     expect(auditLogs.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'mailbox.delete', entityId: 'mailbox_1' }),
       expect.anything(),
+    );
+    expect(auditLogs.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'mailbox.asset_cleanup_completed', entityId: 'mailbox_1' }),
+    );
+  });
+
+  it('Fase 2 (R2) — purges exactly firmas/{correo-normalizado}/ via deleteObjectsByPrefix', async () => {
+    await useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' });
+    expect(storage.deleteObjectsByPrefix).toHaveBeenCalledWith('firmas/ventas@example.com/');
+  });
+
+  it('Fase 2 (R2) — normalizes the mailbox email (trim/lowercase) before building the prefix', async () => {
+    mailboxes.findById.mockResolvedValue(buildMailbox({ email: '  Ventas@Example.COM  ' }));
+    await useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' });
+    expect(storage.deleteObjectsByPrefix).toHaveBeenCalledWith('firmas/ventas@example.com/');
+  });
+
+  it('Fase 2 (R2) — a failed R2 purge still lets the mailbox finish deleting, but marks cleanup FAILED with the error persisted', async () => {
+    storage.deleteObjectsByPrefix.mockRejectedValue(new Error('R2 unreachable'));
+
+    await expect(
+      useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
+    ).resolves.toBeUndefined();
+
+    expect(mailboxes.update).toHaveBeenCalledWith('mailbox_1', {
+      assetCleanupStatus: 'FAILED',
+      assetCleanupAttempts: 1,
+      lastAssetCleanupError: 'R2 unreachable',
+    });
+    expect(auditLogs.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'mailbox.asset_cleanup_failed', entityId: 'mailbox_1' }),
     );
   });
 
@@ -113,6 +160,7 @@ describe('DeleteMailboxUseCase', () => {
       useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
     ).rejects.toThrow(ConflictException);
     expect(mailboxes.update).not.toHaveBeenCalled();
+    expect(storage.deleteObjectsByPrefix).not.toHaveBeenCalled();
   });
 
   it('blocks deletion when the mailbox owns a non-terminal Gestión', async () => {

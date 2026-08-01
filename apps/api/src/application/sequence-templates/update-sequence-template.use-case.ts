@@ -88,8 +88,10 @@ export class UpdateSequenceTemplateUseCase {
       const mailbox = await this.eligibility.requireEligible(input.organizationId, input.actorId, template.mailboxId);
 
       const stepRows = (await this.templatesService.getStepsForPublish(template.id)).sort((a, b) => a.stepNumber - b.stepNumber);
-      // Fase Firma — the template's own current signature draft; a new version can carry a different signature than the one it's replacing (§12).
-      const signatureHtml = template.signatureHtml;
+      // Fase 2 (R2) — the mailbox's current live signature; a new version can
+      // carry a different signature than the one it's replacing (§12) since
+      // the account's signature may have changed since the last publish.
+      const signatureHtml = await this.templatesService.getSignatureHtmlForMailbox(input.organizationId, template.mailboxId);
 
       const variableKeys = [
         ...new Set([

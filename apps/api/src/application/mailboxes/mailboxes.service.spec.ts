@@ -79,6 +79,9 @@ describe('MailboxesService', () => {
     revokedAt: null,
     revocationId: null,
     lastLinkCommandId: null,
+    assetCleanupStatus: 'NOT_NEEDED',
+    assetCleanupAttempts: 0,
+    lastAssetCleanupError: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -116,6 +119,7 @@ describe('MailboxesService', () => {
   beforeEach(() => {
     mailboxes = {
       findById: jest.fn(),
+      findByIdIncludingDeleted: jest.fn(),
       findByEmail: jest.fn(),
       findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),

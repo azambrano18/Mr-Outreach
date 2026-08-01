@@ -151,7 +151,12 @@ export class AppConfigService {
   }
 
   get r2SignaturePrefix(): string {
-    return this.config.get<string>('R2_SIGNATURE_PREFIX', 'signatures');
+    return this.config.get<string>('R2_SIGNATURE_PREFIX', 'firmas');
+  }
+
+  /** Fase 2 (R2), §7 — email-body images live under their own, separate prefix, never mixed with `firmas/`. */
+  get r2EmailBodyPrefix(): string {
+    return this.config.get<string>('R2_EMAIL_BODY_PREFIX', 'email-body');
   }
 
   /** The one host a signature's `<img src>` is ever allowed to point at — see HtmlSanitizerService.sanitizeSignatureHtml. */

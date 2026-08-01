@@ -1,7 +1,9 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
+import { isProtectedSystemAccount } from '../../domain/user/protected-system-account';
 import { RoleRepository } from '../../domain/role/role.repository';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import { SequenceExecutionStatus } from '../../domain/sequence-execution/sequence-execution.entity';
@@ -21,6 +23,7 @@ import { generateTemporaryPassword } from './temporary-password.generator';
 import {
   CreateExecutiveInput,
   CreateUserResult,
+  DeletionImpact,
   ResetPasswordResult,
   UpdateExecutiveInput,
   UserSummary,
@@ -198,52 +201,70 @@ export class UsersService {
   }
 
   /**
-   * Soft-deletes an EXECUTIVE — never an ADMIN through this method. Every
-   * read path (`findById`, `findAll`, `findByEmail`, `findByEmailAnyOrganization`)
-   * already filters `deletedAt: null`, so once this commits the user
-   * instantly: disappears from every listing and selector, can no longer
-   * log in (login resolves via `findByEmailAnyOrganization`), and has any
-   * existing session invalidated on its very next request (`getAuthenticatedUser`
-   * resolves via `findById`). `status` is also set to INACTIVE as a second,
+   * Soft-deletes a user — ADMIN or EXECUTIVE, both go through this same
+   * method now. Every read path (`findById`, `findAll`, `findByEmail`,
+   * `findByEmailAnyOrganization`) already filters `deletedAt: null`, so
+   * once this commits the user instantly: disappears from every listing
+   * and selector, can no longer log in (login resolves via
+   * `findByEmailAnyOrganization`), and has any existing session
+   * invalidated on its very next request (`getAuthenticatedUser` resolves
+   * via `findById`). `status` is also set to INACTIVE as a second,
    * redundant signal — but `deletedAt` is the actual source of truth that
    * distinguishes "eliminado" from a merely deactivated (status=INACTIVE,
    * deletedAt=null) user.
    *
-   * Blocks deletion (ConflictException, never silently ignored) if the
-   * executive is still the PRIMARY assignee on any mailbox — those must be
-   * reassigned first, since a mailbox can never be left without a primary.
-   * Also blocks if they own any non-terminal (draft or still-running)
-   * Gestión — those must finish, fail, or get reassigned first. A
-   * SECONDARY assignment is not blocking: it's removed automatically as
+   * Unconditional blocks, checked before anything else and never
+   * bypassable by any caller regardless of permissions:
+   *   - the protected root account (`sistema@mejoreferido.cl`, matched by
+   *     email — see protected-system-account.ts — never by id, which
+   *     varies per environment);
+   *   - deleting one's own account (an admin must never lock themselves
+   *     out mid-session).
+   *
+   * Resolvable blocks (ConflictException — the caller can fix the
+   * condition and retry):
+   *   - this is the organization's last ACTIVE admin (deleting an already
+   *     -INACTIVE admin is fine — it doesn't remove an active one);
+   *   - still the PRIMARY assignee on any mailbox — a mailbox can never be
+   *     left without a primary;
+   *   - owns a non-terminal (draft or still-running) Gestión.
+   * A SECONDARY assignment is not blocking: it's removed automatically as
    * part of the deletion, since losing a secondary never leaves a mailbox
    * in an invalid state.
    */
-  async remove(organizationId: string, userId: string, actorId: string): Promise<void> {
+  async remove(organizationId: string, userId: string, actorId: string, reason?: string): Promise<void> {
     const existing = await this.getOwnedUser(organizationId, userId);
+
+    if (isProtectedSystemAccount(existing.email)) {
+      throw new ForbiddenException('Esta cuenta está protegida por el sistema y no puede eliminarse.');
+    }
+    if (existing.id === actorId) {
+      throw new ForbiddenException('No puedes eliminar tu propia cuenta mientras tienes una sesión activa.');
+    }
+
     const [role] = await this.userRoles.getRolesForUser(existing.id);
-    if (!role || role.name !== EXECUTIVE_ROLE_NAME) {
-      throw new ConflictException('Solo se pueden eliminar usuarios con rol Ejecutivo.');
+    const roleName = role?.name ?? null;
+
+    if (roleName === ADMIN_ROLE_NAME && existing.status === 'ACTIVE') {
+      const otherActiveAdmins = await this.countOtherActiveAdmins(organizationId, existing.id);
+      if (otherActiveAdmins === 0) {
+        throw new ConflictException('No es posible eliminar al último administrador activo de la organización.');
+      }
     }
 
-    const assignments = await this.mailboxAssignments.findByUser(existing.id);
-    const primaryAssignments = assignments.filter((assignment) => assignment.role === 'PRIMARY');
-    if (primaryAssignments.length > 0) {
+    const impact = await this.computeDeletionImpact(organizationId, existing);
+    if (impact.primaryMailboxCount > 0) {
       throw new ConflictException(
-        `Este ejecutivo es el principal de ${primaryAssignments.length} cuenta(s) de correo. Reasigna esas cuentas antes de eliminarlo.`,
+        `Este usuario es el principal de ${impact.primaryMailboxCount} cuenta(s) de correo. Reasigna esas cuentas antes de eliminarlo.`,
+      );
+    }
+    if (impact.activeExecutionCount > 0) {
+      throw new ConflictException(
+        `Este usuario tiene ${impact.activeExecutionCount} gestión(es) sin finalizar. Deben completarse, fallar o reasignarse antes de eliminarlo.`,
       );
     }
 
-    const executions = await this.sequenceExecutions.findByExecutive(organizationId, existing.id);
-    const activeExecutions = executions.filter((execution) =>
-      NON_TERMINAL_EXECUTION_STATUSES.includes(execution.status),
-    );
-    if (activeExecutions.length > 0) {
-      throw new ConflictException(
-        `Este ejecutivo tiene ${activeExecutions.length} gestión(es) sin finalizar. Deben completarse, fallar o reasignarse antes de eliminarlo.`,
-      );
-    }
-
-    const secondaryAssignments = assignments.filter((assignment) => assignment.role === 'SECONDARY');
+    const secondaryAssignments = impact.assignments.filter((assignment) => assignment.role === 'SECONDARY');
     for (const assignment of secondaryAssignments) {
       await this.mailboxAssignments.remove(assignment.mailboxId, existing.id);
     }
@@ -258,10 +279,85 @@ export class UsersService {
       entityId: userId,
       metadata: {
         email: existing.email,
-        roleName: role.name,
+        roleName: roleName ?? '—',
         secondaryAssignmentsRemoved: secondaryAssignments.length,
+        ...(reason ? { reason } : {}),
       },
     });
+  }
+
+  /**
+   * Read-only preview for the "Eliminar usuario" confirmation modal — shows
+   * the same counts and blockers `remove()` would enforce, computed the
+   * same way, so the modal never invents or estimates a number. Purely
+   * informational: `remove()` re-derives and re-checks every one of these
+   * independently and is the only method that can ever actually enforce
+   * them.
+   */
+  async getDeletionImpact(organizationId: string, userId: string, actorId: string): Promise<DeletionImpact> {
+    const existing = await this.getOwnedUser(organizationId, userId);
+    const [role] = await this.userRoles.getRolesForUser(existing.id);
+    const roleName = role?.name ?? null;
+    const protectedAccount = isProtectedSystemAccount(existing.email);
+    const isSelf = existing.id === actorId;
+
+    let isLastActiveAdmin = false;
+    if (roleName === ADMIN_ROLE_NAME && existing.status === 'ACTIVE') {
+      isLastActiveAdmin = (await this.countOtherActiveAdmins(organizationId, existing.id)) === 0;
+    }
+
+    const impact = await this.computeDeletionImpact(organizationId, existing);
+    const canDelete =
+      !protectedAccount &&
+      !isSelf &&
+      !isLastActiveAdmin &&
+      impact.primaryMailboxCount === 0 &&
+      impact.activeExecutionCount === 0;
+
+    return {
+      roleName: roleName ?? '—',
+      isProtectedSystemAccount: protectedAccount,
+      isSelf,
+      isLastActiveAdmin,
+      primaryMailboxCount: impact.primaryMailboxCount,
+      secondaryMailboxCount: impact.secondaryMailboxCount,
+      activeExecutionCount: impact.activeExecutionCount,
+      canDelete,
+    };
+  }
+
+  private async computeDeletionImpact(
+    organizationId: string,
+    user: User,
+  ): Promise<{
+    assignments: MailboxAssignment[];
+    primaryMailboxCount: number;
+    secondaryMailboxCount: number;
+    activeExecutionCount: number;
+  }> {
+    const assignments = await this.mailboxAssignments.findByUser(user.id);
+    const primaryMailboxCount = assignments.filter((assignment) => assignment.role === 'PRIMARY').length;
+    const secondaryMailboxCount = assignments.filter((assignment) => assignment.role === 'SECONDARY').length;
+
+    const executions = await this.sequenceExecutions.findByExecutive(organizationId, user.id);
+    const activeExecutionCount = executions.filter((execution) =>
+      NON_TERMINAL_EXECUTION_STATUSES.includes(execution.status),
+    ).length;
+
+    return { assignments, primaryMailboxCount, secondaryMailboxCount, activeExecutionCount };
+  }
+
+  /** Active (status=ACTIVE, not soft-deleted) admins in the organization, excluding `excludingUserId`. */
+  private async countOtherActiveAdmins(organizationId: string, excludingUserId: string): Promise<number> {
+    const allUsers = await this.users.findAll(organizationId);
+    const candidates = allUsers.filter((user) => user.status === 'ACTIVE' && user.id !== excludingUserId);
+    const isAdminFlags = await Promise.all(
+      candidates.map(async (user) => {
+        const [role] = await this.userRoles.getRolesForUser(user.id);
+        return role?.name === ADMIN_ROLE_NAME;
+      }),
+    );
+    return isAdminFlags.filter(Boolean).length;
   }
 
   /**

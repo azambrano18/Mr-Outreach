@@ -118,6 +118,7 @@ describe('SignaturesService', () => {
     };
     mailboxes = {
       findById: jest.fn(),
+      findByIdIncludingDeleted: jest.fn(),
       findByEmail: jest.fn(),
       findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),

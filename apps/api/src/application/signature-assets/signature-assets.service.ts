@@ -1,19 +1,28 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { Mailbox } from '../../domain/mailbox/mailbox.entity';
+import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
+import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
 import { SequenceTemplateRepository } from '../../domain/sequence-template/sequence-template.repository';
+import { buildSignatureFolderPrefix, normalizeMailboxEmailForStorageKey } from '../../domain/signature-asset/normalize-mailbox-email-for-storage';
 import { SignatureAssetRepository } from '../../domain/signature-asset/signature-asset.repository';
-import {
-  SignatureAssetStoragePort,
-} from '../../domain/signature-asset-storage/signature-asset-storage.port';
+import { SignatureAssetStoragePort } from '../../domain/signature-asset-storage/signature-asset-storage.port';
 import { SignatureAssetNotFound, SignatureAssetStillReferenced } from '../../domain/signature-asset-storage/signature-asset-storage.errors';
+import { SignatureVersionRepository } from '../../domain/signature/signature-version.repository';
+import { SignatureRepository } from '../../domain/signature/signature.repository';
 import {
   AUDIT_LOG_REPOSITORY,
+  MAILBOX_ASSIGNMENT_REPOSITORY,
+  MAILBOX_REPOSITORY,
   SEQUENCE_TEMPLATE_REPOSITORY,
   SEQUENCE_TEMPLATE_VERSION_REPOSITORY,
   SIGNATURE_ASSET_REPOSITORY,
+  SIGNATURE_REPOSITORY,
+  SIGNATURE_VERSION_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { getImageDimensions } from '../../infrastructure/signature-asset-storage/image-dimensions';
 import { SIGNATURE_ASSET_STORAGE_PORT } from '../../infrastructure/signature-asset-storage/tokens';
 import { sniffImageType } from '../../infrastructure/storage/image-mime-sniffer';
@@ -30,13 +39,14 @@ export interface UploadSignatureAssetFile {
 }
 
 /**
- * §4-6 — validates a signature image upload (real magic bytes, never the
- * declared Content-Type/extension; format/size/dimension limits) then
- * delegates the actual write to whichever SignatureAssetStoragePort
- * adapter is active, and records an ownership/traceability row. Never
- * touches SequenceTemplate/SequenceTemplateVersion — the caller inserts
- * the returned `publicUrl` into the template's own signatureHtml
- * afterward, exactly like any other hosted asset.
+ * §4-6, §9 — validates a signature image upload (real magic bytes, never
+ * the declared Content-Type/extension; format/size/dimension limits) then
+ * delegates the actual write to whichever SignatureAssetStoragePort adapter
+ * is active, and records an ownership/traceability row. The object key is
+ * always `firmas/{correo-normalizado-de-la-cuenta}/{assetId}.{ext}` — a
+ * signature image belongs to the mailbox, never to a template or an
+ * executive, since Fase 2 (R2) a mailbox has exactly one signature shared
+ * by every one of its Plantillas (see SignaturesService).
  */
 @Injectable()
 export class SignatureAssetsService {
@@ -46,11 +56,40 @@ export class SignatureAssetsService {
     @Inject(AUDIT_LOG_REPOSITORY) private readonly audit: AuditLogRepository,
     @Inject(SEQUENCE_TEMPLATE_REPOSITORY) private readonly templates: SequenceTemplateRepository,
     @Inject(SEQUENCE_TEMPLATE_VERSION_REPOSITORY) private readonly templateVersions: SequenceTemplateVersionRepository,
+    @Inject(MAILBOX_REPOSITORY) private readonly mailboxes: MailboxRepository,
+    @Inject(MAILBOX_ASSIGNMENT_REPOSITORY) private readonly assignments: MailboxAssignmentRepository,
+    @Inject(SIGNATURE_REPOSITORY) private readonly signatures: SignatureRepository,
+    @Inject(SIGNATURE_VERSION_REPOSITORY) private readonly signatureVersions: SignatureVersionRepository,
+    private readonly config: AppConfigService,
   ) {}
 
+  /** Admin path — permission-only, no assignment check (mirrors SignaturesController vs MeSignatureController). */
   async upload(
     organizationId: string,
-    ownerUserId: string,
+    actorId: string,
+    mailboxId: string,
+    file: UploadSignatureAssetFile,
+  ): Promise<SignatureAssetSummary> {
+    const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    return this.performUpload(organizationId, actorId, mailbox, file);
+  }
+
+  /** Executive self-service path — same 404-not-403 assignment check as SignaturesService.requireAssignedMailbox. */
+  async uploadForExecutive(
+    organizationId: string,
+    userId: string,
+    mailboxId: string,
+    file: UploadSignatureAssetFile,
+  ): Promise<SignatureAssetSummary> {
+    await this.requireAssignedMailbox(userId, mailboxId);
+    const mailbox = await this.getOwnedMailbox(organizationId, mailboxId);
+    return this.performUpload(organizationId, userId, mailbox, file);
+  }
+
+  private async performUpload(
+    organizationId: string,
+    actorId: string,
+    mailbox: Mailbox,
     file: UploadSignatureAssetFile,
   ): Promise<SignatureAssetSummary> {
     if (!file.buffer || file.buffer.length === 0) {
@@ -62,7 +101,7 @@ export class SignatureAssetsService {
 
     const sniffed = sniffImageType(file.buffer);
     if (!sniffed || sniffed.mimeType === 'image/webp') {
-      throw new BadRequestException('Formato de imagen no soportado. Usa PNG, JPG o GIF.');
+      throw new BadRequestException('El contenido del archivo no corresponde a una imagen PNG, JPG o GIF válida.');
     }
 
     const dimensions = getImageDimensions(file.buffer, sniffed.mimeType);
@@ -71,26 +110,26 @@ export class SignatureAssetsService {
     }
     if (dimensions.width > MAX_WIDTH || dimensions.height > MAX_HEIGHT) {
       throw new BadRequestException(
-        `La imagen supera el tamaño máximo permitido (${MAX_WIDTH}x${MAX_HEIGHT} px).`,
+        `La imagen de firma no puede superar ${MAX_WIDTH}x${MAX_HEIGHT} píxeles.`,
       );
     }
 
+    const normalizedEmail = normalizeMailboxEmailForStorageKey(mailbox.email);
     const assetId = randomUUID();
+    const objectKey = `${buildSignatureFolderPrefix(this.config.r2SignaturePrefix, normalizedEmail)}${assetId}.${sniffed.extension}`;
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
 
     const uploaded = await this.storage.uploadImage({
-      organizationId,
-      ownerUserId,
-      assetId,
+      objectKey,
       buffer: file.buffer,
       contentType: sniffed.mimeType,
-      extension: sniffed.extension,
     });
 
     const asset = await this.assets.create({
       id: assetId,
       organizationId,
-      ownerUserId,
+      ownerUserId: actorId,
+      mailboxId: mailbox.id,
       objectKey: uploaded.objectKey,
       publicUrl: uploaded.publicUrl,
       contentType: sniffed.mimeType,
@@ -103,12 +142,12 @@ export class SignatureAssetsService {
 
     await this.audit.record({
       organizationId,
-      actorId: ownerUserId,
+      actorId,
       action: 'signature_asset.upload',
       entityType: 'SignatureAsset',
       entityId: asset.id,
       // Never the binary content, never the storage credentials — only the outcome.
-      metadata: { contentType: asset.contentType, sizeBytes: asset.sizeBytes, width: asset.width, height: asset.height },
+      metadata: { mailboxId: mailbox.id, contentType: asset.contentType, sizeBytes: asset.sizeBytes, width: asset.width, height: asset.height },
     });
 
     return {
@@ -123,11 +162,13 @@ export class SignatureAssetsService {
 
   /**
    * §10 — the full orchestration: load, validate ownership/tenant, check
-   * every reference (a template's current draft signatureHtml, and every
-   * one of its immutable published versions — which transitively covers
-   * every Gestión, since a Gestión only ever points at an already-frozen
-   * version), reject if referenced, only then delete the physical object
-   * and mark the local row DELETED. Idempotent for an already-DELETED row.
+   * every reference (every version ever created for the mailbox's
+   * Signature — §16, a replaced image is never deleted while the account
+   * exists — plus every already-published SequenceTemplateVersion's frozen
+   * signatureHtml snapshot, which transitively covers every Gestión, since
+   * a Gestión only ever points at an already-frozen version), reject if
+   * referenced, only then delete the physical object and mark the local
+   * row DELETED. Idempotent for an already-DELETED row.
    */
   async deleteUnreferencedImage(organizationId: string, actorId: string, assetId: string): Promise<void> {
     const asset = await this.assets.findById(assetId);
@@ -138,7 +179,10 @@ export class SignatureAssetsService {
       return;
     }
 
-    if (await this.isReferenced(organizationId, asset.ownerUserId, asset.objectKey)) {
+    const referenced = asset.mailboxId
+      ? await this.isReferencedByMailbox(organizationId, asset.mailboxId, asset.objectKey)
+      : await this.isReferencedByLegacyOwner(organizationId, asset.ownerUserId, asset.objectKey);
+    if (referenced) {
       throw new SignatureAssetStillReferenced();
     }
 
@@ -155,8 +199,24 @@ export class SignatureAssetsService {
     });
   }
 
-  /** A signature asset can only ever be referenced by templates owned by whoever uploaded it — there is no cross-executive template editing in this codebase. */
-  private async isReferenced(organizationId: string, ownerUserId: string, objectKey: string): Promise<boolean> {
+  /** Fase 2 (R2) — the authoritative check: every SignatureVersion ever created for this mailbox, plus every published SequenceTemplateVersion's frozen snapshot (historical content). */
+  private async isReferencedByMailbox(organizationId: string, mailboxId: string, objectKey: string): Promise<boolean> {
+    const signature = await this.signatures.findByMailbox(mailboxId);
+    if (signature) {
+      const versions = await this.signatureVersions.findBySignature(signature.id);
+      if (versions.some((version) => version.htmlContent.includes(objectKey))) return true;
+    }
+
+    const templates = await this.templates.findByMailbox(organizationId, mailboxId);
+    for (const template of templates) {
+      const templateVersions = await this.templateVersions.findByTemplate(template.id);
+      if (templateVersions.some((version) => version.signatureHtml.includes(objectKey))) return true;
+    }
+    return false;
+  }
+
+  /** Pre-Fase-2 rows (mailboxId null) — same legacy check this service used before, kept only so an old asset can still be evaluated correctly. */
+  private async isReferencedByLegacyOwner(organizationId: string, ownerUserId: string, objectKey: string): Promise<boolean> {
     const ownedTemplates = await this.templates.findByOwner(organizationId, ownerUserId);
     for (const template of ownedTemplates) {
       if (template.signatureHtml.includes(objectKey)) return true;
@@ -182,6 +242,22 @@ export class SignatureAssetsService {
       await this.assets.update(asset.id, { status: 'ORPHANED' });
     }
     return candidates.length;
+  }
+
+  /** Same 404-not-403 rule as MailboxesService's own assignment check. */
+  private async requireAssignedMailbox(userId: string, mailboxId: string): Promise<void> {
+    const userAssignments = await this.assignments.findByUser(userId);
+    if (!userAssignments.some((assignment) => assignment.mailboxId === mailboxId)) {
+      throw new NotFoundException('Mailbox not found.');
+    }
+  }
+
+  private async getOwnedMailbox(organizationId: string, mailboxId: string): Promise<Mailbox> {
+    const mailbox = await this.mailboxes.findById(mailboxId);
+    if (!mailbox || mailbox.organizationId !== organizationId) {
+      throw new NotFoundException('Mailbox not found.');
+    }
+    return mailbox;
   }
 }
 

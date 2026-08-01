@@ -77,10 +77,16 @@ export function EditorToolbar({
   editor,
   htmlSourceMode,
   onToggleHtmlSourceMode,
+  imageUploadUrl,
+  imageMaxBytes,
+  imageAccept,
 }: {
   editor: Editor | null;
   htmlSourceMode: boolean;
   onToggleHtmlSourceMode: () => void;
+  imageUploadUrl?: string;
+  imageMaxBytes?: number;
+  imageAccept?: string;
 }) {
   if (!editor) return null;
 
@@ -277,6 +283,9 @@ export function EditorToolbar({
       <div className={htmlSourceMode ? 'pointer-events-none opacity-40' : ''}>
         <ImageUploadButton
           onUploaded={(url) => editor.chain().focus().setImage({ src: url }).run()}
+          uploadUrl={imageUploadUrl}
+          maxBytes={imageMaxBytes}
+          accept={imageAccept}
         />
       </div>
 

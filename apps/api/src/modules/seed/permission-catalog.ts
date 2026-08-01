@@ -12,7 +12,11 @@ export const PERMISSION_CATALOG: Permission[] = [
   { key: 'users.update', description: 'Edit a user.' },
   { key: 'users.disable', description: 'Activate or deactivate a user.' },
   { key: 'users.reset_password', description: "Force-reset a user's password." },
-  { key: 'users.delete', description: 'Delete an executive (soft delete; blocked while dependencies remain).' },
+  {
+    key: 'users.delete',
+    description:
+      'Delete an admin or executive user (soft delete; blocked for the protected system account, self, the last active admin, or while dependencies remain).',
+  },
 
   { key: 'roles.read', description: 'View roles and their permissions.' },
   { key: 'roles.manage', description: 'Create roles and change their permissions.' },

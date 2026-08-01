@@ -51,6 +51,7 @@ describe('UnlinkMailboxUseCase', () => {
   beforeEach(() => {
     mailboxes = {
       findById: jest.fn().mockResolvedValue(activeMailbox),
+      findByIdIncludingDeleted: jest.fn(),
       findByEmail: jest.fn(),
       findByServerMailboxId: jest.fn(),
       findAll: jest.fn(),

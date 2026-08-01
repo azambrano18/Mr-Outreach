@@ -87,6 +87,9 @@ function toDomain(row: PrismaMailboxRow): Mailbox {
     revokedAt: row.revokedAt,
     revocationId: row.revocationId,
     lastLinkCommandId: row.lastLinkCommandId,
+    assetCleanupStatus: row.assetCleanupStatus,
+    assetCleanupAttempts: row.assetCleanupAttempts,
+    lastAssetCleanupError: row.lastAssetCleanupError,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
@@ -99,6 +102,11 @@ export class PrismaMailboxRepository implements MailboxRepository {
 
   async findById(id: string, ctx?: TransactionContext): Promise<Mailbox | null> {
     const row = await resolveClient(this.prisma, ctx).mailbox.findFirst({ where: { id, deletedAt: null } });
+    return row ? toDomain(row) : null;
+  }
+
+  async findByIdIncludingDeleted(id: string, ctx?: TransactionContext): Promise<Mailbox | null> {
+    const row = await resolveClient(this.prisma, ctx).mailbox.findUnique({ where: { id } });
     return row ? toDomain(row) : null;
   }
 
@@ -208,6 +216,9 @@ export class PrismaMailboxRepository implements MailboxRepository {
         revokedAt: input.revokedAt,
         revocationId: input.revocationId,
         lastLinkCommandId: input.lastLinkCommandId,
+        assetCleanupStatus: input.assetCleanupStatus,
+        assetCleanupAttempts: input.assetCleanupAttempts,
+        lastAssetCleanupError: input.lastAssetCleanupError,
         ...(input.sendingLimits && {
           ...(input.sendingLimits.dailyLimit !== undefined && { dailyLimit: input.sendingLimits.dailyLimit }),
           ...(input.sendingLimits.minimumIntervalSeconds !== undefined && {

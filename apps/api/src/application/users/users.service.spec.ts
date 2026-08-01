@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
@@ -30,6 +30,33 @@ describe('UsersService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+
+  const adminRole: Role = { ...executiveRole, id: 'role_admin', name: 'ADMIN' };
+
+  const buildAssignment = (overrides: Partial<MailboxAssignment> = {}): MailboxAssignment => ({
+    id: 'assignment_1',
+    organizationId: orgId,
+    mailboxId: 'mailbox_1',
+    userId: 'user_1',
+    role: 'SECONDARY',
+    assignedBy: 'actor_1',
+    assignedAt: new Date(),
+    ...overrides,
+  });
+
+  const buildExecution = (overrides: Partial<SequenceExecution> = {}): SequenceExecution =>
+    ({
+      id: 'execution_1',
+      organizationId: orgId,
+      executiveId: 'user_1',
+      mailboxId: 'mailbox_1',
+      templateId: 'template_1',
+      templateVersionId: 'template_version_1',
+      name: null,
+      timezone: 'America/Santiago',
+      status: 'COMPLETED',
+      ...overrides,
+    }) as SequenceExecution;
 
   const buildUser = (overrides: Partial<User> = {}): User => ({
     id: 'user_1',
@@ -282,31 +309,6 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    const buildAssignment = (overrides: Partial<MailboxAssignment> = {}): MailboxAssignment => ({
-      id: 'assignment_1',
-      organizationId: orgId,
-      mailboxId: 'mailbox_1',
-      userId: 'user_1',
-      role: 'SECONDARY',
-      assignedBy: 'actor_1',
-      assignedAt: new Date(),
-      ...overrides,
-    });
-
-    const buildExecution = (overrides: Partial<SequenceExecution> = {}): SequenceExecution =>
-      ({
-        id: 'execution_1',
-        organizationId: orgId,
-        executiveId: 'user_1',
-        mailboxId: 'mailbox_1',
-        templateId: 'template_1',
-        templateVersionId: 'template_version_1',
-        name: null,
-        timezone: 'America/Santiago',
-        status: 'COMPLETED',
-        ...overrides,
-      }) as SequenceExecution;
-
     it('soft-deletes an executive with no dependencies and audits the action', async () => {
       users.findById.mockResolvedValue(buildUser());
       users.update.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: new Date() }));
@@ -320,11 +322,46 @@ describe('UsersService', () => {
       expect(auditLogs.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'user.delete' }));
     });
 
-    it('rejects deleting a non-EXECUTIVE user (e.g. ADMIN)', async () => {
+    it('allows deleting an ADMIN when another active admin remains', async () => {
       users.findById.mockResolvedValue(buildUser());
-      userRoles.getRolesForUser.mockResolvedValueOnce([{ ...executiveRole, name: 'ADMIN' }]);
+      users.update.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: new Date() }));
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+      users.findAll.mockResolvedValue([buildUser(), buildUser({ id: 'other_admin' })]);
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]); // role lookup for 'other_admin' inside the active-admin count
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).resolves.toBeUndefined();
+    });
+
+    it('blocks deleting the last ACTIVE admin of the organization', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+      // Only the target admin themselves is active — no other admin to fall back on.
+      users.findAll.mockResolvedValue([buildUser()]);
 
       await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(ConflictException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('allows deleting an already-INACTIVE admin even with no other active admin — it does not remove an active one', async () => {
+      users.findById.mockResolvedValue(buildUser({ status: 'INACTIVE' }));
+      users.update.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: new Date() }));
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).resolves.toBeUndefined();
+      expect(users.findAll).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting the protected system account, case-insensitively and trimming whitespace', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: '  Sistema@MejoReferido.CL  ' }));
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(ForbiddenException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an admin deleting their own account', async () => {
+      users.findById.mockResolvedValue(buildUser({ id: 'actor_1' }));
+
+      await expect(service.remove(orgId, 'actor_1', 'actor_1')).rejects.toThrow(ForbiddenException);
       expect(users.update).not.toHaveBeenCalled();
     });
 
@@ -373,6 +410,70 @@ describe('UsersService', () => {
       users.findById.mockResolvedValue(buildUser({ organizationId: otherOrgId }));
 
       await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('getDeletionImpact', () => {
+    it('reports a clean executive as deletable with zero counts', async () => {
+      users.findById.mockResolvedValue(buildUser());
+
+      const impact = await service.getDeletionImpact(orgId, 'user_1', 'actor_1');
+
+      expect(impact).toEqual({
+        roleName: 'EXECUTIVE',
+        isProtectedSystemAccount: false,
+        isSelf: false,
+        isLastActiveAdmin: false,
+        primaryMailboxCount: 0,
+        secondaryMailboxCount: 0,
+        activeExecutionCount: 0,
+        canDelete: true,
+      });
+    });
+
+    it('flags isSelf and sets canDelete to false when previewing one’s own account', async () => {
+      users.findById.mockResolvedValue(buildUser({ id: 'actor_1' }));
+
+      const impact = await service.getDeletionImpact(orgId, 'actor_1', 'actor_1');
+
+      expect(impact.isSelf).toBe(true);
+      expect(impact.canDelete).toBe(false);
+    });
+
+    it('flags isProtectedSystemAccount and sets canDelete to false for sistema@mejoreferido.cl', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+
+      const impact = await service.getDeletionImpact(orgId, 'user_1', 'actor_1');
+
+      expect(impact.isProtectedSystemAccount).toBe(true);
+      expect(impact.canDelete).toBe(false);
+    });
+
+    it('flags isLastActiveAdmin and sets canDelete to false when no other active admin exists', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+      users.findAll.mockResolvedValue([buildUser()]);
+
+      const impact = await service.getDeletionImpact(orgId, 'user_1', 'actor_1');
+
+      expect(impact.isLastActiveAdmin).toBe(true);
+      expect(impact.canDelete).toBe(false);
+    });
+
+    it('reports real mailbox/gestión counts and sets canDelete to false while any block remains', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      mailboxAssignments.findByUser.mockResolvedValue([
+        buildAssignment({ role: 'PRIMARY' }),
+        buildAssignment({ mailboxId: 'mailbox_2', role: 'SECONDARY' }),
+      ]);
+      sequenceExecutions.findByExecutive.mockResolvedValue([buildExecution({ status: 'RUNNING' })]);
+
+      const impact = await service.getDeletionImpact(orgId, 'user_1', 'actor_1');
+
+      expect(impact.primaryMailboxCount).toBe(1);
+      expect(impact.secondaryMailboxCount).toBe(1);
+      expect(impact.activeExecutionCount).toBe(1);
+      expect(impact.canDelete).toBe(false);
     });
   });
 });

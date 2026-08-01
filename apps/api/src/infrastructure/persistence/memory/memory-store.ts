@@ -10,6 +10,7 @@ import { ConversationReadState } from '../../../domain/conversation/conversation
 import { ConversationTag } from '../../../domain/conversation/conversation-tag.entity';
 import { Conversation } from '../../../domain/conversation/conversation.entity';
 import { Domain } from '../../../domain/domain-entity/domain.entity';
+import { EmailBodyAsset } from '../../../domain/email-body-asset/email-body-asset.entity';
 import { IntegrationCommand } from '../../../domain/integration/integration-command.entity';
 import { IntegrationEvent } from '../../../domain/integration/integration-event.entity';
 import { MailboxAssignment } from '../../../domain/mailbox-assignment/mailbox-assignment.entity';
@@ -94,6 +95,7 @@ export class MemoryStore {
   readonly prospectImports = new Map<string, ProspectImport>();
   readonly prospectImportRows = new Map<string, ProspectImportRow>();
   readonly signatureAssets = new Map<string, SignatureAsset>();
+  readonly emailBodyAssets = new Map<string, EmailBodyAsset>();
 
   /** Used by tests to start each case from a clean slate. */
   reset(): void {
@@ -138,5 +140,6 @@ export class MemoryStore {
     this.prospectImports.clear();
     this.prospectImportRows.clear();
     this.signatureAssets.clear();
+    this.emailBodyAssets.clear();
   }
 }
