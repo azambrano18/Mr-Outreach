@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { AssigneeSummary, AuditLogEntry, MailboxSummary, UserSummary } from '@outreach/shared-types';
-import { SecondaryExecutivesSelect } from './secondary-executives-select';
+import { SecondaryExecutivesSelect } from '../../../../../components/executives/secondary-executives-select';
 
 const LINK_SOURCE_LABEL: Record<MailboxSummary['linkSource'], string> = {
   SERVER_TOKEN: 'Vinculada por token',
@@ -33,6 +33,7 @@ export function ServerLinkedMailboxPanel({
   currentUserId,
   canReassign,
   canUnlink,
+  canDelete,
   canViewAudit,
   canViewConversations,
 }: {
@@ -41,6 +42,7 @@ export function ServerLinkedMailboxPanel({
   currentUserId: string;
   canReassign: boolean;
   canUnlink: boolean;
+  canDelete: boolean;
   canViewAudit: boolean;
   /** Holds `mailboxes.read.assigned` — the same permission that gates the Conversaciones module itself; final visibility still requires an actual assignment on THIS mailbox (checked from `assignees` below). */
   canViewConversations: boolean;
@@ -58,6 +60,10 @@ export function ServerLinkedMailboxPanel({
   const [unlinking, setUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
   const [confirmingUnlink, setConfirmingUnlink] = useState(false);
+
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[] | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -90,29 +96,27 @@ export function ServerLinkedMailboxPanel({
   const [selectedSecondaryIds, setSelectedSecondaryIds] = useState<string[]>([]);
   const [savingSecondaries, setSavingSecondaries] = useState(false);
   const [secondariesError, setSecondariesError] = useState<string | null>(null);
+  const [reassignAdjustedSecondaries, setReassignAdjustedSecondaries] = useState(false);
+
+  async function loadAssignees(): Promise<void> {
+    try {
+      const response = await fetch(`/api/mailboxes/${mailbox.id}/assignees`);
+      const body = await response.json().catch(() => []);
+      if (!response.ok) {
+        setAssigneesError(body.error ?? 'No se pudieron cargar los ejecutivos asignados.');
+        return;
+      }
+      const loaded = body as AssigneeSummary[];
+      setAssignees(loaded);
+      setSelectedSecondaryIds(loaded.filter((a) => a.role === 'SECONDARY').map((a) => a.id));
+    } catch {
+      setAssigneesError('No se pudo contactar la API.');
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadAssignees(): Promise<void> {
-      try {
-        const response = await fetch(`/api/mailboxes/${mailbox.id}/assignees`);
-        const body = await response.json().catch(() => []);
-        if (cancelled) return;
-        if (!response.ok) {
-          setAssigneesError(body.error ?? 'No se pudieron cargar los ejecutivos asignados.');
-          return;
-        }
-        const loaded = body as AssigneeSummary[];
-        setAssignees(loaded);
-        setSelectedSecondaryIds(loaded.filter((a) => a.role === 'SECONDARY').map((a) => a.id));
-      } catch {
-        if (!cancelled) setAssigneesError('No se pudo contactar la API.');
-      }
-    }
     void loadAssignees();
-    return () => {
-      cancelled = true;
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mailbox.id]);
 
   async function handleSaveSecondaries(nextSelection: string[]): Promise<void> {
@@ -168,6 +172,7 @@ export function ServerLinkedMailboxPanel({
     setReassignError(null);
     setReassigning(true);
     try {
+      const wasSecondary = selectedSecondaryIds.includes(primaryExecutiveId);
       const response = await fetch(`/api/mailboxes/${mailbox.id}/primary-executive`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': reassignIdempotencyKey },
@@ -178,6 +183,12 @@ export function ServerLinkedMailboxPanel({
         setReassignError(body.error ?? 'No se pudo reasignar el ejecutivo.');
         return;
       }
+      // The new primary can never also be secondary — the backend already
+      // enforces this (upserting their row as PRIMARY replaces any prior
+      // SECONDARY role in place), but this component's own `assignees`
+      // state was fetched once on mount and won't reflect that on its own.
+      setReassignAdjustedSecondaries(wasSecondary);
+      await loadAssignees();
       router.refresh();
     } catch {
       setReassignError('No se pudo contactar la API.');
@@ -207,6 +218,25 @@ export function ServerLinkedMailboxPanel({
       setUnlinkError('No se pudo contactar la API.');
     } finally {
       setUnlinking(false);
+    }
+  }
+
+  async function handleDelete(): Promise<void> {
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      const response = await fetch(`/api/mailboxes/${mailbox.id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setDeleteError(body.error ?? 'No se pudo eliminar la cuenta.');
+        return;
+      }
+      router.push('/dashboard/mailboxes');
+      router.refresh();
+    } catch {
+      setDeleteError('No se pudo contactar la API.');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -298,6 +328,11 @@ export function ServerLinkedMailboxPanel({
 
           <fieldset className="flex flex-col gap-2">
             <legend className="px-0 text-xs font-medium uppercase tracking-wide text-slate-500">Ejecutivos secundarios</legend>
+            {reassignAdjustedSecondaries && (
+              <p className="text-xs text-amber-700">
+                El nuevo ejecutivo principal era secundario — se quitó automáticamente de esta lista.
+              </p>
+            )}
             {assigneesError && <p className="text-sm text-red-600">{assigneesError}</p>}
             {assignees === null && !assigneesError ? (
               <p className="text-sm text-slate-500">Cargando ejecutivos…</p>
@@ -434,6 +469,50 @@ export function ServerLinkedMailboxPanel({
                 <button
                   type="button"
                   onClick={() => setConfirmingUnlink(false)}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </>
+          )}
+        </fieldset>
+      )}
+
+      {/* G. Eliminar cuenta — solo disponible una vez desvinculada (REVOKED). Confirmación separada de la de arriba. */}
+      {canDelete && mailbox.linkStatus === 'REVOKED' && (
+        <fieldset className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-4">
+          <legend className="px-1 text-sm font-medium text-red-800">Eliminar cuenta</legend>
+          <p className="text-sm text-red-800">
+            Esta acción elimina la cuenta de Mr Outreach: dejará de aparecer en Cuentas de Correo y en cualquier
+            selector. No es reversible desde la interfaz. El historial de auditoría se conserva.
+          </p>
+          {!confirmingDelete ? (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
+            >
+              Eliminar cuenta
+            </button>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-red-900">
+                ¿Confirmas que quieres eliminar {mailbox.email} de Mr Outreach?
+              </p>
+              {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? 'Eliminando…' : 'Confirmar eliminación'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(false)}
                   className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   Cancelar

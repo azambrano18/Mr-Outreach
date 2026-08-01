@@ -2,13 +2,16 @@
 
 import { useMemo, useRef, useState } from 'react';
 import type { UserSummary } from '@outreach/shared-types';
-import { useOnClickOutside } from '../../../../../lib/use-on-click-outside';
+import { useOnClickOutside } from '../../lib/use-on-click-outside';
 
 /**
- * §9 — searchable multi-select combobox, visually coherent with the plain
+ * Searchable multi-select combobox, visually coherent with the plain
  * `<select>` used for the principal: a closed field showing chips + a
  * count, a dropdown with a search box and one checkbox per candidate when
- * open. Replaces the old permanently-visible checkbox list.
+ * open. Shared by both places an account has secondary executives assigned
+ * — the "Vincular cuenta de correo" form and the linked-account detail
+ * page's "Asignaciones" section — so they never drift into two different
+ * interaction patterns again.
  */
 export function SecondaryExecutivesSelect({
   candidates,
@@ -57,7 +60,7 @@ export function SecondaryExecutivesSelect({
         className="flex min-h-[42px] w-full flex-wrap items-center gap-1.5 rounded-md border border-slate-300 px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50"
       >
         {selected.length === 0 ? (
-          <span className="px-1 text-slate-400">Seleccionar ejecutivos secundarios</span>
+          <span className="px-1 text-slate-400">Sin ejecutivos secundarios</span>
         ) : (
           selected.map((executive) => (
             <span

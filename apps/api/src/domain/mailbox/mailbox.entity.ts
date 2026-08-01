@@ -194,4 +194,6 @@ export interface UpdateMailboxInput {
   revokedAt?: Date | null;
   revocationId?: string | null;
   lastLinkCommandId?: string | null;
+  /** Set once, on deletion — see DeleteMailboxUseCase. Every read path already filters `deletedAt: null`. */
+  deletedAt?: Date;
 }

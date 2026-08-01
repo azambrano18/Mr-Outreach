@@ -35,3 +35,18 @@ export async function PATCH(
     throw error;
   }
 }
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: { id: string } },
+): Promise<NextResponse> {
+  try {
+    await apiFetch<void>(`/mailboxes/${params.id}`, { method: 'DELETE' });
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+}

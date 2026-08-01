@@ -1,5 +1,55 @@
+import { Mailbox } from '../../../domain/mailbox/mailbox.entity';
 import { InMemoryConversationRepository } from './in-memory-conversation.repository';
 import { MemoryStore } from './memory-store';
+
+function buildMailbox(overrides: Partial<Mailbox> = {}): Mailbox {
+  return {
+    id: 'mailbox-1',
+    organizationId: 'org-1',
+    clientId: null,
+    domainId: null,
+    name: 'Ventas',
+    email: 'ventas@example.com',
+    fromName: 'Equipo de Ventas',
+    replyTo: null,
+    status: 'ACTIVE',
+    connectionStatus: 'NOT_TESTED',
+    provisioningStatus: 'NOT_PROVISIONED',
+    timezone: 'America/Santiago',
+    sendingLimits: { dailyLimit: 40, minimumIntervalSeconds: 60, maximumIntervalSeconds: 180 },
+    lastProvisionCommandId: null,
+    lastTestedAt: null,
+    lastTestedBy: null,
+    lastTestMessage: null,
+    imap: null,
+    smtp: null,
+    linkSource: 'SERVER_TOKEN',
+    linkStatus: 'ACTIVE',
+    serverMailboxId: null,
+    serverDomainId: null,
+    serverClientId: null,
+    serverRedemptionId: null,
+    tokenFingerprint: null,
+    emailSnapshot: null,
+    domainSnapshot: null,
+    clientNameSnapshot: null,
+    serverStatusSnapshot: null,
+    serverCanSendSnapshot: null,
+    serverStatusCheckedAt: null,
+    linkedAt: null,
+    linkedBy: null,
+    unlinkRequestedAt: null,
+    unlinkRequestedBy: null,
+    unlinkReason: null,
+    revokedAt: null,
+    revocationId: null,
+    lastLinkCommandId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    ...overrides,
+  };
+}
 
 describe('InMemoryConversationRepository — new filters', () => {
   let store: MemoryStore;
@@ -100,6 +150,57 @@ describe('InMemoryConversationRepository — new filters', () => {
     it('returns nothing for an outcome no conversation has', async () => {
       const results = await repo.findAll(organizationId, { responseOutcome: 'DO_NOT_CONTACT' });
       expect(results).toHaveLength(0);
+    });
+  });
+
+  describe('conversations of a revoked/deleted mailbox are hidden everywhere', () => {
+    it('findAll excludes conversations whose mailbox is REVOKED', async () => {
+      store.mailboxes.set('mailbox-1', buildMailbox({ linkStatus: 'REVOKED' }));
+
+      const results = await repo.findAll(organizationId);
+
+      expect(results).toHaveLength(0);
+    });
+
+    it('findAll excludes conversations whose mailbox is soft-deleted', async () => {
+      store.mailboxes.set('mailbox-1', buildMailbox({ deletedAt: new Date() }));
+
+      const results = await repo.findAll(organizationId);
+
+      expect(results).toHaveLength(0);
+    });
+
+    it('findAll still returns conversations for a mailbox that is merely UNLINK_REQUESTED (not yet REVOKED)', async () => {
+      store.mailboxes.set('mailbox-1', buildMailbox({ linkStatus: 'UNLINK_REQUESTED' }));
+
+      const results = await repo.findAll(organizationId);
+
+      expect(results).toHaveLength(2);
+    });
+
+    it('findById returns null (never the row) for a conversation of a REVOKED mailbox — a direct URL must 404', async () => {
+      const [existing] = await repo.findAll(organizationId);
+      store.mailboxes.set('mailbox-1', buildMailbox({ linkStatus: 'REVOKED' }));
+
+      const found = await repo.findById(existing.id);
+
+      expect(found).toBeNull();
+    });
+
+    it('findByMailboxAndThread returns null for a REVOKED mailbox', async () => {
+      store.mailboxes.set('mailbox-1', buildMailbox({ linkStatus: 'REVOKED' }));
+
+      const found = await repo.findByMailboxAndThread('mailbox-1', 'thread-1');
+
+      expect(found).toBeNull();
+    });
+
+    it('a mailbox that is ACTIVE keeps its conversations fully visible', async () => {
+      store.mailboxes.set('mailbox-1', buildMailbox({ linkStatus: 'ACTIVE' }));
+
+      const results = await repo.findAll(organizationId);
+
+      expect(results).toHaveLength(2);
     });
   });
 });

@@ -14,11 +14,14 @@ export function OneTimeCredentialsModal({
   onClose,
   email,
   temporaryPassword,
+  roleLabel,
 }: {
   open: boolean;
   onClose: () => void;
   email: string;
   temporaryPassword: string;
+  /** e.g. "Administrador"/"Ejecutivo" — shown as "{roleLabel} creado correctamente." when provided. */
+  roleLabel?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -35,9 +38,10 @@ export function OneTimeCredentialsModal({
   return (
     <Modal open={open} onClose={onClose} title="Credenciales temporales">
       <div className="flex flex-col gap-3">
+        {roleLabel && <p className="text-sm font-medium text-emerald-700">{roleLabel} creado correctamente.</p>}
         <h3 className="text-sm font-semibold text-slate-900">Credenciales temporales</h3>
         <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          Esta contraseña solo se mostrará una vez. El ejecutivo deberá cambiarla al iniciar sesión.
+          Esta contraseña solo se mostrará una vez. El usuario deberá cambiarla al iniciar sesión.
         </p>
         <dl className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
           <div>

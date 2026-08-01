@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ClientMailboxVisibilityService } from '../../application/mailboxes/client-mailbox-visibility.service';
+import { DeleteMailboxUseCase } from '../../application/mailboxes/delete-mailbox.use-case';
 import { LinkMailboxUseCase } from '../../application/mailboxes/link-mailbox.use-case';
 import { MailboxExecutiveAssignmentValidator } from '../../application/mailboxes/mailbox-executive-assignment.validator';
 import { MailboxProvisioningEventApplier } from '../../application/mailboxes/mailbox-provisioning-event-applier';
@@ -49,6 +50,7 @@ import { MeController } from './me.controller';
     LinkMailboxUseCase,
     ReassignMailboxPrimaryExecutiveUseCase,
     UnlinkMailboxUseCase,
+    DeleteMailboxUseCase,
   ],
   exports: [
     MailboxesService,
@@ -60,6 +62,7 @@ import { MeController } from './me.controller';
     LinkMailboxUseCase,
     ReassignMailboxPrimaryExecutiveUseCase,
     UnlinkMailboxUseCase,
+    DeleteMailboxUseCase,
   ],
 })
 export class MailboxesModule {}

@@ -36,6 +36,8 @@ export interface UpdateUserInput {
   mustChangePassword?: boolean;
   lastLoginAt?: Date;
   passwordChangedAt?: Date | null;
+  /** Set once, on deletion — see UsersService.remove. Every read path already filters `deletedAt: null`. */
+  deletedAt?: Date;
 }
 
 /** Display-only, derived — never persisted as its own column. */

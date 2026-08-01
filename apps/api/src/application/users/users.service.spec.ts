@@ -1,7 +1,11 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
+import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { Role } from '../../domain/role/role.entity';
 import { RoleRepository } from '../../domain/role/role.repository';
+import { SequenceExecution } from '../../domain/sequence-execution/sequence-execution.entity';
+import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import { User } from '../../domain/user/user.entity';
 import { UserRepository } from '../../domain/user/user.repository';
 import { UserRoleRepository } from '../../domain/user-role/user-role.repository';
@@ -12,6 +16,8 @@ describe('UsersService', () => {
   let roles: jest.Mocked<RoleRepository>;
   let userRoles: jest.Mocked<UserRoleRepository>;
   let auditLogs: jest.Mocked<AuditLogRepository>;
+  let mailboxAssignments: jest.Mocked<MailboxAssignmentRepository>;
+  let sequenceExecutions: jest.Mocked<SequenceExecutionRepository>;
   let service: UsersService;
 
   const orgId = 'org_1';
@@ -65,8 +71,25 @@ describe('UsersService', () => {
       getRolesForUser: jest.fn().mockResolvedValue([executiveRole]),
     };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
+    mailboxAssignments = {
+      upsert: jest.fn(),
+      remove: jest.fn(),
+      findByMailbox: jest.fn(),
+      findByUser: jest.fn().mockResolvedValue([]),
+      findAllByOrganization: jest.fn(),
+    };
+    sequenceExecutions = {
+      findById: jest.fn(),
+      findByServerExecutionId: jest.fn(),
+      findByExecutive: jest.fn().mockResolvedValue([]),
+      findAllByOrganization: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      conditionalUpdateStatus: jest.fn(),
+    };
 
-    service = new UsersService(users, roles, userRoles, auditLogs);
+    service = new UsersService(users, roles, userRoles, auditLogs, mailboxAssignments, sequenceExecutions);
   });
 
   describe('create', () => {
@@ -120,14 +143,31 @@ describe('UsersService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('rejects the ADMIN role even when it exists and belongs to the same organization — this endpoint only ever creates EXECUTIVE users, never a client-supplied roleId taken at face value', async () => {
+    it('allows creating a user with the ADMIN role — the create-user flow can create admins too', async () => {
       const adminRole: Role = { ...executiveRole, id: 'role_admin', name: 'ADMIN' };
       roles.findById.mockResolvedValue(adminRole);
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+      const created = buildUser({ mustChangePassword: true });
+      users.create.mockResolvedValue(created);
+
+      const result = await service.create(
+        orgId,
+        { firstName: 'Nueva', lastName: 'Admin', email: 'nueva.admin@example.com', roleId: 'role_admin' },
+        'actor_1',
+      );
+
+      expect(userRoles.assign).toHaveBeenCalledWith(created.id, adminRole.id);
+      expect(result.roleName).toBe('ADMIN');
+    });
+
+    it('rejects a custom/other role even when it exists and belongs to the same organization — only ADMIN or EXECUTIVE can be assigned through this endpoint, never a client-supplied roleId taken at face value', async () => {
+      const customRole: Role = { ...executiveRole, id: 'role_custom', name: 'AUDITOR_EXTERNO' };
+      roles.findById.mockResolvedValue(customRole);
 
       await expect(
         service.create(
           orgId,
-          { firstName: 'Intento', lastName: 'DeAdmin', email: 'intento@example.com', roleId: 'role_admin' },
+          { firstName: 'Intento', lastName: 'DeCustom', email: 'intento@example.com', roleId: 'role_custom' },
           'actor_1',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -238,6 +278,101 @@ describe('UsersService', () => {
       users.findById.mockResolvedValue(buildUser({ organizationId: otherOrgId }));
 
       await expect(service.getById(orgId, 'user_1')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove', () => {
+    const buildAssignment = (overrides: Partial<MailboxAssignment> = {}): MailboxAssignment => ({
+      id: 'assignment_1',
+      organizationId: orgId,
+      mailboxId: 'mailbox_1',
+      userId: 'user_1',
+      role: 'SECONDARY',
+      assignedBy: 'actor_1',
+      assignedAt: new Date(),
+      ...overrides,
+    });
+
+    const buildExecution = (overrides: Partial<SequenceExecution> = {}): SequenceExecution =>
+      ({
+        id: 'execution_1',
+        organizationId: orgId,
+        executiveId: 'user_1',
+        mailboxId: 'mailbox_1',
+        templateId: 'template_1',
+        templateVersionId: 'template_version_1',
+        name: null,
+        timezone: 'America/Santiago',
+        status: 'COMPLETED',
+        ...overrides,
+      }) as SequenceExecution;
+
+    it('soft-deletes an executive with no dependencies and audits the action', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      users.update.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: new Date() }));
+
+      await service.remove(orgId, 'user_1', 'actor_1');
+
+      expect(users.update).toHaveBeenCalledWith(
+        'user_1',
+        expect.objectContaining({ status: 'INACTIVE', deletedAt: expect.any(Date) }),
+      );
+      expect(auditLogs.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'user.delete' }));
+    });
+
+    it('rejects deleting a non-EXECUTIVE user (e.g. ADMIN)', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      userRoles.getRolesForUser.mockResolvedValueOnce([{ ...executiveRole, name: 'ADMIN' }]);
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(ConflictException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('blocks deletion when the executive is still PRIMARY on a mailbox', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      mailboxAssignments.findByUser.mockResolvedValue([buildAssignment({ role: 'PRIMARY' })]);
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(ConflictException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('blocks deletion when the executive owns a non-terminal Gestión', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      sequenceExecutions.findByExecutive.mockResolvedValue([buildExecution({ status: 'RUNNING' })]);
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(ConflictException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('allows deletion when every owned Gestión is already terminal', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      users.update.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: new Date() }));
+      sequenceExecutions.findByExecutive.mockResolvedValue([
+        buildExecution({ status: 'COMPLETED' }),
+        buildExecution({ id: 'execution_2', status: 'FAILED' }),
+      ]);
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).resolves.toBeUndefined();
+    });
+
+    it('removes SECONDARY mailbox assignments as part of deletion', async () => {
+      users.findById.mockResolvedValue(buildUser());
+      users.update.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: new Date() }));
+      mailboxAssignments.findByUser.mockResolvedValue([
+        buildAssignment({ mailboxId: 'mailbox_1', role: 'SECONDARY' }),
+        buildAssignment({ mailboxId: 'mailbox_2', role: 'SECONDARY' }),
+      ]);
+
+      await service.remove(orgId, 'user_1', 'actor_1');
+
+      expect(mailboxAssignments.remove).toHaveBeenCalledWith('mailbox_1', 'user_1');
+      expect(mailboxAssignments.remove).toHaveBeenCalledWith('mailbox_2', 'user_1');
+    });
+
+    it('throws NotFoundException for a user in a different organization', async () => {
+      users.findById.mockResolvedValue(buildUser({ organizationId: otherOrgId }));
+
+      await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(NotFoundException);
     });
   });
 });

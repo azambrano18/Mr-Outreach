@@ -244,24 +244,23 @@ describe('Users (e2e) — memory + mock', () => {
     expect(restoredLogin.status).toBe(200);
   });
 
-  it('rejects creating a user with the ADMIN role id — this endpoint only ever creates EXECUTIVE users', async () => {
+  it('an admin can create a new user with the ADMIN role id — the create-user flow allows both ADMIN and EXECUTIVE', async () => {
     const response = await request(app.getHttpServer())
       .post('/users')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        firstName: 'Intento',
-        lastName: 'DeAdmin',
-        email: 'intento.de.admin@mejoreferido.cl',
+        firstName: 'Nueva',
+        lastName: 'Admin',
+        email: 'nueva.admin@mejoreferido.cl',
         roleId: adminRoleId,
       });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(201);
+    expect(response.body.roleName).toBe('ADMIN');
     const listResponse = await request(app.getHttpServer())
       .get('/users')
       .set('Authorization', `Bearer ${adminToken}`);
-    expect(listResponse.body.map((u: { email: string }) => u.email)).not.toContain(
-      'intento.de.admin@mejoreferido.cl',
-    );
+    expect(listResponse.body.map((u: { email: string }) => u.email)).toContain('nueva.admin@mejoreferido.cl');
   });
 
   it('rejects creating a user with a role id that does not exist', async () => {
@@ -284,5 +283,91 @@ describe('Users (e2e) — memory + mock', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(404);
+  });
+
+  describe('DELETE /users/:id', () => {
+    it('an executive (no users.delete permission) cannot delete a user', async () => {
+      const { id } = await createReadyExecutive(app, adminToken, {
+        name: 'Sera Protegido',
+        email: 'sera.protegido@mejoreferido.cl',
+        roleId: executiveRoleId,
+      });
+
+      const response = await request(app.getHttpServer())
+        .delete(`/users/${id}`)
+        .set('Authorization', `Bearer ${executiveToken}`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('an admin cannot delete another ADMIN through this endpoint', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Otro', lastName: 'Admin', email: 'otro.admin@mejoreferido.cl', roleId: adminRoleId });
+
+      const response = await request(app.getHttpServer())
+        .delete(`/users/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(409);
+    });
+
+    it('an admin deletes an executive with no dependencies: it disappears from listings and can no longer log in', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          firstName: 'Sera',
+          lastName: 'Eliminado',
+          email: 'sera.eliminado@mejoreferido.cl',
+          roleId: executiveRoleId,
+        });
+      const temporaryPassword: string = created.body.temporaryPassword;
+
+      const deleteResponse = await request(app.getHttpServer())
+        .delete(`/users/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deleteResponse.status).toBe(204);
+
+      const getResponse = await request(app.getHttpServer())
+        .get(`/users/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(getResponse.status).toBe(404);
+
+      const listResponse = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(listResponse.body.map((u: { email: string }) => u.email)).not.toContain(
+        'sera.eliminado@mejoreferido.cl',
+      );
+
+      const loginAttempt = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'sera.eliminado@mejoreferido.cl', password: temporaryPassword });
+      expect(loginAttempt.status).toBe(401);
+    });
+
+    it('a second delete of the same (already-deleted) user returns a controlled 404, not a crash', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          firstName: 'Doble',
+          lastName: 'Eliminado',
+          email: 'doble.eliminado@mejoreferido.cl',
+          roleId: executiveRoleId,
+        });
+
+      await request(app.getHttpServer())
+        .delete(`/users/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      const secondDelete = await request(app.getHttpServer())
+        .delete(`/users/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(secondDelete.status).toBe(404);
+    });
   });
 });

@@ -5,36 +5,51 @@ import { useState, type FormEvent } from 'react';
 import type { CreateUserResult, RoleSummary } from '@outreach/shared-types';
 import { OneTimeCredentialsModal } from '../../../../components/executives/one-time-credentials-modal';
 
-const EXECUTIVE_ROLE_FRIENDLY_LABEL = 'Ejecutivo';
-const EXECUTIVE_ROLE_MISCONFIGURED_MESSAGE =
-  'El rol Ejecutivo no está configurado para esta organización. Sincroniza los roles del sistema antes de crear usuarios.';
+const ADMIN_ROLE_NAME = 'ADMIN';
+const EXECUTIVE_ROLE_NAME = 'EXECUTIVE';
+
+const ROLE_FRIENDLY_LABEL: Record<string, string> = {
+  [ADMIN_ROLE_NAME]: 'Administrador',
+  [EXECUTIVE_ROLE_NAME]: 'Ejecutivo',
+};
+
+function misconfiguredMessage(roleName: string): string {
+  return `El rol ${ROLE_FRIENDLY_LABEL[roleName]} no está configurado para esta organización. Sincroniza los roles del sistema antes de crear usuarios.`;
+}
 
 /**
- * This form only ever creates EXECUTIVE users. There is no role selector —
- * the role is resolved once by the server component (new/page.tsx), which
- * looks it up by name rather than defaulting to whatever the API happens
- * to return first. If the EXECUTIVE role isn't configured for this
- * organization, `executiveRole` is null and submission is disabled — never
- * fall back to any other role (in particular, never ADMIN).
+ * Creates either an ADMIN or an EXECUTIVE user — never any other role.
+ * Each role is resolved once by the server component (new/page.tsx) by
+ * name, never by array position; if either is missing from this
+ * organization, selecting it here is disabled rather than silently
+ * falling back to whichever role happens to exist.
  */
-export function CreateExecutiveForm({ executiveRole }: { executiveRole: RoleSummary | null }) {
+export function CreateUserForm({
+  adminRole,
+  executiveRole,
+}: {
+  adminRole: RoleSummary | null;
+  executiveRole: RoleSummary | null;
+}) {
   const router = useRouter();
+  const [selectedRoleName, setSelectedRoleName] = useState<string>(
+    executiveRole ? EXECUTIVE_ROLE_NAME : ADMIN_ROLE_NAME,
+  );
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; temporaryPassword: string } | null>(
-    null,
-  );
+  const [createdUser, setCreatedUser] = useState<CreateUserResult | null>(null);
 
-  const roleMisconfigured = !executiveRole;
+  const selectedRole = selectedRoleName === ADMIN_ROLE_NAME ? adminRole : executiveRole;
+  const noRoleAvailable = !adminRole && !executiveRole;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!executiveRole) {
+    if (!selectedRole) {
       // Defense in depth — the submit button is already disabled in this state.
-      setError(EXECUTIVE_ROLE_MISCONFIGURED_MESSAGE);
+      setError(misconfiguredMessage(selectedRoleName));
       return;
     }
     setError(null);
@@ -44,27 +59,28 @@ export function CreateExecutiveForm({ executiveRole }: { executiveRole: RoleSumm
       const response = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, roleId: executiveRole.id }),
+        body: JSON.stringify({ firstName, lastName, email, roleId: selectedRole.id }),
       });
 
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(body.error ?? 'No se pudo crear el ejecutivo.');
+        setError(body.error ?? 'No se pudo crear el usuario.');
         return;
       }
 
-      const created = body as CreateUserResult;
-      setCreatedCredentials({ email: created.email, temporaryPassword: created.temporaryPassword });
+      setCreatedUser(body as CreateUserResult);
     } finally {
       setLoading(false);
     }
   }
 
   function handleCloseCredentials(): void {
-    setCreatedCredentials(null);
+    setCreatedUser(null);
     router.push('/dashboard/executives');
     router.refresh();
   }
+
+  const roleLabelForSelection = ROLE_FRIENDLY_LABEL[selectedRoleName] ?? selectedRoleName;
 
   return (
     <>
@@ -72,11 +88,31 @@ export function CreateExecutiveForm({ executiveRole }: { executiveRole: RoleSumm
         onSubmit={handleSubmit}
         className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5"
       >
-        {roleMisconfigured && (
+        {noRoleAvailable && (
           <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            {EXECUTIVE_ROLE_MISCONFIGURED_MESSAGE}
+            Ni el rol Administrador ni el rol Ejecutivo están configurados para esta organización. Sincroniza los
+            roles del sistema antes de crear usuarios.
           </p>
         )}
+
+        <label className="flex flex-col gap-1 text-sm text-slate-700" htmlFor="user-role">
+          Rol
+          <select
+            id="user-role"
+            required
+            value={selectedRoleName}
+            onChange={(event) => setSelectedRoleName(event.target.value)}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          >
+            <option value={ADMIN_ROLE_NAME} disabled={!adminRole}>
+              Administrador{!adminRole ? ' (no disponible)' : ''}
+            </option>
+            <option value={EXECUTIVE_ROLE_NAME} disabled={!executiveRole}>
+              Ejecutivo{!executiveRole ? ' (no disponible)' : ''}
+            </option>
+          </select>
+          {!selectedRole && <span className="text-xs text-red-600">{misconfiguredMessage(selectedRoleName)}</span>}
+        </label>
 
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1 text-sm text-slate-700">
@@ -112,19 +148,6 @@ export function CreateExecutiveForm({ executiveRole }: { executiveRole: RoleSumm
           <span className="text-xs text-slate-500">Debe terminar en @mejoreferido.cl.</span>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          Rol
-          <input
-            value={EXECUTIVE_ROLE_FRIENDLY_LABEL}
-            disabled
-            readOnly
-            className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
-          />
-          <span className="text-xs text-slate-500">
-            Este formulario crea exclusivamente cuentas de Ejecutivo.
-          </span>
-        </label>
-
         <p className="text-xs text-slate-500">
           La contraseña inicial se genera automáticamente y se mostrará una sola vez al confirmar.
         </p>
@@ -134,20 +157,21 @@ export function CreateExecutiveForm({ executiveRole }: { executiveRole: RoleSumm
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={loading || roleMisconfigured}
+            disabled={loading || !selectedRole}
             className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
           >
-            {loading ? 'Creando…' : 'Crear ejecutivo'}
+            {loading ? 'Creando…' : `Crear ${roleLabelForSelection.toLowerCase()}`}
           </button>
         </div>
       </form>
 
-      {createdCredentials && (
+      {createdUser && (
         <OneTimeCredentialsModal
           open
           onClose={handleCloseCredentials}
-          email={createdCredentials.email}
-          temporaryPassword={createdCredentials.temporaryPassword}
+          email={createdUser.email}
+          temporaryPassword={createdUser.temporaryPassword}
+          roleLabel={ROLE_FRIENDLY_LABEL[createdUser.roleName] ?? createdUser.roleName}
         />
       )}
     </>

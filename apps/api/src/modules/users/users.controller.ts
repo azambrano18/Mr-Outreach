@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ManagedClientSummary } from '../../application/clients/clients.types';
 import { ClientsService } from '../../application/clients/clients.service';
@@ -72,6 +72,13 @@ export class UsersController {
     @Param('id') id: string,
   ): Promise<ResetPasswordResult> {
     return this.usersService.resetPassword(user.organizationId, id, user.id);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions('users.delete')
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
+    return this.usersService.remove(user.organizationId, id, user.id);
   }
 
   @Get(':id/clients')

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Inject, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, HttpCode, Inject, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { IntegrationService } from '../../application/integration/integration.service';
@@ -6,6 +6,7 @@ import { AuthenticatedUser } from '../../application/auth/auth.types';
 import { AuditLogEntry } from '../../domain/audit/audit-log.entity';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { AUDIT_LOG_REPOSITORY } from '../../infrastructure/persistence/tokens';
+import { DeleteMailboxUseCase } from '../../application/mailboxes/delete-mailbox.use-case';
 import { IntrospectLinkTokenResult, LinkMailboxResult, LinkMailboxUseCase } from '../../application/mailboxes/link-mailbox.use-case';
 import {
   ReassignMailboxPrimaryExecutiveResult,
@@ -59,6 +60,7 @@ export class MailboxesController {
     private readonly linkMailbox: LinkMailboxUseCase,
     private readonly reassignPrimaryExecutive: ReassignMailboxPrimaryExecutiveUseCase,
     private readonly unlinkMailboxUseCase: UnlinkMailboxUseCase,
+    private readonly deleteMailboxUseCase: DeleteMailboxUseCase,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
   ) {}
 
@@ -97,6 +99,17 @@ export class MailboxesController {
     @Param('id') id: string,
   ): Promise<UnlinkMailboxResult> {
     return this.unlinkMailboxUseCase.retryConfirmation(user.organizationId, id, user.id);
+  }
+
+  /**
+   * §8.2 — only ever succeeds once the mailbox is already REVOKED
+   * (LINKED → UNLINKED → DELETED, never directly). Soft-delete only.
+   */
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions('mailboxes.delete')
+  async remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
+    await this.deleteMailboxUseCase.execute({ organizationId: user.organizationId, mailboxId: id, actorId: user.id });
   }
 
   /**

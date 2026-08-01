@@ -60,7 +60,7 @@ export default async function AdminSequenceExecutionsPage() {
   const executions = await apiFetch<SequenceExecutionSummary[]>('/admin/sequence-executions');
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 py-4">
+    <div className="flex w-full flex-1 flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Monitor de gestiones</h1>
         <p className="text-sm text-slate-500">

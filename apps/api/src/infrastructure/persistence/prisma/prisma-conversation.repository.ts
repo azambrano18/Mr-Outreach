@@ -50,20 +50,41 @@ function toDomain(row: PrismaConversationRow): Conversation {
 export class PrismaConversationRepository implements ConversationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * A revoked (unlinked) or soft-deleted mailbox is no longer authorized to
+   * be used — its conversations must stop resolving everywhere, including
+   * a direct URL to one, not just be filtered out of list views.
+   */
+  private static readonly USABLE_MAILBOX_FILTER: Prisma.MailboxWhereInput = {
+    linkStatus: { not: 'REVOKED' },
+    deletedAt: null,
+  };
+
   async findById(id: string): Promise<Conversation | null> {
-    const row = await this.prisma.conversation.findFirst({ where: { id, deletedAt: null } });
+    const row = await this.prisma.conversation.findFirst({
+      where: { id, deletedAt: null, mailbox: PrismaConversationRepository.USABLE_MAILBOX_FILTER },
+    });
     return row ? toDomain(row) : null;
   }
 
   async findByMailboxAndThread(mailboxId: string, emailThreadId: string): Promise<Conversation | null> {
     const row = await this.prisma.conversation.findFirst({
-      where: { mailboxId, emailThreadId, deletedAt: null },
+      where: {
+        mailboxId,
+        emailThreadId,
+        deletedAt: null,
+        mailbox: PrismaConversationRepository.USABLE_MAILBOX_FILTER,
+      },
     });
     return row ? toDomain(row) : null;
   }
 
   async findAll(organizationId: string, filter: ConversationFilter = {}): Promise<Conversation[]> {
-    const where: Prisma.ConversationWhereInput = { organizationId, deletedAt: null };
+    const where: Prisma.ConversationWhereInput = {
+      organizationId,
+      deletedAt: null,
+      mailbox: { ...PrismaConversationRepository.USABLE_MAILBOX_FILTER },
+    };
     if (filter.clientId) where.clientId = filter.clientId;
     if (filter.domainId) where.domainId = filter.domainId;
     if (filter.mailboxId) where.mailboxId = filter.mailboxId;
@@ -84,7 +105,7 @@ export class PrismaConversationRepository implements ConversationRepository {
       where.tagAssignments = { some: { tagId: filter.tagId } };
     }
     if (filter.unmatchedOnly) {
-      where.mailbox = { clientId: null };
+      where.mailbox = { ...PrismaConversationRepository.USABLE_MAILBOX_FILTER, clientId: null };
     }
     if (filter.dateFrom || filter.dateTo) {
       where.lastMessageAt = {

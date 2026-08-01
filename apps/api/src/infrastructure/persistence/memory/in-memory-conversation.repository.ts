@@ -15,15 +15,28 @@ import { MemoryStore } from './memory-store';
 export class InMemoryConversationRepository implements ConversationRepository {
   constructor(private readonly store: MemoryStore) {}
 
+  /**
+   * A conversation whose mailbox was revoked (unlinked) or soft-deleted is
+   * no longer authorized to be shown — Mr Outreach lost the right to use
+   * that account. This is checked on every read path (not just `findAll`)
+   * so a direct URL to such a conversation also stops resolving.
+   */
+  private isMailboxUsable(mailboxId: string): boolean {
+    const mailbox = this.store.mailboxes.get(mailboxId);
+    return !mailbox || (mailbox.linkStatus !== 'REVOKED' && !mailbox.deletedAt);
+  }
+
   async findById(id: string): Promise<Conversation | null> {
     const conversation = this.store.conversations.get(id);
-    return conversation && !conversation.deletedAt ? conversation : null;
+    if (!conversation || conversation.deletedAt) return null;
+    return this.isMailboxUsable(conversation.mailboxId) ? conversation : null;
   }
 
   async findByMailboxAndThread(
     mailboxId: string,
     emailThreadId: string,
   ): Promise<Conversation | null> {
+    if (!this.isMailboxUsable(mailboxId)) return null;
     for (const conversation of this.store.conversations.values()) {
       if (
         !conversation.deletedAt &&
@@ -39,7 +52,10 @@ export class InMemoryConversationRepository implements ConversationRepository {
   async findAll(organizationId: string, filter: ConversationFilter = {}): Promise<Conversation[]> {
     const mailboxesById = this.store.mailboxes;
     let results = Array.from(this.store.conversations.values()).filter(
-      (conversation) => !conversation.deletedAt && conversation.organizationId === organizationId,
+      (conversation) =>
+        !conversation.deletedAt &&
+        conversation.organizationId === organizationId &&
+        this.isMailboxUsable(conversation.mailboxId),
     );
 
     if (filter.clientId) {

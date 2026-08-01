@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { UserSummary } from '@outreach/shared-types';
+import { SecondaryExecutivesSelect } from '../../../../components/executives/secondary-executives-select';
 
 type TokenStatus = 'ISSUED' | 'EXPIRED' | 'REVOKED' | 'REDEEMED';
 
@@ -97,10 +98,15 @@ export function LinkMailboxForm() {
     }
   }
 
-  function toggleSecondary(userId: string): void {
-    setSecondaryExecutiveIds((current) =>
-      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
-    );
+  const [primaryAdjustedSecondaries, setPrimaryAdjustedSecondaries] = useState(false);
+
+  function handlePrimaryChange(nextPrimaryId: string): void {
+    setPrimaryExecutiveId(nextPrimaryId);
+    setSecondaryExecutiveIds((current) => {
+      if (!current.includes(nextPrimaryId)) return current;
+      setPrimaryAdjustedSecondaries(true);
+      return current.filter((id) => id !== nextPrimaryId);
+    });
   }
 
   const tokenStillValid = result ? !isExpired(result.expiresAt) : true;
@@ -213,10 +219,7 @@ export function LinkMailboxForm() {
             <select
               required
               value={primaryExecutiveId}
-              onChange={(event) => {
-                setPrimaryExecutiveId(event.target.value);
-                setSecondaryExecutiveIds((current) => current.filter((id) => id !== event.target.value));
-              }}
+              onChange={(event) => handlePrimaryChange(event.target.value)}
               className="rounded-md border border-slate-300 px-3 py-2 text-sm"
             >
               <option value="">Selecciona un ejecutivo</option>
@@ -230,24 +233,19 @@ export function LinkMailboxForm() {
 
           <fieldset className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
             <legend className="px-1 text-sm font-medium text-slate-700">Ejecutivos secundarios (opcional)</legend>
+            {primaryAdjustedSecondaries && (
+              <p className="text-xs text-amber-700">
+                El ejecutivo principal era secundario — se quitó automáticamente de esta lista.
+              </p>
+            )}
             {executives.filter((e) => e.id !== primaryExecutiveId).length === 0 ? (
               <p className="text-xs text-slate-500">No hay otros ejecutivos disponibles.</p>
             ) : (
-              <div className="flex flex-col gap-1.5">
-                {executives
-                  .filter((executive) => executive.id !== primaryExecutiveId)
-                  .map((executive) => (
-                    <label key={executive.id} className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={secondaryExecutiveIds.includes(executive.id)}
-                        onChange={() => toggleSecondary(executive.id)}
-                        className="rounded border-slate-300"
-                      />
-                      {executive.name}
-                    </label>
-                  ))}
-              </div>
+              <SecondaryExecutivesSelect
+                candidates={executives.filter((executive) => executive.id !== primaryExecutiveId)}
+                selectedIds={secondaryExecutiveIds}
+                onChange={setSecondaryExecutiveIds}
+              />
             )}
           </fieldset>
 

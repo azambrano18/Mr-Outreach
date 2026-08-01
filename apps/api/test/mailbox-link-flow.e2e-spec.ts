@@ -1,6 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
+import { ConversationRepository } from '../src/domain/conversation/conversation.repository';
+import { CONVERSATION_REPOSITORY } from '../src/infrastructure/persistence/tokens';
 import { SimulatedMailboxMotorAdapter } from '../src/infrastructure/mailbox-motor/simulated/simulated-mailbox-motor-adapter';
 
 /**
@@ -308,6 +310,64 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
       expect(getResponse.body.linkStatus).toBe('REVOKED');
     });
 
+    it('hides a mailbox\'s conversations everywhere once it is unlinked (REVOKED) — list and direct fetch both stop returning them', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-unlink-hides-conversations-setup-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+      const mailboxId = linkResponse.body.mailboxId;
+
+      const adminMe = await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      const conversations = app.get<ConversationRepository>(CONVERSATION_REPOSITORY);
+      const conversation = await conversations.create({
+        organizationId: adminMe.body.organizationId,
+        clientId: linkResponse.body.clientId,
+        domainId: linkResponse.body.domainId,
+        mailboxId,
+        emailThreadId: `thread-${stamp}`,
+        contactEmail: 'prospecto@example.com',
+        contactName: 'Prospecto E2E',
+        origin: 'EXTERNAL_INBOUND',
+        subject: 'Interesado',
+        isUnread: true,
+        lastMessageAt: new Date(),
+      });
+
+      const beforeUnlink = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ mailboxId })
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(beforeUnlink.body.map((c: { id: string }) => c.id)).toContain(conversation.id);
+
+      const beforeUnlinkDirect = await request(app.getHttpServer())
+        .get(`/conversations/${conversation.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(beforeUnlinkDirect.status).toBe(200);
+
+      const unlink = await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-unlink-hides-conversations-${stamp}`)
+        .send({ reason: 'Cuenta dada de baja en e2e' });
+      expect(unlink.body.linkStatus).toBe('REVOKED');
+
+      const afterUnlink = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ mailboxId })
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(afterUnlink.body.map((c: { id: string }) => c.id)).not.toContain(conversation.id);
+
+      const afterUnlinkDirect = await request(app.getHttpServer())
+        .get(`/conversations/${conversation.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(afterUnlinkDirect.status).toBe(404);
+    });
+
     it('requires a non-empty reason', async () => {
       const token = issueToken();
       const linkResponse = await request(app.getHttpServer())
@@ -365,6 +425,92 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
         .set('Authorization', `Bearer ${executiveToken}`)
         .set('Idempotency-Key', `e2e-unlink-${stamp}-4`)
         .send({ reason: 'no autorizado' });
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe('DELETE /mailboxes/:id (§8.2 — only once unlinked)', () => {
+    it('rejects deleting a mailbox that is still linked', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-still-linked-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+
+      const response = await request(app.getHttpServer())
+        .delete(`/mailboxes/${linkResponse.body.mailboxId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(409);
+    });
+
+    it('deletes a mailbox once unlinked: it disappears from the overview and 404s directly', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-setup-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+      const mailboxId = linkResponse.body.mailboxId;
+
+      await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-unlink-${stamp}`)
+        .send({ reason: 'Cuenta dada de baja en e2e' });
+
+      const deleteResponse = await request(app.getHttpServer())
+        .delete(`/mailboxes/${mailboxId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deleteResponse.status).toBe(204);
+
+      const getResponse = await request(app.getHttpServer())
+        .get(`/mailboxes/${mailboxId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(getResponse.status).toBe(404);
+
+      const overview = await request(app.getHttpServer())
+        .get('/mailboxes/overview')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(overview.body.map((item: { id: string }) => item.id)).not.toContain(mailboxId);
+    });
+
+    it('a second delete of the same (already-deleted) mailbox returns a controlled 404', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-twice-setup-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+      const mailboxId = linkResponse.body.mailboxId;
+
+      await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-twice-unlink-${stamp}`)
+        .send({ reason: 'Cuenta dada de baja en e2e' });
+
+      await request(app.getHttpServer()).delete(`/mailboxes/${mailboxId}`).set('Authorization', `Bearer ${adminToken}`);
+      const secondDelete = await request(app.getHttpServer())
+        .delete(`/mailboxes/${mailboxId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(secondDelete.status).toBe(404);
+    });
+
+    it('an executive without mailboxes.delete cannot delete a mailbox', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-forbidden-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+
+      const response = await request(app.getHttpServer())
+        .delete(`/mailboxes/${linkResponse.body.mailboxId}`)
+        .set('Authorization', `Bearer ${executiveToken}`);
 
       expect(response.status).toBe(403);
     });

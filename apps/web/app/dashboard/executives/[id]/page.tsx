@@ -4,6 +4,7 @@ import type { UserSummary } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../../lib/api';
 import { getCurrentUser } from '../../../../lib/session';
 import { AccessDenied } from '../../access-denied';
+import { DeleteExecutiveButton } from '../delete-executive-button';
 import { ResetPasswordButton } from '../reset-password-button';
 import { ToggleStatusButton } from '../toggle-status-button';
 import { ExecutiveProfileSummary } from './executive-profile-summary';
@@ -31,6 +32,8 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
   const canUpdate = currentUser.permissions.includes('users.update');
   const canDisable = currentUser.permissions.includes('users.disable');
   const canResetPassword = currentUser.permissions.includes('users.reset_password');
+  // Only ever offered for EXECUTIVE users — the backend rejects deleting an ADMIN through this endpoint too.
+  const canDelete = currentUser.permissions.includes('users.delete') && executive.roleName === 'EXECUTIVE';
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -52,6 +55,9 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
             <ToggleStatusButton userId={executive.id} active={executive.status === 'ACTIVE'} />
           )}
           {canResetPassword && <ResetPasswordButton userId={executive.id} />}
+          {canDelete && (
+            <DeleteExecutiveButton userId={executive.id} name={executive.name} email={executive.email} />
+          )}
         </div>
       </div>
 

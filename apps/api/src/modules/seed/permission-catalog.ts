@@ -7,11 +7,12 @@ import { Permission } from '../../domain/permission/permission.entity';
  * both the memory seed and the Prisma seed load from.
  */
 export const PERMISSION_CATALOG: Permission[] = [
-  { key: 'users.read', description: 'View executives in the organization.' },
-  { key: 'users.create', description: 'Create new executives.' },
-  { key: 'users.update', description: 'Edit an executive.' },
-  { key: 'users.disable', description: 'Activate or deactivate an executive.' },
-  { key: 'users.reset_password', description: "Force-reset an executive's password." },
+  { key: 'users.read', description: 'View users in the organization.' },
+  { key: 'users.create', description: 'Create new admin or executive users.' },
+  { key: 'users.update', description: 'Edit a user.' },
+  { key: 'users.disable', description: 'Activate or deactivate a user.' },
+  { key: 'users.reset_password', description: "Force-reset a user's password." },
+  { key: 'users.delete', description: 'Delete an executive (soft delete; blocked while dependencies remain).' },
 
   { key: 'roles.read', description: 'View roles and their permissions.' },
   { key: 'roles.manage', description: 'Create roles and change their permissions.' },
@@ -34,6 +35,10 @@ export const PERMISSION_CATALOG: Permission[] = [
   {
     key: 'mailboxes.unlink',
     description: 'Fase 2.1: revoke Mr Outreach\'s authorization to use a SERVER_TOKEN mailbox (owner/admin only).',
+  },
+  {
+    key: 'mailboxes.delete',
+    description: 'Remove a mailbox from Mr Outreach entirely (soft delete; only after it has been unlinked/revoked).',
   },
 
   { key: 'templates.read', description: 'View templates.' },

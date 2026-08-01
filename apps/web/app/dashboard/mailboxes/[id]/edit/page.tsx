@@ -50,6 +50,7 @@ export default async function EditMailboxPage({ params }: { params: { id: string
           currentUserId={currentUser.id}
           canReassign={currentUser.permissions.includes('mailboxes.assign')}
           canUnlink={currentUser.permissions.includes('mailboxes.unlink')}
+          canDelete={currentUser.permissions.includes('mailboxes.delete')}
           canViewAudit={currentUser.permissions.includes('audit.read')}
           canViewConversations={currentUser.permissions.includes('mailboxes.read.assigned')}
         />

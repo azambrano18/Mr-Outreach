@@ -84,7 +84,7 @@ export default async function ExecutivesPage({
             href="/dashboard/executives/new"
             className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
           >
-            Crear ejecutivo
+            Crear usuario
           </Link>
         )}
       </div>
