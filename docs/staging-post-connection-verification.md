@@ -1,5 +1,27 @@
 # Verificación posterior a la conexión Railway `staging` → Neon `staging`
 
+## Estado: completado (2026-07-31)
+
+Los pasos §1-§5 de este documento se ejecutaron y verificaron por completo
+contra `staging`: build/Pre-Deploy/Start Command en verde, las 4
+migraciones aplicadas (confirmadas en `_prisma_migrations`), conteos en 0
+antes del bootstrap, y `/health/ready` con `persistence.status: "connected"`.
+A partir de ahí se ejecutó `docs/bootstrap-admin-procedure.md` — ver ese
+documento para el resultado final (usuario administrador creado, login y
+cambio de contraseña verificados en la Web).
+
+Durante el paso §5.3 (confirmar que la Web se comunica con la API) se
+encontró y corrigió un problema real: `API_INTERNAL_URL` en
+`mr-outreach-web` resolvía con el puerto vacío
+(`http://mr-outreach-api.railway.internal:`), causando `fetch failed` en
+cada llamada servidor-a-servidor y, en consecuencia, el login fallaba con
+el mismo mensaje genérico que una contraseña incorrecta. Causa raíz y
+corrección completas documentadas en
+`docs/railway-environment-variables-inventory.md`
+("Advertencia confirmada: `${{<api-service>.PORT}}` puede resolver
+vacío"). Si se repite este mismo síntoma en `production` al configurar
+esa variable, revisar esa sección primero.
+
 Railway `staging` (`mr-outreach-api`) ya tiene `DATABASE_URL`/`DIRECT_URL`
 apuntando al branch Neon `staging` (confirmado por el propietario del
 proyecto — no vuelvo a pedir ese cambio). Este documento cubre lo que

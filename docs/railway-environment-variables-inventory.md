@@ -63,6 +63,42 @@ en el código, no por inferencia).
 — la cookie httpOnly guarda el JWT que ya emite la API verbatim; no hay
 nada adicional que firmar o cifrar del lado de Next.js.
 
+### Advertencia confirmada: `${{<api-service>.PORT}}` puede resolver vacío
+
+Detectado en `staging` (2026-07-31): `API_INTERNAL_URL` estaba configurada
+como `http://${{mr-outreach-api.RAILWAY_PRIVATE_DOMAIN}}:${{mr-outreach-api.PORT}}`,
+una referencia de variable entre servicios de Railway. En la práctica esa
+referencia resolvió con el puerto **vacío** —
+`http://mr-outreach-api.railway.internal:` (dos puntos finales, sin
+número) — porque `PORT` es inyectado dinámicamente por Railway al proceso
+de `mr-outreach-api` y no estaba declarado como variable explícita en la
+pestaña "Variables" de ese servicio; sin una variable explícita que
+referenciar, `${{mr-outreach-api.PORT}}` no tiene nada que resolver.
+
+Síntoma en el consumidor (`mr-outreach-web`): cualquier `fetch()` server-side
+hacia `API_INTERNAL_URL` (por ejemplo `getCurrentUser()` en
+`apps/web/lib/session.ts`, o el proxy de login en
+`apps/web/app/api/auth/login/route.ts`) falla con `fetch failed`, sin
+ningún otro mensaje — y como el login colapsa cualquier error en el mismo
+mensaje genérico ("Correo o contraseña incorrectos"), el síntoma visible
+para el usuario final es indistinguible de una contraseña incorrecta.
+
+**Corrección aplicada**: agregar una variable explícita `PORT=8080` en el
+servicio `mr-outreach-api` (mismo puerto que ya se ve consistentemente en
+sus logs de arranque: `API listening on port 8080`), para que la
+referencia `${{mr-outreach-api.PORT}}` desde `mr-outreach-web` tenga un
+valor real que resolver. Alternativa más simple si esto se repite: fijar
+el puerto literal en `API_INTERNAL_URL`
+(`http://${{mr-outreach-api.RAILWAY_PRIVATE_DOMAIN}}:8080`) en vez de
+depender de la referencia cruzada a `PORT`.
+
+**Aplica también a `production`**: al configurar `API_INTERNAL_URL` en el
+ambiente `production` de Railway, verificar este mismo punto desde el
+principio (confirmar que `PORT` esté declarado explícitamente en el
+servicio API, o usar el puerto literal) — no asumir que la referencia
+`${{...PORT}}` funciona solo porque el servicio arranca y responde bien a
+tráfico público.
+
 ## Confirmaciones explícitas de higiene de secretos
 
 - Ningún secreto real vive en `NEXT_PUBLIC_*` — la única variable pública

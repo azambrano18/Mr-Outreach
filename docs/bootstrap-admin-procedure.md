@@ -1,5 +1,37 @@
 # Procedimiento: crear el primer administrador real en Neon staging
 
+## Estado: completado en `staging` (2026-07-31)
+
+Resultado final, verificado paso a paso (no solo "se ejecutó sin error"):
+
+- **Organización**: `MejoReferido` (`id f67bfe7c-b6b2-4452-8ab2-51ce733a8463`).
+- **Usuario administrador**: `sistema@mejoreferido.cl`
+  (`id 2ce59446-4d94-4755-a2eb-90050a3a12de`), rol `ADMIN`
+  (`id ec1e4581-c272-4df6-84f4-608d19139fc6`) con los 111 permisos del
+  catálogo.
+- **Login con la contraseña temporal**: confirmado exitoso desde
+  `https://mr-outreach-web-staging.up.railway.app` (tras corregir un bug
+  de conectividad Web→API no relacionado con el bootstrap en sí — ver
+  `docs/staging-post-connection-verification.md`, sección "Estado").
+- **Cambio de contraseña obligatorio**: confirmado — la pantalla
+  `/dashboard/change-password` forzó el cambio, la contraseña temporal
+  dejó de funcionar de inmediato, y la nueva contraseña definida por el
+  propio usuario permite iniciar sesión normalmente.
+- **Auditoría**: confirmada por consulta SQL directa (la pantalla de
+  Auditoría en la UI todavía no existe — es un placeholder conocido,
+  `apps/web/app/dashboard/audit/page.tsx`). La fila en `audit_logs` tiene
+  `action = 'admin.bootstrap'`, `entityType = 'User'`,
+  `entityId = '2ce59446-4d94-4755-a2eb-90050a3a12de'` (coincide con el
+  usuario creado), `actorId` vacío (esperado — no hay un actor
+  autenticado durante el bootstrap inicial), y `metadata` sin ninguna
+  contraseña ni hash: `{"mode": "create", "target": "staging", "projectedResult": "CREATE"}`.
+
+Este documento se conserva completo abajo como referencia del
+procedimiento en sí, útil para repetirlo en `production` cuando
+corresponda.
+
+---
+
 Este documento es para quien tenga acceso a la consola de Railway (yo no lo
 tengo desde este entorno — ver confirmación en la conversación). Cubre el
 uso de `prisma/bootstrap-admin.ts` contra el ambiente `staging` del proyecto
