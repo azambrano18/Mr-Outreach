@@ -101,7 +101,20 @@ export function AdminShell({
         />
       </aside>
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      {/*
+       * min-w-0 on both this column and <main> below is load-bearing, not
+       * decorative: a flex item's default min-width is `auto`, meaning it
+       * refuses to shrink below its content's intrinsic width. A wide table
+       * on any page (Cuentas de Correo, Monitor de Gestiones, ...) would
+       * otherwise force this whole column — and with it the sidebar and
+       * topbar — wider than the viewport instead of scrolling only inside
+       * that page's own `overflow-x-auto` container. Without this, the
+       * symptom is the *entire page* scrolling horizontally: the sidebar
+       * (position: sticky, which only pins vertically) scrolls out of view
+       * and a blank strip exactly the sidebar's width appears on the other
+       * side once scrolled.
+       */}
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <AdminTopbar
           title={title}
           collapsed={collapsed}
@@ -112,7 +125,7 @@ export function AdminShell({
           userEmail={userEmail}
           showNotificationBell={permissions.includes('conversations.read.assigned')}
         />
-        <main className="flex flex-1 flex-col p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="flex min-w-0 flex-1 flex-col p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );
