@@ -19,30 +19,116 @@ motor entrega al redimir un token de vinculación (`LinkMailboxUseCase`).
 ## 2. Proyecto Neon y branches
 
 Proyecto Neon dedicado **"Mr Outreach"** (separado del proyecto "Mejoreferido",
-que aloja `maestro_clientes` y no debe modificarse). Tres branches:
+que aloja `maestro_clientes` y no debe modificarse). Cuatro branches:
 
-- `production` — vacío, sin migrar, sin tocar hasta autorización expresa.
-- `development` — migrado y validado funcionalmente.
+> **Nota sobre el estado de `production` (leer antes de asumir nada):**
+> ningún agente automatizado que ha trabajado en este repositorio tiene, ni
+> ha tenido nunca, acceso al panel o a la API de control de Neon — solo a
+> cadenas de conexión Postgres ya emitidas para `development`/`test`, y a
+> ninguna para `production`. Todo lo que este documento dice sobre
+> `production` es **estado documentado en fases anteriores** (nadie del
+> equipo reporta haber ejecutado `prisma migrate deploy` contra ese branch
+> a través de este repositorio) — **no es una inspección verificada
+> actualmente** contra el branch real. Antes de usar `production` como
+> parent de cualquier branch nuevo, quien tenga acceso al panel de Neon
+> debe verificar directamente y en persona:
+> 1. que el proyecto seleccionado es **Mr Outreach** (no "Mejoreferido");
+> 2. que la rama seleccionada es **`production`**;
+> 3. que no existen tablas de negocio inesperadas;
+> 4. que no existen usuarios, organizaciones ni datos reales;
+> 5. que el historial/estado de migraciones es el esperado (idealmente
+>    ninguna aplicada, coherente con `docs/production-blockers.md`);
+> 6. que no hay actividad ni conexiones productivas activas;
+> 7. que crear un branch nuevo desde ahí no copiaría datos sensibles.
+>
+> Ver el detalle completo de esta verificación en
+> `docs/neon-staging-branch-procedure.md`.
+
+- `production` — **estado documentado (no verificado actualmente por mí):**
+  nunca se reporta una migración aplicada a través de este repositorio, por
+  lo que se documenta como "sin migrar" — **pendiente de verificación
+  manual directa** antes de tratarlo como confirmado. Nunca se toca sin
+  autorización expresa y separada, se haya verificado o no.
+- `staging` — **✅ creada** (confirmado por el propietario del proyecto,
+  manualmente, en el panel de Neon — ningún agente automatizado tiene
+  acceso a Neon para haberla creado).
+  - **Parent branch usado**: no confirmado hacia mí — no asumo que fue
+    `production` ni ninguna otra opción hasta que se confirme
+    explícitamente.
+  - **Modalidad de creación** (Current data / Schema-only / branch
+    limpio): no confirmada hacia mí — ver `docs/neon-staging-branch-procedure.md`.
+  - **Conexión de Railway `staging` a Neon `staging`**: **✅ configurada**
+    — el propietario del proyecto ya sustituyó manualmente `DATABASE_URL`
+    y `DIRECT_URL` de `mr-outreach-api` (ambiente Railway `staging`) por
+    las cadenas del branch Neon `staging`. Confirmado por el propietario,
+    no verificado de forma independiente por mí (sin acceso a Railway).
+  - **Deployment posterior al cambio de variables**: pendiente de
+    verificación (ver `docs/staging-post-connection-verification.md`).
+  - **Migraciones en Neon `staging`**: pendientes de verificación — no
+    confirmado si ya corrieron o no. **No afirmar que están aplicadas**
+    hasta confirmarlo por logs o inspección directa.
+  - **Administrador inicial en `staging`**: pendiente — no creado.
+  - **Prueba funcional real contra `staging`**: pendiente.
+- `development` — migrado y validado funcionalmente en fases anteriores.
+  Uso: desarrollo local manual. Railway `staging` ya **no** apunta aquí —
+  ver arriba.
 - `test` — migrado y validado; usado exclusivamente por la suite de
   integración y limpiado (`TRUNCATE`, nunca `DROP`) entre corridas.
 
+### Correspondencia Railway ↔ Neon
+
+```text
+Railway production  → Neon production   (operación productiva real)
+Railway staging      → Neon staging      (validación previa a producción)
+Desarrollo local      → Neon development (desarrollo manual, datos sintéticos)
+Pruebas automatizadas → Neon test        (fixtures efímeros, TRUNCATE entre corridas)
+```
+
+Ningún ambiente comparte branch con otro — en particular, `staging` nunca
+debe apuntar a `development` ni a `test` de forma permanente, y ni
+`bootstrap-admin.ts` ni ninguna limpieza de datos deben poder confundir uno
+con otro (ver `BOOTSTRAP_DATABASE_BRANCH` en
+`docs/bootstrap-admin-procedure.md` y el guard de 6 señales de §4 para
+`test`).
+
 ## 3. Convención de nombres de base de datos
 
-Los tres branches usan el nombre de base **`neondb`** (el default de Neon).
-Neon distingue ambientes por branch/endpoint (hostname), no por nombre de
-base — introducir nombres distintos por ambiente habría sido complejidad
-sin beneficio. Decisión: mantener `neondb` en los tres.
+`production`, `development` y `test` usan el nombre de base **`neondb`**
+(el default de Neon). El nombre de base de `staging` **no está confirmado
+hacia mí todavía** — se documentará aquí una vez se confirme (debería ser
+también `neondb`, por consistencia, pero no se asume). Neon distingue
+ambientes por branch/endpoint (hostname), no por nombre de base —
+introducir nombres distintos por ambiente habría sido complejidad sin
+beneficio.
 
-## 4. Separación development/test/production
+## 4. Separación development/test/staging/production
 
 - `development`: para desarrollo manual y smoke tests con datos sintéticos.
 - `test`: exclusivo para las suites automatizadas (integración, contratos
-  Prisma). Un guard de 3 señales (`NODE_ENV=test` + `DATABASE_ENVIRONMENT=test`
-  + `DATABASE_URL === TEST_DATABASE_URL` byte a byte) impide que un comando
-  destructivo de test corra por accidente contra otra base
-  (`apps/api/src/infrastructure/persistence/prisma/test-database-guard.ts`).
-- `production`: sin migrar. Ningún comando de este proyecto debe apuntar ahí
-  sin autorización explícita y separada.
+  Prisma). Un guard de 6 señales independientes (`NODE_ENV=test` +
+  `DATABASE_ENVIRONMENT=test` + `TEST_DATABASE_BRANCH=test` +
+  `TEST_DATABASE_CONFIRM=ALLOW_DESTRUCTIVE_TESTS_ON_TEST_BRANCH` +
+  `TEST_DATABASE_URL` presente + `DATABASE_URL === TEST_DATABASE_URL` byte
+  a byte) impide que un comando destructivo de test corra por accidente
+  contra otra base — deliberadamente NO confía solo en que las dos URLs
+  coincidan entre sí, porque esa igualdad se cumpliría igual de bien si
+  ambas apuntaran, por error, a `staging` o `production`
+  (`apps/api/src/infrastructure/persistence/prisma/test-database-guard.ts`,
+  con `test-database-guard.spec.ts` cubriendo los casos de rechazo).
+- `staging`: exclusivo para el ambiente Railway `staging` — validación
+  funcional previa a producción con el mismo procedimiento de migración
+  (`prisma migrate deploy`) que se usará en `production`. No debe
+  acumular fixtures de desarrollo ni datos de prueba automatizada; si en
+  el futuro se necesita limpiar datos ahí, el script correspondiente debe
+  exigir `CLEANUP_TARGET=staging` + `CLEANUP_DATABASE_BRANCH=staging` +
+  una confirmación explícita, y rechazar `production`/`development`/`test`
+  (mismo patrón que `BOOTSTRAP_DATABASE_BRANCH` en `bootstrap-admin.ts`) —
+  no existe todavía ningún script de limpieza reutilizable en el
+  repositorio.
+- `production`: documentado como sin migrar (ver nota de §2 — no verificado
+  actualmente contra el branch real). Ningún comando de este proyecto debe
+  apuntar ahí sin autorización explícita y separada, independientemente de
+  si ya se verificó su estado o no.
 
 ## 5. Diagrama general
 

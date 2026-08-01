@@ -12,9 +12,13 @@ para la evidencia que respalda "todo verde" antes de seguir este runbook.
 
 - Release candidate congelado (ver §Orden, paso A) y con las validaciones
   de `docs/test-inventory-reconciliation.md` en verde.
-- Proyecto Neon "Mr Outreach" con su branch `production` existente, vacío
-  y accesible (confirmado en fases anteriores — nunca el proyecto
-  "Mejoreferido").
+- Proyecto Neon "Mr Outreach" con su branch `production` existente y
+  accesible (nunca el proyecto "Mejoreferido"). Su estado "vacío" es
+  **documentado en fases anteriores, no verificado actualmente contra el
+  panel de Neon** — ningún agente de este repositorio tiene acceso al
+  plano de control de Neon. Antes de seguir este runbook, quien tenga
+  acceso debe confirmarlo en persona (ver §9 y
+  `docs/database-architecture.md` §2).
 - Cuenta Cloudflare R2 con el bucket de producción ya creado (fuera del
   alcance de este repositorio — ver `docs/signature-assets-r2-setup.md`).
 - Dominio público de la API y del frontend ya resueltos en DNS.
@@ -40,7 +44,8 @@ asigna personas, solo roles.)*
 
 A definir por la organización. Recomendación: horario de bajo tráfico,
 con los responsables de §2 disponibles durante toda la ventana y al menos
-1 hora después, dado que `production` parte de una base vacía (primera
+1 hora después, dado que `production` se documenta (sin verificación
+actual) como una base vacía (primera
 migración real contra datos de verdad, no un ajuste incremental).
 
 ## 4. Verificaciones previas
@@ -91,18 +96,34 @@ punto.
 
 ## 9. Confirmación del branch `production` en Neon
 
-- [ ] Confirmado de solo lectura: branch `production` del proyecto **"Mr
-  Outreach"** (nunca "Mejoreferido"), vacío (0 tablas o solo
-  `_prisma_migrations` si ya se corrió una vez).
+- [ ] **Verificación manual pendiente** (nunca hecha por un agente
+  automatizado, que no tiene acceso al panel/API de Neon): quien tenga
+  acceso confirma en persona, en el panel de Neon, proyecto **"Mr
+  Outreach"** (nunca "Mejoreferido"), branch `production`:
+  - [ ] proyecto correcto seleccionado;
+  - [ ] rama correcta seleccionada;
+  - [ ] no existen tablas de negocio inesperadas;
+  - [ ] no existen usuarios, organizaciones ni datos reales;
+  - [ ] el historial/estado de migraciones es el esperado (idealmente
+    ninguna aplicada — ver `docs/production-blockers.md`);
+  - [ ] no hay actividad ni conexiones productivas activas.
+  Hasta que esta verificación se haga, "vacío" es solo lo documentado en
+  fases anteriores, no un hecho confirmado hoy.
 - [ ] `DATABASE_URL`/`DIRECT_URL` de producción documentados únicamente en
   el gestor de secretos de Railway, nunca en un archivo versionado.
+- [ ] El branch `staging` (independiente, ya creado — ver
+  `docs/database-architecture.md` §2 y `docs/neon-staging-branch-procedure.md`)
+  ya fue validado de punta a punta (migraciones aplicadas, administrador
+  creado, prueba funcional real — todo pendiente al momento de escribir
+  esto) con el mismo procedimiento de migración antes de repetirlo aquí
+  contra `production`.
 
 ## 10. Respaldo previo
 
 - [ ] Crear un branch de respaldo en Neon a partir de `production` **antes**
-  de aplicar la migración inicial (aunque `production` esté vacío, este
-  paso deja el hábito instalado para el próximo despliegue, cuando ya no
-  lo estará).
+  de aplicar la migración inicial — obligatorio incluso si §9 confirmó que
+  `production` está vacía, tanto por hábito para el próximo despliegue
+  como por si la verificación manual de §9 revelara que no lo está.
 - [ ] Documentar el nombre del branch de respaldo y la hora exacta en la
   bitácora de este despliegue.
 
