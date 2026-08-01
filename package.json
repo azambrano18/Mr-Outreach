@@ -18,8 +18,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts",
-    "prisma:bootstrap-admin": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/bootstrap-admin.ts",
+    "prisma:seed": "ts-node --project prisma/tsconfig.json prisma/seed.ts",
+    "prisma:bootstrap-admin": "ts-node --project prisma/tsconfig.json prisma/bootstrap-admin.ts",
     "test:bootstrap-admin": "jest --config jest.config.prisma.js"
   },
   "devDependencies": {
