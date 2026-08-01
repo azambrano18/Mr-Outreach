@@ -8,6 +8,7 @@ describe('Users (e2e) — memory + mock', () => {
   let adminToken: string;
   let executiveToken: string;
   let executiveRoleId: string;
+  let adminRoleId: string;
 
   const adminEmail = process.env.DEV_ADMIN_EMAIL as string;
   const adminPassword = process.env.DEV_ADMIN_PASSWORD as string;
@@ -31,6 +32,7 @@ describe('Users (e2e) — memory + mock', () => {
       .get('/roles')
       .set('Authorization', `Bearer ${adminToken}`);
     executiveRoleId = roles.body.find((role: { name: string }) => role.name === 'EXECUTIVE').id;
+    adminRoleId = roles.body.find((role: { name: string }) => role.name === 'ADMIN').id;
   });
 
   afterAll(async () => {
@@ -240,6 +242,26 @@ describe('Users (e2e) — memory + mock', () => {
       .post('/auth/login')
       .send({ email: 'desactivar@mejoreferido.cl', password: temporaryPassword });
     expect(restoredLogin.status).toBe(200);
+  });
+
+  it('rejects creating a user with the ADMIN role id — this endpoint only ever creates EXECUTIVE users', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        firstName: 'Intento',
+        lastName: 'DeAdmin',
+        email: 'intento.de.admin@mejoreferido.cl',
+        roleId: adminRoleId,
+      });
+
+    expect(response.status).toBe(400);
+    const listResponse = await request(app.getHttpServer())
+      .get('/users')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(listResponse.body.map((u: { email: string }) => u.email)).not.toContain(
+      'intento.de.admin@mejoreferido.cl',
+    );
   });
 
   it('rejects creating a user with a role id that does not exist', async () => {

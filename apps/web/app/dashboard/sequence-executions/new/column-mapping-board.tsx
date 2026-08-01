@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { DEFAULT_TEMPLATE_VARIABLES } from '@outreach/validation';
 
 export interface MappingField {
   key: string;
@@ -8,11 +9,15 @@ export interface MappingField {
   required: boolean;
 }
 
-export const STANDARD_MAPPING_FIELDS: MappingField[] = [
-  { key: 'email', label: 'Correo', required: true },
-  { key: 'contact_name', label: 'Contacto', required: false },
-  { key: 'company_name', label: 'Empresa', required: false },
-];
+// Only "email" is required to start a gestión — the other default
+// variables are optional per-row data, same as a custom variable.
+const REQUIRED_DEFAULT_KEYS = new Set(['email']);
+
+export const STANDARD_MAPPING_FIELDS: MappingField[] = DEFAULT_TEMPLATE_VARIABLES.map((variable) => ({
+  key: variable.key,
+  label: variable.label,
+  required: REQUIRED_DEFAULT_KEYS.has(variable.key),
+}));
 
 /**
  * §8 — two-panel drag-and-drop column mapping. Every drop zone also accepts

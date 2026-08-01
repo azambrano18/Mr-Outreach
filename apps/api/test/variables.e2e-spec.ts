@@ -61,6 +61,32 @@ describe('Variables (e2e) — memory + mock', () => {
     expect(response.body.description).toBeNull();
   });
 
+  it('rejects a key reserved by the system default template variables (email/contact_name/company_name)', async () => {
+    for (const key of ['email', 'contact_name', 'company_name']) {
+      const response = await request(app.getHttpServer())
+        .post('/variables')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...createPayload, key });
+
+      expect(response.status).toBe(400);
+      expect(JSON.stringify(response.body.message)).toMatch(/reservada por el sistema/);
+    }
+  });
+
+  it('rejects renaming an existing custom variable to a reserved key', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/variables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...createPayload, key: 'renombrable_e2e' });
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/variables/${created.body.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ key: 'company_name' });
+
+    expect(updated.status).toBe(400);
+  });
+
   it('rejects a key with invalid characters', async () => {
     const response = await request(app.getHttpServer())
       .post('/variables')

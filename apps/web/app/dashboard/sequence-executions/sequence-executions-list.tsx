@@ -1,8 +1,15 @@
 'use client';
 
-import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type { SequenceExecutionSummary } from '../../../lib/sequence-execution-types';
+import {
+  ClickableTableRow,
+  DataTable,
+  DataTableContainer,
+  DataTableHeader,
+  DataTableHeaderCell,
+  PrimaryItemLink,
+} from '../../../components/ui/data-table';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Borrador',
@@ -85,48 +92,46 @@ export function SequenceExecutionsList({ executions }: { executions: SequenceExe
             : `No tienes gestiones en "${TAB_LABELS[tab]}".`}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/5">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Nombre</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Cliente</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Cuenta</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Plantilla</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Prospectos</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Recibida por el servidor</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Estado</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visible.map((execution) => (
-                <tr key={execution.id}>
-                  <td className="px-4 py-3 font-medium text-slate-900">{nameOrDraftLabel(execution)}</td>
-                  <td className="px-4 py-3 text-slate-600">{execution.clientName ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{execution.mailboxEmail}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {execution.templateName} (v{execution.templateVersionNumber})
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{execution.prospectCount ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {execution.receivedAt ? new Date(execution.receivedAt).toLocaleString('es-CL') : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[execution.status]}`}>
-                      {STATUS_LABELS[execution.status]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/dashboard/sequence-executions/${execution.id}`} className="text-brand-600 hover:underline">
-                      Ver detalle
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+        <DataTableContainer>
+          <DataTable>
+            <DataTableHeader>
+              <DataTableHeaderCell>Nombre</DataTableHeaderCell>
+              <DataTableHeaderCell>Cliente</DataTableHeaderCell>
+              <DataTableHeaderCell>Cuenta</DataTableHeaderCell>
+              <DataTableHeaderCell>Plantilla</DataTableHeaderCell>
+              <DataTableHeaderCell>Prospectos</DataTableHeaderCell>
+              <DataTableHeaderCell>Recibida por el servidor</DataTableHeaderCell>
+              <DataTableHeaderCell>Estado</DataTableHeaderCell>
+            </DataTableHeader>
+            <tbody>
+              {visible.map((execution) => {
+                const href = `/dashboard/sequence-executions/${execution.id}`;
+                const label = nameOrDraftLabel(execution);
+                return (
+                  <ClickableTableRow key={execution.id} href={href} ariaLabel={`Abrir gestión ${label}`}>
+                    <td className="px-4 py-3">
+                      <PrimaryItemLink href={href}>{label}</PrimaryItemLink>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{execution.clientName ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{execution.mailboxEmail}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {execution.templateName} (v{execution.templateVersionNumber})
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{execution.prospectCount ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {execution.receivedAt ? new Date(execution.receivedAt).toLocaleString('es-CL') : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[execution.status]}`}>
+                        {STATUS_LABELS[execution.status]}
+                      </span>
+                    </td>
+                  </ClickableTableRow>
+                );
+              })}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </DataTableContainer>
       )}
     </div>
   );

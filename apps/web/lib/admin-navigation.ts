@@ -96,12 +96,11 @@ export const adminNavigation: NavigationItem[] = [
     // the admin's own active MailboxAssignment — never all conversations of
     // the organization just because they're admin. `/dashboard/conversations`
     // is a pure redirect alias to the executive's own route (see
-    // app/dashboard/conversations/page.tsx). Listed BEFORE both "Cuentas de
-    // Correos" items below (`resolvePageTitle` takes the first array match,
-    // without checking visibility) so the topbar title resolves to
-    // "Conversaciones" while on `/dashboard/mailboxes/mine` — a prefix both
-    // other items' own broader `/dashboard/mailboxes` matchPrefix would
-    // otherwise also match.
+    // app/dashboard/conversations/page.tsx). Its matchPrefix
+    // ('/dashboard/mailboxes/mine') overlaps with "Cuentas de Correos"'
+    // broader '/dashboard/mailboxes' matchPrefix below — resolveActiveNavItem
+    // picks this one because it's the more specific (longer) match, not
+    // because of array order (see resolveActiveNavItem's doc comment).
     label: 'Conversaciones',
     href: '/dashboard/conversations',
     icon: MessageSquare,
@@ -180,9 +179,27 @@ export const adminNavigation: NavigationItem[] = [
   },
 ];
 
-export function isNavItemActive(item: NavigationItem, pathname: string): boolean {
+/**
+ * How well `item` matches `pathname`, as the length of the longest matching
+ * prefix (its own `href` or any `matchPrefixes` entry) — -1 if none match.
+ * Longer prefix = more specific match. Used by resolveActiveNavItem to pick
+ * a single winner deterministically when two items' prefixes both match the
+ * same pathname (e.g. "Conversaciones"'s '/dashboard/mailboxes/mine' vs.
+ * "Cuentas de Correos"'s broader '/dashboard/mailboxes').
+ */
+function activeMatchScore(item: NavigationItem, pathname: string): number {
   const prefixes = [item.href, ...(item.matchPrefixes ?? [])];
-  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  let best = -1;
+  for (const prefix of prefixes) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
+      best = Math.max(best, prefix.length);
+    }
+  }
+  return best;
+}
+
+export function isNavItemActive(item: NavigationItem, pathname: string): boolean {
+  return activeMatchScore(item, pathname) >= 0;
 }
 
 /** Visible if the user holds any of `permissions` and none of `excludePermissions`. */
@@ -192,11 +209,33 @@ export function isNavItemVisible(item: NavigationItem, permissions: string[]): b
   return hasAny && !hasExcluded;
 }
 
-/** Section title shown in the topbar, resolved from the active route. */
-export function resolvePageTitle(pathname: string): string {
+/**
+ * The single active item for `pathname`, chosen from `items` (already
+ * filtered to what the current user can see) by most-specific (longest)
+ * matching prefix — never by array order, never by "first match wins". This
+ * is the one place "which nav item is active" gets decided; both the
+ * sidebar highlight and the topbar title must call this (with the same
+ * visible-items list) so they can never disagree or both light up at once.
+ */
+export function resolveActiveNavItem(items: NavigationItem[], pathname: string): NavigationItem | null {
+  let winner: NavigationItem | null = null;
+  let winnerScore = -1;
+  for (const item of items) {
+    const score = activeMatchScore(item, pathname);
+    if (score > winnerScore) {
+      winner = item;
+      winnerScore = score;
+    }
+  }
+  return winner;
+}
+
+/** Section title shown in the topbar, resolved from the same active-item logic the sidebar uses. */
+export function resolvePageTitle(pathname: string, permissions: string[]): string {
   if (pathname === '/dashboard') {
     return 'Inicio';
   }
-  const match = adminNavigation.find((item) => isNavItemActive(item, pathname));
+  const visibleItems = adminNavigation.filter((item) => isNavItemVisible(item, permissions));
+  const match = resolveActiveNavItem(visibleItems, pathname);
   return match?.label ?? 'Panel';
 }

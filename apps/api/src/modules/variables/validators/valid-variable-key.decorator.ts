@@ -1,5 +1,5 @@
-import { registerDecorator, ValidationOptions } from 'class-validator';
-import { isValidVariableKey } from '@outreach/validation';
+import { registerDecorator, ValidationArguments, ValidationOptions } from 'class-validator';
+import { describeInvalidVariableKey, isValidVariableKey } from '@outreach/validation';
 
 /**
  * Validates a catalog variable's key with the same rules a {key}
@@ -18,8 +18,13 @@ export function IsValidVariableKey(validationOptions?: ValidationOptions) {
         validate(value: unknown): boolean {
           return typeof value === 'string' && isValidVariableKey(value);
         },
-        defaultMessage(): string {
-          return `${propertyName} must contain only letters, digits and underscores, and must not start with a digit.`;
+        defaultMessage(args: ValidationArguments): string {
+          const value = args.value;
+          const reservedMessage = typeof value === 'string' ? describeInvalidVariableKey(value) : null;
+          return (
+            reservedMessage ??
+            `${propertyName} must contain only letters, digits and underscores, and must not start with a digit.`
+          );
         },
       },
     });

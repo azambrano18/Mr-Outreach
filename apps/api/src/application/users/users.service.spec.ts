@@ -119,6 +119,20 @@ describe('UsersService', () => {
         service.create(orgId, { firstName: 'A', lastName: 'B', email: 'a@example.com', roleId: 'role_exec' }, 'actor_1'),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('rejects the ADMIN role even when it exists and belongs to the same organization — this endpoint only ever creates EXECUTIVE users, never a client-supplied roleId taken at face value', async () => {
+      const adminRole: Role = { ...executiveRole, id: 'role_admin', name: 'ADMIN' };
+      roles.findById.mockResolvedValue(adminRole);
+
+      await expect(
+        service.create(
+          orgId,
+          { firstName: 'Intento', lastName: 'DeAdmin', email: 'intento@example.com', roleId: 'role_admin' },
+          'actor_1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(users.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('resetPassword', () => {

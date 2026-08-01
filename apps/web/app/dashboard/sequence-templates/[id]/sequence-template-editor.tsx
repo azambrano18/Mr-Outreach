@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { extractTemplateVariables } from '@outreach/validation';
+import { DEFAULT_TEMPLATE_VARIABLES, extractTemplateVariables } from '@outreach/validation';
 import { RichTextEditor } from '../../../../components/rich-text-editor/rich-text-editor';
 import { VariableInsertMenu } from '../../../../components/rich-text-editor/variable-insert-menu';
 import { sanitizeRichTextHtml } from '../../../../lib/sanitize-html-client';
@@ -10,12 +10,6 @@ import type { SequenceTemplateDetail, SequenceTemplateStepSummary } from '../../
 import { EditPublishedTemplateModal } from './edit-published-template-modal';
 import { PublishConfirmationModal } from './publish-confirmation-modal';
 import { UpdateTemplateConfirmationModal, type TemplateUpdateImpact } from './update-template-confirmation-modal';
-
-const BASE_VARIABLES = [
-  { key: 'email', label: 'Correo' },
-  { key: 'contact_name', label: 'Nombre del contacto' },
-  { key: 'company_name', label: 'Empresa' },
-];
 
 const MIN_DELAY_DAYS = 1;
 const MAX_DELAY_DAYS = 20;
@@ -161,12 +155,12 @@ export function SequenceTemplateEditor({
         ...extractTemplateVariables(draft.bodyHtml),
       ]),
     ];
-    const standard = new Set(BASE_VARIABLES.map((v) => v.key));
+    const standard = new Set(DEFAULT_TEMPLATE_VARIABLES.map((v) => v.key));
     return [...new Set(all)].filter((key) => !standard.has(key));
   }, [subjectTemplate, drafts]);
 
   const variablesForEditor = useMemo(
-    () => [...BASE_VARIABLES, ...customVariables.map((key) => ({ key, label: key }))],
+    () => [...DEFAULT_TEMPLATE_VARIABLES, ...customVariables.map((key) => ({ key, label: key }))],
     [customVariables],
   );
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { adminNavigation, isNavItemActive, isNavItemVisible } from '../../lib/admin-navigation';
+import { adminNavigation, isNavItemVisible, resolveActiveNavItem } from '../../lib/admin-navigation';
 import { getInitials } from '../../lib/format';
 import { BrandMark } from '../brand';
 
@@ -21,6 +21,7 @@ export function AdminSidebar({
 }) {
   const pathname = usePathname();
   const visibleItems = adminNavigation.filter((item) => isNavItemVisible(item, permissions));
+  const activeItem = resolveActiveNavItem(visibleItems, pathname);
 
   return (
     <div className="flex h-full flex-col">
@@ -39,7 +40,7 @@ export function AdminSidebar({
       <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto px-2 py-4">
         <ul className="flex flex-col gap-1">
           {visibleItems.map((item) => {
-            const active = isNavItemActive(item, pathname);
+            const active = item === activeItem;
             const Icon = item.icon;
             return (
               <li key={item.href}>

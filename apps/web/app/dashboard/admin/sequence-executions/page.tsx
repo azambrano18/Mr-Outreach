@@ -1,9 +1,16 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../../../lib/api';
 import { getCurrentUser } from '../../../../lib/session';
 import { AccessDenied } from '../../access-denied';
 import type { SequenceExecutionSummary } from '../../../../lib/sequence-execution-types';
+import {
+  ClickableTableRow,
+  DataTable,
+  DataTableContainer,
+  DataTableHeader,
+  DataTableHeaderCell,
+  PrimaryItemLink,
+} from '../../../../components/ui/data-table';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Borrador',
@@ -66,62 +73,61 @@ export default async function AdminSequenceExecutionsPage() {
           Todavía no hay gestiones creadas en la organización.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/5">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Gestión</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Ejecutivo</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Cliente</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Dominio</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Cuenta</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Plantilla</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Prospectos</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Creada</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Enviada al servidor</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Recibida por el servidor</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Inicio real</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Estado local</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Estado servidor</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Estado inicial prospectos</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Última actualización</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {executions.map((execution) => (
-                <tr key={execution.id}>
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    {execution.name ?? `Borrador creado el ${new Date(execution.createdAt).toLocaleDateString('es-CL')}`}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{execution.executiveName}</td>
-                  <td className="px-4 py-3 text-slate-600">{execution.clientName ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{execution.domainName ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{execution.mailboxEmail}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {execution.templateName} (v{execution.templateVersionNumber})
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{execution.prospectCount ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.createdAt)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.requestedAt)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.receivedAt)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.startedAt)}</td>
-                  <td className="px-4 py-3 text-slate-600">{STATUS_LABELS[execution.status] ?? execution.status}</td>
-                  <td className="px-4 py-3 text-slate-600">{execution.serverStatus ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {execution.initialProspectState ? PROSPECT_STATE_LABELS[execution.initialProspectState] ?? execution.initialProspectState : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.lastSyncedAt)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/dashboard/admin/sequence-executions/${execution.id}`} className="text-brand-600 hover:underline">
-                      Ver detalle
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+        <DataTableContainer>
+          <DataTable>
+            <DataTableHeader>
+              <DataTableHeaderCell>Gestión</DataTableHeaderCell>
+              <DataTableHeaderCell>Ejecutivo</DataTableHeaderCell>
+              <DataTableHeaderCell>Cliente</DataTableHeaderCell>
+              <DataTableHeaderCell>Dominio</DataTableHeaderCell>
+              <DataTableHeaderCell>Cuenta</DataTableHeaderCell>
+              <DataTableHeaderCell>Plantilla</DataTableHeaderCell>
+              <DataTableHeaderCell>Prospectos</DataTableHeaderCell>
+              <DataTableHeaderCell>Creada</DataTableHeaderCell>
+              <DataTableHeaderCell>Enviada al servidor</DataTableHeaderCell>
+              <DataTableHeaderCell>Recibida por el servidor</DataTableHeaderCell>
+              <DataTableHeaderCell>Inicio real</DataTableHeaderCell>
+              <DataTableHeaderCell>Estado local</DataTableHeaderCell>
+              <DataTableHeaderCell>Estado servidor</DataTableHeaderCell>
+              <DataTableHeaderCell>Estado inicial prospectos</DataTableHeaderCell>
+              <DataTableHeaderCell>Última actualización</DataTableHeaderCell>
+            </DataTableHeader>
+            <tbody>
+              {executions.map((execution) => {
+                const href = `/dashboard/admin/sequence-executions/${execution.id}`;
+                const label =
+                  execution.name ?? `Borrador creado el ${new Date(execution.createdAt).toLocaleDateString('es-CL')}`;
+                return (
+                  <ClickableTableRow key={execution.id} href={href} ariaLabel={`Abrir gestión ${label}`}>
+                    <td className="px-4 py-3">
+                      <PrimaryItemLink href={href}>{label}</PrimaryItemLink>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{execution.executiveName}</td>
+                    <td className="px-4 py-3 text-slate-600">{execution.clientName ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{execution.domainName ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{execution.mailboxEmail}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {execution.templateName} (v{execution.templateVersionNumber})
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{execution.prospectCount ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.createdAt)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.requestedAt)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.receivedAt)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.startedAt)}</td>
+                    <td className="px-4 py-3 text-slate-600">{STATUS_LABELS[execution.status] ?? execution.status}</td>
+                    <td className="px-4 py-3 text-slate-600">{execution.serverStatus ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {execution.initialProspectState
+                        ? PROSPECT_STATE_LABELS[execution.initialProspectState] ?? execution.initialProspectState
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{formatDateTime(execution.lastSyncedAt)}</td>
+                  </ClickableTableRow>
+                );
+              })}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </DataTableContainer>
       )}
     </div>
   );

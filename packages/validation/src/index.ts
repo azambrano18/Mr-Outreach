@@ -31,16 +31,41 @@ export const VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z
 const BRACE_TOKEN_PATTERN = /\{([^{}]*)\}/g;
 const DOUBLE_BRACE_PATTERN = /\{\{|\}\}/;
 
+export interface DefaultTemplateVariable {
+  key: string;
+  label: string;
+  description: string;
+}
+
+/**
+ * The fixed variables the live SequenceTemplate/SequenceExecution flow
+ * resolves automatically from the imported prospect file's column mapping
+ * — never typed by hand, never created as a Variable catalog row. Single
+ * source of truth, reused by: the sequence template editor's built-in
+ * variable list, the Variables panel's "Variables por defecto" section, the
+ * prospect-import column mapping board, and RESERVED_VARIABLE_KEYS below
+ * (a custom catalog variable can never shadow one of these). If this flow
+ * ever starts resolving more fixed fields end-to-end, add them here first.
+ */
+export const DEFAULT_TEMPLATE_VARIABLES: DefaultTemplateVariable[] = [
+  { key: 'email', label: 'Correo', description: 'Correo del contacto.' },
+  { key: 'contact_name', label: 'Nombre del contacto', description: 'Nombre del contacto.' },
+  { key: 'company_name', label: 'Empresa', description: 'Empresa del contacto.' },
+];
+
+export const DEFAULT_TEMPLATE_VARIABLE_KEYS = DEFAULT_TEMPLATE_VARIABLES.map((variable) => variable.key);
+
 /**
  * Namespace roots reserved for this app's built-in, dot-qualified variables
  * ({sender.*}, {mailbox.*}, {contact.*}, all resolved server-side from real
- * data) — a custom catalog variable is always a bare key, so it's rejected
- * if it exactly matches one of these roots, keeping the two namespaces from
- * ever colliding. Common sample keys like "nombre"/"empresa"/"cargo" are
- * NOT reserved — those are exactly the kind of custom variable an admin is
+ * data), plus the flat DEFAULT_TEMPLATE_VARIABLE_KEYS above — a custom
+ * catalog variable is always a bare key, so it's rejected if it exactly
+ * matches one of these, keeping a custom variable from ever shadowing a
+ * built-in one. Common sample keys like "nombre"/"empresa"/"cargo" are NOT
+ * reserved — those are exactly the kind of custom variable an admin is
  * expected to create (see spec §5.3 examples).
  */
-export const RESERVED_VARIABLE_KEYS = new Set(['sender', 'mailbox', 'contact']);
+export const RESERVED_VARIABLE_KEYS = new Set(['sender', 'mailbox', 'contact', ...DEFAULT_TEMPLATE_VARIABLE_KEYS]);
 
 export interface TemplateVariableValidationResult {
   valid: boolean;
@@ -114,6 +139,22 @@ const BARE_VARIABLE_KEY_PATTERN = /^[a-z_][a-z0-9_]*$/;
 
 export function isValidVariableKey(key: string): boolean {
   return BARE_VARIABLE_KEY_PATTERN.test(key) && !RESERVED_VARIABLE_KEYS.has(key);
+}
+
+/**
+ * Human-readable (Spanish) reason a normalized catalog key is rejected, or
+ * null if it's valid — single source of truth for the message shown by
+ * both the create and edit Variable forms (and mirrored server-side by
+ * IsValidVariableKey's defaultMessage), so a reserved-key rejection reads
+ * differently from a plain character-format error instead of the same
+ * generic message for both.
+ */
+export function describeInvalidVariableKey(key: string): string | null {
+  if (isValidVariableKey(key)) return null;
+  if (RESERVED_VARIABLE_KEYS.has(key)) {
+    return 'Esta clave está reservada por el sistema (es una variable por defecto) y no puede usarse en el catálogo personalizado.';
+  }
+  return 'Usa solo minúsculas, números y guion bajo, sin espacios ni empezar con número.';
 }
 
 /**

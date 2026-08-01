@@ -1,4 +1,7 @@
 import {
+  DEFAULT_TEMPLATE_VARIABLE_KEYS,
+  DEFAULT_TEMPLATE_VARIABLES,
+  describeInvalidVariableKey,
   extractTemplateVariables,
   isInstitutionalEmail,
   isValidVariableKey,
@@ -160,7 +163,46 @@ describe('isValidVariableKey', () => {
     expect(isValidVariableKey('contact')).toBe(false);
   });
 
+  it('rejects the default template variable keys — a custom catalog variable can never shadow one', () => {
+    expect(isValidVariableKey('email')).toBe(false);
+    expect(isValidVariableKey('contact_name')).toBe(false);
+    expect(isValidVariableKey('company_name')).toBe(false);
+  });
+
   it('rejects an empty key', () => {
     expect(isValidVariableKey('')).toBe(false);
+  });
+});
+
+describe('describeInvalidVariableKey', () => {
+  it('returns null for a valid key', () => {
+    expect(describeInvalidVariableKey('empresa')).toBeNull();
+  });
+
+  it('returns a reserved-key-specific message for each default template variable key', () => {
+    for (const key of ['email', 'contact_name', 'company_name']) {
+      expect(describeInvalidVariableKey(key)).toMatch(/reservada por el sistema/);
+    }
+  });
+
+  it('returns a reserved-key-specific message for the system-namespace roots too', () => {
+    expect(describeInvalidVariableKey('sender')).toMatch(/reservada por el sistema/);
+  });
+
+  it('returns a plain format message for a merely malformed key', () => {
+    expect(describeInvalidVariableKey('Nombre Completo')).toMatch(/minúsculas/);
+  });
+});
+
+describe('DEFAULT_TEMPLATE_VARIABLES', () => {
+  it('exposes exactly the three fixed keys the live import/mapping flow resolves', () => {
+    expect(DEFAULT_TEMPLATE_VARIABLE_KEYS).toEqual(['email', 'contact_name', 'company_name']);
+  });
+
+  it('every default variable has a non-empty label and description', () => {
+    for (const variable of DEFAULT_TEMPLATE_VARIABLES) {
+      expect(variable.label.length).toBeGreaterThan(0);
+      expect(variable.description.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -1,8 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import type { UserSummary } from '@outreach/shared-types';
+import { ClickableTableRow, PrimaryItemLink } from '../../../components/ui/data-table';
 
 function StatusPill({ active }: { active: boolean }) {
   return (
@@ -26,32 +25,12 @@ export function ExecutiveRow({
   assignedClientCount?: number;
   showAssignedClients: boolean;
 }) {
-  const router = useRouter();
   const profileHref = `/dashboard/executives/${executive.id}`;
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>): void {
-    if (event.key === 'Enter') {
-      router.push(profileHref);
-    }
-  }
-
   return (
-    <tr
-      onClick={() => router.push(profileHref)}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}
-      role="link"
-      aria-label={`Ver perfil de ${executive.name}`}
-      className="cursor-pointer border-b border-slate-100 outline-none transition-colors last:border-0 hover:bg-brand-50/50 focus-visible:bg-brand-50/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
-    >
+    <ClickableTableRow href={profileHref} ariaLabel={`Ver perfil de ${executive.name}`}>
       <td className="px-4 py-3">
-        <Link
-          href={profileHref}
-          onClick={(event) => event.stopPropagation()}
-          className="font-medium text-slate-900 hover:text-brand-700 hover:underline"
-        >
-          {executive.name}
-        </Link>
+        <PrimaryItemLink href={profileHref}>{executive.name}</PrimaryItemLink>
       </td>
       <td className="px-4 py-3 text-slate-600">{executive.email}</td>
       <td className="px-4 py-3 text-slate-600">{executive.roleName}</td>
@@ -65,6 +44,6 @@ export function ExecutiveRow({
       <td className="px-4 py-3 font-mono text-xs text-slate-500">
         {executive.lastLoginAt ? new Date(executive.lastLoginAt).toLocaleString('es-CL') : 'Nunca'}
       </td>
-    </tr>
+    </ClickableTableRow>
   );
 }

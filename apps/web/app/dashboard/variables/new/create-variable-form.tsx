@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { isValidVariableKey, normalizeVariableKey } from '@outreach/validation';
+import { describeInvalidVariableKey, normalizeVariableKey } from '@outreach/validation';
 
 export function CreateVariableForm() {
   const router = useRouter();
@@ -12,7 +12,8 @@ export function CreateVariableForm() {
   const [loading, setLoading] = useState(false);
 
   const normalizedKey = normalizeVariableKey(key);
-  const keyIsValid = key === '' || isValidVariableKey(normalizedKey);
+  const keyError = key === '' ? null : describeInvalidVariableKey(normalizedKey);
+  const keyIsValid = keyError === null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -62,11 +63,7 @@ export function CreateVariableForm() {
             <code className="rounded bg-slate-100 px-1 py-0.5">{`{${normalizedKey}}`}</code>
           </span>
         )}
-        {!keyIsValid && (
-          <span className="text-xs text-red-600">
-            Usa solo minúsculas, números y guion bajo, sin espacios ni empezar con número.
-          </span>
-        )}
+        {keyError && <span className="text-xs text-red-600">{keyError}</span>}
       </label>
 
       <label className="flex flex-col gap-1 text-sm text-slate-700" htmlFor="variable-label">

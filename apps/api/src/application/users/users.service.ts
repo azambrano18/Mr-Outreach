@@ -11,6 +11,7 @@ import {
   USER_REPOSITORY,
   USER_ROLE_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
+import { EXECUTIVE_ROLE_NAME } from '../../modules/seed/system-roles';
 import { generateTemporaryPassword } from './temporary-password.generator';
 import {
   CreateExecutiveInput,
@@ -45,6 +46,15 @@ export class UsersService {
    * The admin never chooses the password (per spec) — a temporary one is
    * always generated here and returned exactly once, in this response.
    * It is never logged, audited, or retrievable again afterward.
+   *
+   * This endpoint only ever creates EXECUTIVE users — it backs the
+   * "Crear ejecutivo" screen exclusively, never a general-purpose
+   * "create any user" API. The client is expected to submit the
+   * organization's EXECUTIVE role id, but that is never trusted at face
+   * value: it must resolve to a role that belongs to this organization
+   * AND is literally named EXECUTIVE, or the request is rejected. This is
+   * what stops a crafted request (or a compromised/buggy frontend) from
+   * creating a second ADMIN through this form.
    */
   async create(
     organizationId: string,
@@ -52,6 +62,9 @@ export class UsersService {
     actorId: string,
   ): Promise<CreateUserResult> {
     const role = await this.requireOwnedRole(organizationId, input.roleId);
+    if (role.name !== EXECUTIVE_ROLE_NAME) {
+      throw new BadRequestException(`Only the ${EXECUTIVE_ROLE_NAME} role can be assigned through this endpoint.`);
+    }
 
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, PASSWORD_HASH_ROUNDS);

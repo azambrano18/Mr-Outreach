@@ -5,6 +5,13 @@ import { ApiError, apiFetch } from '../../../lib/api';
 import { getCurrentUser } from '../../../lib/session';
 import { AccessDenied } from '../access-denied';
 import { ExecutiveRow } from './executive-row';
+import {
+  DataTable,
+  DataTableContainer,
+  DataTableHeader,
+  DataTableHeaderCell,
+  EmptyTableState,
+} from '../../../components/ui/data-table';
 
 const PAGE_SIZE = 20;
 
@@ -125,19 +132,17 @@ export default async function ExecutivesPage({
       {loadError ? (
         <p className="text-sm text-red-600">{loadError}</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/5">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Nombre</th>
-                <th className="px-4 py-3">Correo</th>
-                <th className="px-4 py-3">Rol</th>
-                <th className="px-4 py-3">Estado</th>
-                {canSeeAssignedClients && <th className="px-4 py-3">Clientes asignados</th>}
-                <th className="px-4 py-3">Creado</th>
-                <th className="px-4 py-3">Último acceso</th>
-              </tr>
-            </thead>
+        <DataTableContainer>
+          <DataTable>
+            <DataTableHeader>
+              <DataTableHeaderCell>Nombre</DataTableHeaderCell>
+              <DataTableHeaderCell>Correo</DataTableHeaderCell>
+              <DataTableHeaderCell>Rol</DataTableHeaderCell>
+              <DataTableHeaderCell>Estado</DataTableHeaderCell>
+              {canSeeAssignedClients && <DataTableHeaderCell>Clientes asignados</DataTableHeaderCell>}
+              <DataTableHeaderCell>Creado</DataTableHeaderCell>
+              <DataTableHeaderCell>Último acceso</DataTableHeaderCell>
+            </DataTableHeader>
             <tbody>
               {paged.map((executive) => (
                 <ExecutiveRow
@@ -147,16 +152,10 @@ export default async function ExecutivesPage({
                   showAssignedClients={canSeeAssignedClients}
                 />
               ))}
-              {paged.length === 0 && (
-                <tr>
-                  <td colSpan={canSeeAssignedClients ? 7 : 6} className="px-4 py-6 text-center text-slate-500">
-                    Sin resultados.
-                  </td>
-                </tr>
-              )}
+              {paged.length === 0 && <EmptyTableState colSpan={canSeeAssignedClients ? 7 : 6} />}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </DataTableContainer>
       )}
 
       {!loadError && totalPages > 1 && (

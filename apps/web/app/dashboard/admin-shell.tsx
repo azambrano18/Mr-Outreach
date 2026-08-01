@@ -58,7 +58,7 @@ export function AdminShell({
     };
   }, [mobileOpen]);
 
-  const title = resolvePageTitle(pathname);
+  const title = resolvePageTitle(pathname, permissions);
 
   return (
     <div className="flex min-h-screen bg-slate-50">

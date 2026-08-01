@@ -4,7 +4,15 @@ import type { MailboxAdminOverviewItem } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { getCurrentUser } from '../../../lib/session';
 import { AccessDenied } from '../access-denied';
-import { MailboxRow } from './mailbox-row';
+import {
+  ClickableTableRow,
+  DataTable,
+  DataTableContainer,
+  DataTableHeader,
+  DataTableHeaderCell,
+  EmptyTableState,
+  PrimaryItemLink,
+} from '../../../components/ui/data-table';
 
 const LOCAL_STATUS_LABEL: Record<MailboxAdminOverviewItem['status'], string> = {
   ACTIVE: 'Activa',
@@ -223,87 +231,84 @@ export default async function MailboxesOverviewPage({
           {loadError ? (
             <p className="text-sm text-red-600">{loadError}</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/5">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Cliente</th>
-                    <th className="px-4 py-3">Dominio</th>
-                    <th className="px-4 py-3">Cuenta</th>
-                    <th className="px-4 py-3">Origen</th>
-                    <th className="px-4 py-3">Ejecutivo principal</th>
-                    <th className="px-4 py-3">Secundarios</th>
-                    <th className="px-4 py-3">Estado servidor</th>
-                    <th className="px-4 py-3">Puede enviar</th>
-                    <th className="px-4 py-3">Estado local</th>
-                    <th className="px-4 py-3">Última sync.</th>
-                  </tr>
-                </thead>
+            <DataTableContainer>
+              <DataTable>
+                <DataTableHeader>
+                  <DataTableHeaderCell>Cliente</DataTableHeaderCell>
+                  <DataTableHeaderCell>Dominio</DataTableHeaderCell>
+                  <DataTableHeaderCell>Cuenta</DataTableHeaderCell>
+                  <DataTableHeaderCell>Origen</DataTableHeaderCell>
+                  <DataTableHeaderCell>Ejecutivo principal</DataTableHeaderCell>
+                  <DataTableHeaderCell>Secundarios</DataTableHeaderCell>
+                  <DataTableHeaderCell>Estado servidor</DataTableHeaderCell>
+                  <DataTableHeaderCell>Puede enviar</DataTableHeaderCell>
+                  <DataTableHeaderCell>Estado local</DataTableHeaderCell>
+                  <DataTableHeaderCell>Última sync.</DataTableHeaderCell>
+                </DataTableHeader>
                 <tbody>
-                  {filtered.map((item) => (
-                    <MailboxRow key={item.id} href={`/dashboard/mailboxes/${item.id}/edit`} label={item.email}>
-                      <td className="px-4 py-3 text-slate-700">{item.clientName ?? '— Sin clasificar —'}</td>
-                      <td className="px-4 py-3 text-slate-700">{item.domainName ?? '—'}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-slate-900">{item.email}</span>
-                          <span className="text-xs text-slate-500">{item.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            item.linkSource === 'SERVER_TOKEN' ? 'bg-brand-50 text-brand-700' : 'bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {ORIGIN_LABEL[item.linkSource]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {item.primaryExecutive ? (
-                          item.primaryExecutive.name
-                        ) : (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                            Sin principal
+                  {filtered.map((item) => {
+                    const href = `/dashboard/mailboxes/${item.id}/edit`;
+                    return (
+                      <ClickableTableRow key={item.id} href={href} ariaLabel={`Abrir detalle de ${item.email}`}>
+                        <td className="px-4 py-3 text-slate-700">{item.clientName ?? '— Sin clasificar —'}</td>
+                        <td className="px-4 py-3 text-slate-700">{item.domainName ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col">
+                            <PrimaryItemLink href={href}>{item.email}</PrimaryItemLink>
+                            <span className="text-xs text-slate-500">{item.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                              item.linkSource === 'SERVER_TOKEN' ? 'bg-brand-50 text-brand-700' : 'bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {ORIGIN_LABEL[item.linkSource]}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{item.secondaryExecutiveCount}</td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {SERVER_STATUS_LABEL[item.serverStatusSnapshot ?? 'UNKNOWN'] ?? '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {item.serverCanSendSnapshot === null ? (
-                          '—'
-                        ) : item.serverCanSendSnapshot ? (
-                          <span className="text-emerald-700">Sí</span>
-                        ) : (
-                          <span className="text-red-600">No</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${LINK_STATUS_TONE[item.linkStatus]}`}>
-                          {LINK_STATUS_LABEL[item.linkStatus]}
-                        </span>
-                        <div className="mt-0.5 text-xs text-slate-400">{LOCAL_STATUS_LABEL[item.status]}</div>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">
-                        {item.serverStatusCheckedAt
-                          ? new Date(item.serverStatusCheckedAt).toLocaleString('es-CL')
-                          : 'Nunca'}
-                      </td>
-                    </MailboxRow>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.primaryExecutive ? (
+                            item.primaryExecutive.name
+                          ) : (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                              Sin principal
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{item.secondaryExecutiveCount}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {SERVER_STATUS_LABEL[item.serverStatusSnapshot ?? 'UNKNOWN'] ?? '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.serverCanSendSnapshot === null ? (
+                            '—'
+                          ) : item.serverCanSendSnapshot ? (
+                            <span className="text-emerald-700">Sí</span>
+                          ) : (
+                            <span className="text-red-600">No</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${LINK_STATUS_TONE[item.linkStatus]}`}>
+                            {LINK_STATUS_LABEL[item.linkStatus]}
+                          </span>
+                          <div className="mt-0.5 text-xs text-slate-400">{LOCAL_STATUS_LABEL[item.status]}</div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-500">
+                          {item.serverStatusCheckedAt
+                            ? new Date(item.serverStatusCheckedAt).toLocaleString('es-CL')
+                            : 'Nunca'}
+                        </td>
+                      </ClickableTableRow>
+                    );
+                  })}
                   {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
-                        Ninguna cuenta coincide con los filtros seleccionados.
-                      </td>
-                    </tr>
+                    <EmptyTableState colSpan={10} message="Ninguna cuenta coincide con los filtros seleccionados." />
                   )}
                 </tbody>
-              </table>
-            </div>
+              </DataTable>
+            </DataTableContainer>
           )}
         </>
       )}

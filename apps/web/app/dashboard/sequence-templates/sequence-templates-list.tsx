@@ -1,8 +1,15 @@
 'use client';
 
-import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type { SequenceTemplateSummary } from '../../../lib/sequence-template-types';
+import {
+  ClickableTableRow,
+  DataTable,
+  DataTableContainer,
+  DataTableHeader,
+  DataTableHeaderCell,
+  PrimaryItemLink,
+} from '../../../components/ui/data-table';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Borrador',
@@ -87,50 +94,47 @@ export function SequenceTemplatesList({ templates }: { templates: SequenceTempla
               : `No tienes plantillas en "${TAB_LABELS[tab]}".`}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/5">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Nombre</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Cliente</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Cuenta</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Versión</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Última actualización</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Publicada</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-500">Estado del servidor</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visible.map((template) => (
-                <tr key={template.id}>
-                  <td className="px-4 py-3 font-medium text-slate-900">{template.name}</td>
-                  <td className="px-4 py-3 text-slate-600">{template.clientName ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{template.mailboxEmail}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {template.latestPublishedVersion ? `v${template.latestPublishedVersion.versionNumber}` : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{new Date(template.updatedAt).toLocaleString('es-CL')}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {template.latestPublishedVersion?.acceptedAt
-                      ? new Date(template.latestPublishedVersion.acceptedAt).toLocaleString('es-CL')
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[template.status]}`}>
-                      {STATUS_LABELS[template.status]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/dashboard/sequence-templates/${template.id}`} className="text-brand-600 hover:underline">
-                      {tab === 'drafts' ? 'Editar' : 'Ver'}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+        <DataTableContainer>
+          <DataTable>
+            <DataTableHeader>
+              <DataTableHeaderCell>Nombre</DataTableHeaderCell>
+              <DataTableHeaderCell>Cliente</DataTableHeaderCell>
+              <DataTableHeaderCell>Cuenta</DataTableHeaderCell>
+              <DataTableHeaderCell>Versión</DataTableHeaderCell>
+              <DataTableHeaderCell>Última actualización</DataTableHeaderCell>
+              <DataTableHeaderCell>Publicada</DataTableHeaderCell>
+              <DataTableHeaderCell>Estado del servidor</DataTableHeaderCell>
+            </DataTableHeader>
+            <tbody>
+              {visible.map((template) => {
+                const href = `/dashboard/sequence-templates/${template.id}`;
+                return (
+                  <ClickableTableRow key={template.id} href={href} ariaLabel={`Abrir plantilla ${template.name}`}>
+                    <td className="px-4 py-3">
+                      <PrimaryItemLink href={href}>{template.name}</PrimaryItemLink>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{template.clientName ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{template.mailboxEmail}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {template.latestPublishedVersion ? `v${template.latestPublishedVersion.versionNumber}` : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{new Date(template.updatedAt).toLocaleString('es-CL')}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {template.latestPublishedVersion?.acceptedAt
+                        ? new Date(template.latestPublishedVersion.acceptedAt).toLocaleString('es-CL')
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[template.status]}`}>
+                        {STATUS_LABELS[template.status]}
+                      </span>
+                    </td>
+                  </ClickableTableRow>
+                );
+              })}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </DataTableContainer>
       )}
     </div>
   );
