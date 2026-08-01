@@ -221,12 +221,28 @@ export function SequenceExecutionDetail({
 
       <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
         <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Ejecutivo</span>
+          <p className="text-sm text-slate-800">{execution.executiveName}</p>
+        </div>
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Dominio</span>
+          <p className="text-sm text-slate-800">{execution.domainName ?? '—'}</p>
+        </div>
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Creada</span>
+          <p className="text-sm text-slate-800">{formatDateTime(execution.createdAt)}</p>
+        </div>
+        <div>
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado local</span>
           <p className="text-sm text-slate-800">{STATUS_LABELS[execution.status] ?? execution.status}</p>
         </div>
         <div>
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado del servidor</span>
           <p className="text-sm text-slate-800">{execution.serverStatus ?? '—'}</p>
+        </div>
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Enviada al servidor</span>
+          <p className="text-sm text-slate-800">{formatDateTime(execution.requestedAt)}</p>
         </div>
         <div>
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Recibida por el servidor</span>

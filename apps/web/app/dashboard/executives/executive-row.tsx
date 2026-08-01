@@ -16,15 +16,12 @@ function StatusPill({ active }: { active: boolean }) {
   );
 }
 
-export function ExecutiveRow({
-  executive,
-  assignedClientCount,
-  showAssignedClients,
-}: {
-  executive: UserSummary;
-  assignedClientCount?: number;
-  showAssignedClients: boolean;
-}) {
+/**
+ * §3 — kept to the columns needed to identify a user and its main state.
+ * Fecha de creación, clientes asignados, etc. live in the detail page
+ * (ExecutiveProfileSummary) rather than repeated here.
+ */
+export function ExecutiveRow({ executive }: { executive: UserSummary }) {
   const profileHref = `/dashboard/executives/${executive.id}`;
 
   return (
@@ -36,10 +33,6 @@ export function ExecutiveRow({
       <td className="px-4 py-3 text-slate-600">{executive.roleName}</td>
       <td className="px-4 py-3">
         <StatusPill active={executive.status === 'ACTIVE'} />
-      </td>
-      {showAssignedClients && <td className="px-4 py-3 text-slate-600">{assignedClientCount ?? 0}</td>}
-      <td className="px-4 py-3 font-mono text-xs text-slate-500">
-        {new Date(executive.createdAt).toLocaleDateString('es-CL')}
       </td>
       <td className="px-4 py-3 font-mono text-xs text-slate-500">
         {executive.lastLoginAt ? new Date(executive.lastLoginAt).toLocaleString('es-CL') : 'Nunca'}

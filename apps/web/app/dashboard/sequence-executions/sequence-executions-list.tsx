@@ -8,8 +8,11 @@ import {
   DataTableContainer,
   DataTableHeader,
   DataTableHeaderCell,
+  EmptyTableState,
   PrimaryItemLink,
 } from '../../../components/ui/data-table';
+import { EntitySearchInput } from '../../../components/ui/entity-search-input';
+import { matchesSearch } from '../../../lib/search';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Borrador',
@@ -57,8 +60,15 @@ function nameOrDraftLabel(execution: SequenceExecutionSummary): string {
   return `Borrador creado el ${new Date(execution.createdAt).toLocaleDateString('es-CL')}`;
 }
 
+/**
+ * §11 — the executive's own Gestiones are already loaded in full (no
+ * backend pagination), so search filters client-side. Plantilla y
+ * Prospectos se movieron al detalle (ya estaban ahí) — la lista solo
+ * necesita lo esencial para identificar y abrir una gestión.
+ */
 export function SequenceExecutionsList({ executions }: { executions: SequenceExecutionSummary[] }) {
   const [tab, setTab] = useState<TabKey>('running');
+  const [search, setSearch] = useState('');
 
   const buckets = useMemo(() => {
     const grouped: Record<TabKey, SequenceExecutionSummary[]> = { drafts: [], running: [], completed: [], problems: [] };
@@ -67,22 +77,37 @@ export function SequenceExecutionsList({ executions }: { executions: SequenceExe
   }, [executions]);
 
   const visible = buckets[tab];
+  const filtered = useMemo(
+    () =>
+      visible.filter((execution) =>
+        matchesSearch(search, nameOrDraftLabel(execution), execution.clientName, execution.mailboxEmail),
+      ),
+    [visible, search],
+  );
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap gap-2">
-        {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-              tab === key ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {TAB_LABELS[key]} ({buckets[key].length})
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                tab === key ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {TAB_LABELS[key]} ({buckets[key].length})
+            </button>
+          ))}
+        </div>
+        <EntitySearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Buscar por gestión, cliente o correo"
+          ariaLabel="Buscar gestiones"
+        />
       </div>
 
       {visible.length === 0 ? (
@@ -95,16 +120,14 @@ export function SequenceExecutionsList({ executions }: { executions: SequenceExe
         <DataTableContainer>
           <DataTable>
             <DataTableHeader>
-              <DataTableHeaderCell>Nombre</DataTableHeaderCell>
+              <DataTableHeaderCell>Gestión</DataTableHeaderCell>
               <DataTableHeaderCell>Cliente</DataTableHeaderCell>
               <DataTableHeaderCell>Cuenta</DataTableHeaderCell>
-              <DataTableHeaderCell>Plantilla</DataTableHeaderCell>
-              <DataTableHeaderCell>Prospectos</DataTableHeaderCell>
-              <DataTableHeaderCell>Recibida por el servidor</DataTableHeaderCell>
               <DataTableHeaderCell>Estado</DataTableHeaderCell>
+              <DataTableHeaderCell>Recibida por el servidor</DataTableHeaderCell>
             </DataTableHeader>
             <tbody>
-              {visible.map((execution) => {
+              {filtered.map((execution) => {
                 const href = `/dashboard/sequence-executions/${execution.id}`;
                 const label = nameOrDraftLabel(execution);
                 return (
@@ -114,21 +137,20 @@ export function SequenceExecutionsList({ executions }: { executions: SequenceExe
                     </td>
                     <td className="px-4 py-3 text-slate-600">{execution.clientName ?? '—'}</td>
                     <td className="px-4 py-3 text-slate-600">{execution.mailboxEmail}</td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {execution.templateName} (v{execution.templateVersionNumber})
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{execution.prospectCount ?? '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {execution.receivedAt ? new Date(execution.receivedAt).toLocaleString('es-CL') : '—'}
-                    </td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[execution.status]}`}>
                         {STATUS_LABELS[execution.status]}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {execution.receivedAt ? new Date(execution.receivedAt).toLocaleString('es-CL') : '—'}
+                    </td>
                   </ClickableTableRow>
                 );
               })}
+              {filtered.length === 0 && (
+                <EmptyTableState colSpan={5} message={`No encontramos gestiones que coincidan con "${search}".`} />
+              )}
             </tbody>
           </DataTable>
         </DataTableContainer>
