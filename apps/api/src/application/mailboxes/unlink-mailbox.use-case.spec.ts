@@ -26,6 +26,7 @@ describe('UnlinkMailboxUseCase', () => {
   let useCase: UnlinkMailboxUseCase;
 
   const orgId = 'org_1';
+  const otherOrgId = 'org_2';
   const activeMailbox = {
     id: 'mailbox_1',
     organizationId: orgId,
@@ -177,6 +178,40 @@ describe('UnlinkMailboxUseCase', () => {
     );
   });
 
+  it('Fase 11 — records the ACCEPTED and PROCESSING audit stages around the motor call, in addition to REQUESTED and the terminal stage', async () => {
+    await useCase.execute(baseInput());
+
+    const actions = auditLogs.record.mock.calls.map((call) => call[0].action);
+    expect(actions).toEqual([
+      'mailbox.unlink_requested',
+      'mailbox.unlink_accepted',
+      'mailbox.unlink_processing',
+      'mailbox.unlink_confirmed',
+    ]);
+  });
+
+  it('records ACCEPTED and PROCESSING even when the motor ultimately fails, before the FAILED entry', async () => {
+    motor.unlinkMailbox.mockRejectedValue(new ServiceUnavailableException('motor caído'));
+
+    await useCase.execute(baseInput());
+
+    const actions = auditLogs.record.mock.calls.map((call) => call[0].action);
+    expect(actions).toEqual([
+      'mailbox.unlink_requested',
+      'mailbox.unlink_accepted',
+      'mailbox.unlink_processing',
+      'mailbox.unlink_failed',
+    ]);
+  });
+
+  it('rejects unlinking a mailbox that belongs to a different organization (never 403 — same 404 as "does not exist")', async () => {
+    mailboxes.findById.mockResolvedValue({ ...activeMailbox, organizationId: otherOrgId } as never);
+
+    await expect(useCase.execute(baseInput())).rejects.toThrow(NotFoundException);
+    expect(mailboxes.update).not.toHaveBeenCalled();
+    expect(motor.unlinkMailbox).not.toHaveBeenCalled();
+  });
+
   it('§10 — revoke-checks derived visibility for every assignee once the motor confirms REVOKED', async () => {
     assignments.findByMailbox.mockResolvedValue([
       { id: 'a1', mailboxId: 'mailbox_1', userId: 'exec_1', role: 'PRIMARY' } as never,
@@ -229,6 +264,21 @@ describe('UnlinkMailboxUseCase', () => {
       const result = await useCase.retryConfirmation(orgId, 'mailbox_1', 'admin_1');
 
       expect(result.linkStatus).toBe('REVOKED');
+      expect(motor.unlinkMailbox).not.toHaveBeenCalled();
+    });
+
+    it('never regresses an already-REVOKED mailbox back to UNLINK_REQUESTED — a late/duplicate retry can only confirm, never undo', async () => {
+      mailboxes.findById.mockResolvedValue({ ...activeMailbox, linkStatus: 'REVOKED', revocationId: 'rev_old' } as never);
+
+      await useCase.retryConfirmation(orgId, 'mailbox_1', 'admin_1');
+
+      expect(mailboxes.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects retrying a mailbox that belongs to a different organization (never 403 — same 404 as "does not exist")', async () => {
+      mailboxes.findById.mockResolvedValue({ ...activeMailbox, organizationId: otherOrgId, linkStatus: 'UNLINK_REQUESTED' } as never);
+
+      await expect(useCase.retryConfirmation(orgId, 'mailbox_1', 'admin_1')).rejects.toThrow(NotFoundException);
       expect(motor.unlinkMailbox).not.toHaveBeenCalled();
     });
   });

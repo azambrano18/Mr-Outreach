@@ -143,6 +143,18 @@ export class UsersService {
     return { email: updated.email, temporaryPassword };
   }
 
+  /**
+   * Unconditional protections for `sistema@mejoreferido.cl` — checked
+   * before any write this method could make, never bypassable via
+   * permissions or payload shape:
+   *   - its email can never change (renaming it away from the recognized
+   *     identity would silently disable every other protection below on
+   *     the very next call, since matching is by email, never by id — see
+   *     protected-system-account.ts);
+   *   - it can never lose the ADMIN role through a role reassignment.
+   * Both are independent of, and in addition to, the deactivate/delete
+   * blocks in `setStatus`/`remove` below.
+   */
   async update(
     organizationId: string,
     userId: string,
@@ -150,9 +162,21 @@ export class UsersService {
     actorId: string,
   ): Promise<UserSummary> {
     const existing = await this.getOwnedUser(organizationId, userId);
+    const protectedAccount = isProtectedSystemAccount(existing.email);
+
+    if (
+      protectedAccount &&
+      input.email !== undefined &&
+      input.email.trim().toLowerCase() !== existing.email.trim().toLowerCase()
+    ) {
+      throw new ForbiddenException('No es posible cambiar el correo de la cuenta protegida del sistema.');
+    }
 
     if (input.roleId) {
       const role = await this.requireOwnedRole(organizationId, input.roleId);
+      if (protectedAccount && role.name !== ADMIN_ROLE_NAME) {
+        throw new ForbiddenException('La cuenta protegida del sistema debe mantener el rol de administrador.');
+      }
       const currentRoles = await this.userRoles.getRolesForUser(userId);
       await Promise.all(currentRoles.map((role_) => this.userRoles.unassign(userId, role_.id)));
       await this.userRoles.assign(userId, role.id);
@@ -186,6 +210,15 @@ export class UsersService {
     actorId: string,
   ): Promise<UserSummary> {
     const existing = await this.getOwnedUser(organizationId, userId);
+
+    // Unconditional — the protected root account can never be deactivated,
+    // regardless of the caller's permissions or how the request was made
+    // (UI, direct API call, crafted payload). Reactivating it (status ===
+    // 'ACTIVE') is never blocked: it's a no-op at worst and never leaves
+    // the account without access.
+    if (status === 'INACTIVE' && isProtectedSystemAccount(existing.email)) {
+      throw new ForbiddenException('La cuenta principal del sistema no puede desactivarse ni eliminarse.');
+    }
 
     // Mirrors the same invariant `remove()` protects (never leave the
     // organization without an active admin) — moved here too because

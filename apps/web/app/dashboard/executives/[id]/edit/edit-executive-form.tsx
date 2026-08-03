@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { RoleSummary, UserSummary } from '@outreach/shared-types';
+import { isProtectedSystemAccount } from '../../../../../lib/protected-system-account';
 import { parseUserStatus } from '../../../../../lib/user-status';
 import { ToggleStatusButton } from '../../toggle-status-button';
 
@@ -14,6 +15,7 @@ export function EditExecutiveForm({
   roles: RoleSummary[];
 }) {
   const router = useRouter();
+  const protectedAccount = isProtectedSystemAccount(executive.email);
   const [firstName, setFirstName] = useState(executive.firstName);
   const [lastName, setLastName] = useState(executive.lastName);
   const [email, setEmail] = useState(executive.email);
@@ -77,27 +79,37 @@ export function EditExecutiveForm({
         <input
           type="email"
           required
+          disabled={protectedAccount}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-200 disabled:bg-slate-50 disabled:text-slate-500"
         />
-        <span className="text-xs text-slate-500">Debe terminar en @mejoreferido.cl.</span>
+        <span className="text-xs text-slate-500">
+          {protectedAccount
+            ? 'El correo de la cuenta protegida del sistema no puede modificarse.'
+            : 'Debe terminar en @mejoreferido.cl.'}
+        </span>
       </label>
 
-      <div className="flex flex-col gap-1 text-sm text-slate-700">
-        Estado
-        <div>
-          <ToggleStatusButton userId={executive.id} active={parseUserStatus(executive.status) === 'ACTIVE'} />
+      {/* La cuenta protegida del sistema nunca puede desactivarse — el
+          control ni siquiera se renderiza, en vez de mostrarse deshabilitado. */}
+      {!protectedAccount && (
+        <div className="flex flex-col gap-1 text-sm text-slate-700">
+          Estado
+          <div>
+            <ToggleStatusButton userId={executive.id} active={parseUserStatus(executive.status) === 'ACTIVE'} />
+          </div>
         </div>
-      </div>
+      )}
 
       <label className="flex flex-col gap-1 text-sm text-slate-700">
         Rol
         <select
           required
+          disabled={protectedAccount}
           value={roleId}
           onChange={(event) => setRoleId(event.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
         >
           {roles.map((role) => (
             <option key={role.id} value={role.id}>
@@ -105,6 +117,11 @@ export function EditExecutiveForm({
             </option>
           ))}
         </select>
+        {protectedAccount && (
+          <span className="text-xs text-slate-500">
+            La cuenta protegida del sistema debe mantener siempre el rol de administrador.
+          </span>
+        )}
       </label>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

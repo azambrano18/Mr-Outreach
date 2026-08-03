@@ -90,6 +90,43 @@ describe('envValidationSchema', () => {
     expect(error).toBeUndefined();
   });
 
+  it('refuses to boot in production with MAILBOX_MOTOR_DRIVER=simulated — the simulator is a dev/staging-only tool', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      NODE_ENV: 'production',
+      MAILBOX_MOTOR_DRIVER: 'simulated',
+      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+    });
+    expect(error?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
+  });
+
+  it('refuses to boot in production when MAILBOX_MOTOR_DRIVER is left unset — the default must never silently resolve to simulated', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      NODE_ENV: 'production',
+      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+    });
+    expect(error?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
+  });
+
+  it('accepts production with MAILBOX_MOTOR_DRIVER=http', () => {
+    const { error } = envValidationSchema.validate({
+      ...BASE_MEMORY_ENV,
+      NODE_ENV: 'production',
+      MAILBOX_MOTOR_DRIVER: 'http',
+      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+    });
+    expect(error).toBeUndefined();
+  });
+
+  it('still allows MAILBOX_MOTOR_DRIVER=simulated in staging/development/test — only production is restricted', () => {
+    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, NODE_ENV: 'staging' });
+    expect(error).toBeUndefined();
+  });
+
   it('accepts the default simulated SEQUENCE_MOTOR_MODE without a SEQUENCE_MOTOR_API_KEY', () => {
     const { error, value } = envValidationSchema.validate(BASE_MEMORY_ENV);
     expect(error).toBeUndefined();

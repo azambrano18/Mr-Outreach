@@ -124,6 +124,44 @@ export class SimulatedMailboxMotorAdapter implements MailboxMotorPort {
     }
   }
 
+  /**
+   * Root cause of a mailbox getting permanently stuck in
+   * "Desvinculación en proceso" (UNLINK_REQUESTED) in staging: this
+   * registry is a plain in-memory Map, populated only by `issueLinkToken`
+   * — it is wiped on every process restart (any deploy). Before this fix,
+   * `unlinkMailbox`/`getMailboxStatus` threw `BadRequestException` for any
+   * `serverMailboxId` missing from it, which `UnlinkMailboxUseCase` then
+   * treated the same as a transient motor outage: it leaves the mailbox
+   * at UNLINK_REQUESTED and lets the caller retry. But since nothing ever
+   * repopulates the missing entry, every retry hit the identical error
+   * forever — a structurally permanent stuck state, not a transient one.
+   *
+   * The fix: this Map is never the real source of truth for "does this
+   * mailbox exist" — the persisted `Mailbox.serverMailboxId` row already
+   * is, and the caller only ever reaches this adapter with an id it
+   * already confirmed is real. So a missing entry here just means "this
+   * simulator forgot about a mailbox it really did link before a
+   * restart" — self-healing it (assuming a healthy, still-linked mailbox)
+   * is the correct simulated behavior, never a masked real error.
+   */
+  private getOrRegisterMailbox(serverMailboxId: string): MailboxRegistryEntry {
+    let entry = this.mailboxRegistry.get(serverMailboxId);
+    if (!entry) {
+      entry = {
+        info: {
+          serverMailboxId,
+          email: '(desconocido tras reinicio del simulador)',
+          displayName: '(desconocido tras reinicio del simulador)',
+          status: 'CONNECTED',
+          canSend: true,
+        },
+        linkStatus: 'ACTIVE',
+      };
+      this.mailboxRegistry.set(serverMailboxId, entry);
+    }
+    return entry;
+  }
+
   private currentStatus(record: TokenRecord): MailboxLinkTokenStatus {
     if (record.status === 'REVOKED') return 'REVOKED';
     if (record.redemptions.size > 0) return 'REDEEMED';
@@ -186,10 +224,7 @@ export class SimulatedMailboxMotorAdapter implements MailboxMotorPort {
 
   async getMailboxStatus(serverMailboxId: string): Promise<ServerMailboxStatus> {
     this.requireMotorAvailable();
-    const entry = this.mailboxRegistry.get(serverMailboxId);
-    if (!entry) {
-      throw new BadRequestException('Cuenta de correo desconocida para el motor.');
-    }
+    const entry = this.getOrRegisterMailbox(serverMailboxId);
     return {
       serverMailboxId,
       linkStatus: entry.linkStatus,
@@ -201,10 +236,7 @@ export class SimulatedMailboxMotorAdapter implements MailboxMotorPort {
 
   async unlinkMailbox(input: UnlinkServerMailboxInput): Promise<ServerMailboxRevocation> {
     this.requireMotorAvailable();
-    const entry = this.mailboxRegistry.get(input.serverMailboxId);
-    if (!entry) {
-      throw new BadRequestException('Cuenta de correo desconocida para el motor.');
-    }
+    const entry = this.getOrRegisterMailbox(input.serverMailboxId);
 
     // Idempotent: already revoked — return a fresh receipt, never re-derive a different one.
     const outcome = this.unlinkOutcomes.get(input.serverMailboxId) ?? 'SUCCESS';

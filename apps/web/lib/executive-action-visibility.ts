@@ -20,7 +20,7 @@ export interface CurrentUserForVisibility {
 export interface ExecutiveActionsVisibility {
   /** False whenever `status` isn't exactly `'ACTIVE'` or `'INACTIVE'` — every action below is then forced to `false`, regardless of permissions. */
   isKnownStatus: boolean;
-  /** True only when the account is confirmed ACTIVE and the caller can disable accounts. */
+  /** True only when the account is confirmed ACTIVE, the caller can disable accounts, and the target isn't the protected system account (which can never be deactivated). */
   showDeactivate: boolean;
   /** True only when the account is confirmed INACTIVE and the caller can disable accounts. */
   showActivate: boolean;
@@ -71,7 +71,7 @@ export function getExecutiveActionsVisibility(
 
   return {
     isKnownStatus: status !== null,
-    showDeactivate: canDisable && isActive,
+    showDeactivate: canDisable && isActive && !isProtected,
     showActivate: canDisable && isInactive,
     showDelete: canDelete && !isProtected && !isSelf && isInactive,
   };

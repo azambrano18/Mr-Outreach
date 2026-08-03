@@ -95,6 +95,27 @@ describe('getExecutiveActionsVisibility', () => {
     expect(visibility.showDelete).toBe(false);
   });
 
+  it('sistema@mejoreferido.cl never shows Desactivar, even while ACTIVE', () => {
+    const visibility = getExecutiveActionsVisibility(
+      executive({ email: 'sistema@mejoreferido.cl', status: 'ACTIVE' }),
+      ADMIN_TOKEN,
+    );
+    expect(visibility.showDeactivate).toBe(false);
+  });
+
+  it('matches sistema@mejoreferido.cl case-insensitively and trimming whitespace for Desactivar too', () => {
+    const visibility = getExecutiveActionsVisibility(
+      executive({ email: '  Sistema@MejoReferido.CL  ', status: 'ACTIVE' }),
+      ADMIN_TOKEN,
+    );
+    expect(visibility.showDeactivate).toBe(false);
+  });
+
+  it('a non-protected ACTIVE account still shows Desactivar normally — the exclusion is exclusive to the protected system account', () => {
+    const visibility = getExecutiveActionsVisibility(executive({ status: 'ACTIVE' }), ADMIN_TOKEN);
+    expect(visibility.showDeactivate).toBe(true);
+  });
+
   it('never shows Eliminar for one’s own account, even while INACTIVE', () => {
     const visibility = getExecutiveActionsVisibility(executive({ id: 'admin-1', status: 'INACTIVE' }), ADMIN_TOKEN);
     expect(visibility.showDelete).toBe(false);

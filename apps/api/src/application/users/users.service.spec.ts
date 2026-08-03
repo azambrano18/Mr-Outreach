@@ -263,6 +263,56 @@ describe('UsersService', () => {
         NotFoundException,
       );
     });
+
+    it('rejects changing the protected system account’s email — renaming it would silently disable every other protection, which is matched by email, never by id', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+
+      await expect(
+        service.update(orgId, 'user_1', { email: 'atacante@example.com' }, 'actor_1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('allows re-submitting the protected system account’s own email unchanged (case/whitespace variants included)', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+      users.update.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+
+      await expect(
+        service.update(orgId, 'user_1', { email: '  Sistema@MejoReferido.CL  ' }, 'actor_1'),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects reassigning the protected system account away from the ADMIN role', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+      roles.findById.mockResolvedValue(executiveRole);
+
+      await expect(
+        service.update(orgId, 'user_1', { roleId: executiveRole.id }, 'actor_1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(userRoles.unassign).not.toHaveBeenCalled();
+      expect(userRoles.assign).not.toHaveBeenCalled();
+    });
+
+    it('allows re-assigning the protected system account to the ADMIN role (a no-op in practice, but never blocked)', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+      users.update.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+      roles.findById.mockResolvedValue(adminRole);
+
+      await expect(
+        service.update(orgId, 'user_1', { roleId: adminRole.id }, 'actor_1'),
+      ).resolves.toBeDefined();
+      expect(userRoles.assign).toHaveBeenCalledWith('user_1', adminRole.id);
+    });
+
+    it('other admins can still change their email and role normally — the protection is exclusive to the protected system account', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'otro.admin@example.com' }));
+      users.update.mockResolvedValue(buildUser({ email: 'nuevo@example.com' }));
+      roles.findById.mockResolvedValue(executiveRole);
+
+      await expect(
+        service.update(orgId, 'user_1', { email: 'nuevo@example.com', roleId: executiveRole.id }, 'actor_1'),
+      ).resolves.toBeDefined();
+    });
   });
 
   describe('setStatus', () => {
@@ -333,6 +383,37 @@ describe('UsersService', () => {
 
       expect(users.findAll).not.toHaveBeenCalled();
     });
+
+    it('rejects deactivating the protected system account, unconditionally — even as the caller with users.disable', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl' }));
+
+      await expect(service.setStatus(orgId, 'user_1', 'INACTIVE', 'actor_1')).rejects.toThrow(ForbiddenException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects deactivating the protected system account matched case-insensitively and trimming whitespace', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: '  Sistema@MejoReferido.CL  ' }));
+
+      await expect(service.setStatus(orgId, 'user_1', 'INACTIVE', 'actor_1')).rejects.toThrow(ForbiddenException);
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('never blocks reactivating the protected system account (status ACTIVE is always safe)', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl', status: 'INACTIVE' }));
+      users.update.mockResolvedValue(buildUser({ email: 'sistema@mejoreferido.cl', status: 'ACTIVE' }));
+
+      await expect(service.setStatus(orgId, 'user_1', 'ACTIVE', 'actor_1')).resolves.toBeDefined();
+    });
+
+    it('other admins can still be deactivated normally — the protection is exclusive to the protected system account', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'otro.admin@example.com' }));
+      users.update.mockResolvedValue(buildUser({ email: 'otro.admin@example.com', status: 'INACTIVE' }));
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+      users.findAll.mockResolvedValue([buildUser(), buildUser({ id: 'other_admin' })]);
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+
+      await expect(service.setStatus(orgId, 'user_1', 'INACTIVE', 'actor_1')).resolves.toBeDefined();
+    });
   });
 
   describe('list / getById', () => {
@@ -396,6 +477,19 @@ describe('UsersService', () => {
 
       await expect(service.remove(orgId, 'user_1', 'actor_1')).rejects.toThrow(ForbiddenException);
       expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('an INACTIVE admin (not the protected system account) can still be soft-deleted normally', async () => {
+      users.findById.mockResolvedValue(buildUser({ email: 'otro.admin@example.com', status: 'INACTIVE' }));
+      users.update.mockResolvedValue(buildUser({ email: 'otro.admin@example.com', status: 'INACTIVE', deletedAt: new Date() }));
+      userRoles.getRolesForUser.mockResolvedValueOnce([adminRole]);
+
+      await service.remove(orgId, 'user_1', 'actor_1');
+
+      expect(users.update).toHaveBeenCalledWith(
+        'user_1',
+        expect.objectContaining({ status: 'INACTIVE', deletedAt: expect.any(Date) }),
+      );
     });
 
     it('rejects an admin deleting their own account even while ACTIVE', async () => {

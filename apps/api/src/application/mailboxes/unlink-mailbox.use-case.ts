@@ -215,14 +215,43 @@ export class UnlinkMailboxUseCase {
     result: UnlinkMailboxResult,
     commandRowId: string | null,
   ): Promise<{ result: UnlinkMailboxResult; httpStatus: number }> {
+    const correlationId = input.correlationId ?? `corr_${mailboxId}`;
+
+    // Fase 11 — durable audit trail for the REQUESTED -> ACCEPTED ->
+    // PROCESSING -> COMPLETED/FAILED lifecycle ('mailbox.unlink_requested'
+    // was already recorded, inside the local transaction, before this
+    // method ever runs). The simulated adapter resolves synchronously
+    // (no separate async event delivery exists for this flow), so
+    // ACCEPTED and PROCESSING are recorded back-to-back here rather than
+    // on delivery of two separate events — that's the real, honest shape
+    // of this call, not a fabricated delay. A real HTTP motor would still
+    // go through the exact same two audit entries, just with the network
+    // round-trip happening between them.
+    await this.auditLogs.record({
+      organizationId: input.organizationId,
+      actorId: input.actorId,
+      action: 'mailbox.unlink_accepted',
+      entityType: 'Mailbox',
+      entityId: mailboxId,
+      metadata: { correlationId, serverMailboxId, idempotencyKey: input.idempotencyKey },
+    });
     try {
+      await this.auditLogs.record({
+        organizationId: input.organizationId,
+        actorId: input.actorId,
+        action: 'mailbox.unlink_processing',
+        entityType: 'Mailbox',
+        entityId: mailboxId,
+        metadata: { correlationId, serverMailboxId },
+      });
+
       const revocation = await this.motor.unlinkMailbox({
         serverMailboxId,
         idempotencyKey: input.idempotencyKey,
         requestingOrganizationId: input.organizationId,
         actorId: input.actorId,
         reason: input.reason,
-        correlationId: input.correlationId ?? `corr_${mailboxId}`,
+        correlationId,
       });
 
       await this.mailboxes.update(mailboxId, {
@@ -273,7 +302,7 @@ export class UnlinkMailboxUseCase {
         action: 'mailbox.unlink_failed',
         entityType: 'Mailbox',
         entityId: mailboxId,
-        metadata: { serverMailboxId, reason: 'motor_confirmation_failed', error: message },
+        metadata: { correlationId, serverMailboxId, reason: 'motor_confirmation_failed', error: message },
       });
       // result.linkStatus stays UNLINK_REQUESTED — never claim revoked when
       // the motor never confirmed it. The account remains blocked for new

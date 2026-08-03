@@ -401,6 +401,63 @@ describe('Users (e2e) — memory + mock', () => {
       expect(listResponse.body.map((u: { email: string }) => u.email)).toContain('sistema@mejoreferido.cl');
     });
 
+    /**
+     * Looks up the protected account created by an earlier test in this
+     * file rather than creating a new one — `sistema@mejoreferido.cl` is
+     * unique per organization, and this suite shares one organization
+     * across every test, so a second `POST /users` with the same email
+     * would 409 on the uniqueness constraint, not on anything this test
+     * cares about.
+     */
+    async function findProtectedSystemAccountId(): Promise<string> {
+      const listResponse = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const protectedUser = (listResponse.body as Array<{ id: string; email: string }>).find(
+        (u) => u.email === 'sistema@mejoreferido.cl',
+      );
+      if (!protectedUser) {
+        throw new Error('Expected the protected system account to already exist from an earlier test.');
+      }
+      return protectedUser.id;
+    }
+
+    it('rejects deactivating the protected system account through the API, even as a direct request', async () => {
+      const protectedId = await findProtectedSystemAccountId();
+
+      const response = await request(app.getHttpServer())
+        .post(`/users/${protectedId}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(response.status).toBe(403);
+
+      const stillThere = await request(app.getHttpServer())
+        .get(`/users/${protectedId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(stillThere.body.status).toBe('ACTIVE');
+    });
+
+    it('rejects changing the protected system account’s email or role through the generic update endpoint, even as a direct request with a crafted payload', async () => {
+      const protectedId = await findProtectedSystemAccountId();
+
+      const emailChange = await request(app.getHttpServer())
+        .patch(`/users/${protectedId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ email: 'atacante@mejoreferido.cl' });
+      expect(emailChange.status).toBe(403);
+
+      const roleChange = await request(app.getHttpServer())
+        .patch(`/users/${protectedId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ roleId: executiveRoleId });
+      expect(roleChange.status).toBe(403);
+
+      const stillThere = await request(app.getHttpServer())
+        .get(`/users/${protectedId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(stillThere.body.email).toBe('sistema@mejoreferido.cl');
+      expect(stillThere.body.roleName).toBe('ADMIN');
+    });
+
     it('an admin deletes an executive with no dependencies: it disappears from listings and can no longer log in', async () => {
       const created = await request(app.getHttpServer())
         .post('/users')

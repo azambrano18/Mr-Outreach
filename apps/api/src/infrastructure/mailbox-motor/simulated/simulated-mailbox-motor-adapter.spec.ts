@@ -141,8 +141,23 @@ describe('SimulatedMailboxMotorAdapter', () => {
       expect(status.canSend).toBe(false);
     });
 
-    it('rejects an unknown serverMailboxId', async () => {
-      await expect(adapter.getMailboxStatus('mbx_unknown')).rejects.toThrow(BadRequestException);
+    /**
+     * Fase 11 — root cause of a mailbox getting permanently stuck in
+     * "Desvinculación en proceso" in staging: this registry is a plain
+     * in-memory Map, wiped by every process restart (any deploy). Before
+     * this fix, a serverMailboxId missing from it (which is the NORMAL
+     * state for any mailbox linked before the current process started)
+     * threw BadRequestException here and in unlinkMailbox — treated by
+     * UnlinkMailboxUseCase as a retryable motor outage, except the
+     * missing entry never comes back, so every retry failed identically
+     * forever. Self-healing (registering it as a normal ACTIVE mailbox)
+     * is what makes the flow reach REVOKED reliably again.
+     */
+    it('self-heals a serverMailboxId missing from the registry instead of throwing — simulates the state after a process restart', async () => {
+      const status = await adapter.getMailboxStatus('mbx_unknown_after_restart');
+      expect(status.linkStatus).toBe('ACTIVE');
+      expect(status.technicalStatus).toBe('CONNECTED');
+      expect(status.canSend).toBe(true);
     });
   });
 
@@ -179,6 +194,48 @@ describe('SimulatedMailboxMotorAdapter', () => {
       ).rejects.toThrow(ServiceUnavailableException);
       const status = await adapter.getMailboxStatus(mailbox.serverMailboxId);
       expect(status.linkStatus).toBe('ACTIVE');
+    });
+
+    it('self-heals and succeeds when the serverMailboxId is missing from the registry — the exact staging bug: a mailbox linked before a process restart can still be unlinked afterward', async () => {
+      const revocation = await adapter.unlinkMailbox({
+        serverMailboxId: 'mbx_linked_before_restart',
+        idempotencyKey: 'u1',
+        requestingOrganizationId: 'org_1',
+        actorId: 'admin_1',
+        reason: 'Cuenta dada de baja',
+        correlationId: 'corr_1',
+      });
+      expect(revocation.status).toBe('REVOKED');
+      const status = await adapter.getMailboxStatus('mbx_linked_before_restart');
+      expect(status.linkStatus).toBe('REVOKED');
+    });
+
+    it('a self-healed mailbox is still subject to a configured FAILURE outcome and the outage flag — self-healing never bypasses other simulation controls', async () => {
+      adapter.setUnlinkOutcome('mbx_linked_before_restart', 'FAILURE');
+      await expect(
+        adapter.unlinkMailbox({
+          serverMailboxId: 'mbx_linked_before_restart',
+          idempotencyKey: 'u1',
+          requestingOrganizationId: 'org_1',
+          actorId: 'admin_1',
+          reason: 'x',
+          correlationId: 'corr_1',
+        }),
+      ).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it('never self-heals while the global outage flag is set — the outage check runs before any registry lookup', async () => {
+      adapter.setMotorUnavailable(true);
+      await expect(
+        adapter.unlinkMailbox({
+          serverMailboxId: 'mbx_linked_before_restart',
+          idempotencyKey: 'u1',
+          requestingOrganizationId: 'org_1',
+          actorId: 'admin_1',
+          reason: 'x',
+          correlationId: 'corr_1',
+        }),
+      ).rejects.toThrow(ServiceUnavailableException);
     });
   });
 

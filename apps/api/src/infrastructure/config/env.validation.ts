@@ -180,4 +180,23 @@ export const envValidationSchema = Joi.object({
       then: Joi.string().min(8).required(),
       otherwise: Joi.string().allow('').optional(),
     }),
-});
+}).custom((value, helpers) => {
+  // Fase 11 — the simulated mailbox motor adapter is a dev/staging-only
+  // tool: it's a plain in-memory Map reset by every process restart, and
+  // its "Desvinculación en proceso" recovery only ever works because its
+  // fixtures were issued by the same in-process simulator — a real motor
+  // would never behave this way. Cross-field checks like this one can't
+  // be expressed with `Joi.string().when(...)` chained onto a schema that
+  // already has `.valid()`/`.default()`: Joi concatenates (unions) the
+  // conditional branch with the base schema instead of replacing it,
+  // which would silently keep 'simulated' allowed in production. A
+  // `.custom()` on the whole object is the reliable way to fail closed
+  // here, including when the variable is left unset entirely (the
+  // default must never silently resolve to 'simulated' in production).
+  if (value.NODE_ENV === 'production' && value.MAILBOX_MOTOR_DRIVER !== 'http') {
+    return helpers.message({
+      custom: 'MAILBOX_MOTOR_DRIVER must be "http" when NODE_ENV=production — the simulated adapter must never run in production.',
+    });
+  }
+  return value;
+}, 'production requires the http mailbox motor driver');
