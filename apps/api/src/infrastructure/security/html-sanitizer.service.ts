@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import sanitizeHtml from 'sanitize-html';
+import { htmlToPlainText } from './html-to-plain-text';
 
 /**
  * Signature/step HTML is authored through a rich-text editor (Tiptap) but
@@ -101,6 +102,22 @@ export class HtmlSanitizerService {
       },
     });
   }
+}
+
+/**
+ * A signature is valid with text alone, an image alone, or both — only
+ * genuinely empty content is rejected. Must be called on ALREADY-sanitized
+ * HTML (i.e. the output of `sanitizeSignatureHtml`): an `<img>` surviving
+ * sanitization is by construction one whose `src` already passed the
+ * host/scheme allow-list, so its mere presence is sufficient evidence of a
+ * valid image — no need to re-parse `src` here. Checking the raw,
+ * pre-sanitization HTML instead would wrongly treat e.g. `<img
+ * src="javascript:...">` as non-blank, when sanitization is about to strip
+ * it down to nothing.
+ */
+export function hasVisibleSignatureContent(sanitizedHtml: string): boolean {
+  if (/<img\b/i.test(sanitizedHtml)) return true;
+  return htmlToPlainText(sanitizedHtml).trim().length > 0;
 }
 
 function isAllowedSignatureImageSrc(src: string | undefined, allowedImageHost: string, allowInsecureHost: boolean): boolean {

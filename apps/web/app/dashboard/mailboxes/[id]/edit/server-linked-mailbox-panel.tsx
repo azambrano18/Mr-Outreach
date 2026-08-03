@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { AssigneeSummary, AuditLogEntry, MailboxSummary, UserSummary } from '@outreach/shared-types';
 import { SecondaryExecutivesSelect } from '../../../../../components/executives/secondary-executives-select';
+import { Modal } from '../../../../../components/ui/modal';
 
 const LINK_SOURCE_LABEL: Record<MailboxSummary['linkSource'], string> = {
   SERVER_TOKEN: 'Vinculada por token',
@@ -60,6 +61,9 @@ export function ServerLinkedMailboxPanel({
   const [unlinking, setUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
   const [confirmingUnlink, setConfirmingUnlink] = useState(false);
+
+  const [retryingUnlink, setRetryingUnlink] = useState(false);
+  const [retryUnlinkError, setRetryUnlinkError] = useState<string | null>(null);
 
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -218,6 +222,34 @@ export function ServerLinkedMailboxPanel({
       setUnlinkError('No se pudo contactar la API.');
     } finally {
       setUnlinking(false);
+    }
+  }
+
+  /**
+   * The initial `/unlink` call can return 200 while the account is still
+   * stuck in `UNLINK_REQUESTED` — the local write commits immediately, but
+   * confirming the revocation with the motor happens right after and can
+   * fail independently (network hiccup, motor outage). That failure is
+   * never surfaced as an HTTP error (the local unlink request itself did
+   * succeed), so the account can be left needing this explicit retry
+   * before it ever reaches `REVOKED` and "Eliminar cuenta" becomes
+   * available.
+   */
+  async function handleRetryUnlinkConfirmation(): Promise<void> {
+    setRetryUnlinkError(null);
+    setRetryingUnlink(true);
+    try {
+      const response = await fetch(`/api/mailboxes/${mailbox.id}/unlink/retry`, { method: 'POST' });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRetryUnlinkError(body.error ?? 'No se pudo confirmar la desvinculación todavía.');
+        return;
+      }
+      router.refresh();
+    } catch {
+      setRetryUnlinkError('No se pudo contactar la API.');
+    } finally {
+      setRetryingUnlink(false);
     }
   }
 
@@ -427,8 +459,11 @@ export function ServerLinkedMailboxPanel({
         </section>
       )}
 
-      {/* F. Zona de desvinculación — siempre al final. */}
-      {canUnlink && mailbox.linkStatus !== 'REVOKED' && (
+      {/* F. Zona de desvinculación — siempre al final. Nunca visible junto con
+          la sección de "pendiente de confirmar" ni con "Eliminar cuenta": los
+          tres estados (vinculada, pendiente, desvinculada) son mutuamente
+          excluyentes por `linkStatus`. */}
+      {canUnlink && mailbox.linkStatus !== 'REVOKED' && mailbox.linkStatus !== 'UNLINK_REQUESTED' && (
         <fieldset className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-4">
           <legend className="px-1 text-sm font-medium text-red-800">Desvincular cuenta</legend>
           <p className="text-sm text-red-800">
@@ -436,16 +471,21 @@ export function ServerLinkedMailboxPanel({
             eliminada físicamente del servidor. Puede volver a vincularse más adelante con un nuevo
             token. Esta acción queda registrada en auditoría.
           </p>
-          {!confirmingUnlink ? (
-            <button
-              type="button"
-              onClick={() => setConfirmingUnlink(true)}
-              className="self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
-            >
-              Desvincular cuenta
-            </button>
-          ) : (
-            <>
+          <button
+            type="button"
+            onClick={() => setConfirmingUnlink(true)}
+            className="self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
+          >
+            Desvincular cuenta
+          </button>
+
+          <Modal open={confirmingUnlink} onClose={() => (unlinking ? undefined : setConfirmingUnlink(false))} title="Desvincular cuenta">
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-slate-900">Desvincular {mailbox.email}</h3>
+              <p className="text-sm text-slate-600">
+                Esta acción revocará el uso de la cuenta dentro de Mr Outreach. No elimina la cuenta ni
+                su historial; puede volver a vincularse más adelante con un nuevo token.
+              </p>
               <label className="flex flex-col gap-1 text-sm text-slate-700" htmlFor="unlink-reason">
                 Motivo (obligatorio)
                 <input
@@ -457,29 +497,55 @@ export function ServerLinkedMailboxPanel({
                 />
               </label>
               {unlinkError && <p className="text-sm text-red-600">{unlinkError}</p>}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleUnlink}
-                  disabled={unlinking || !unlinkReason.trim()}
-                  className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-                >
-                  {unlinking ? 'Desvinculando…' : 'Confirmar desvinculación'}
-                </button>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
                 <button
                   type="button"
                   onClick={() => setConfirmingUnlink(false)}
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                  disabled={unlinking}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
                 >
                   Cancelar
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void handleUnlink()}
+                  disabled={unlinking || !unlinkReason.trim()}
+                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {unlinking ? 'Desvinculando…' : 'Confirmar desvinculación'}
+                </button>
               </div>
-            </>
-          )}
+            </div>
+          </Modal>
         </fieldset>
       )}
 
-      {/* G. Eliminar cuenta — solo disponible una vez desvinculada (REVOKED). Confirmación separada de la de arriba. */}
+      {/* F2. Desvinculación pendiente de confirmar — la solicitud local ya se
+          registró (linkStatus = UNLINK_REQUESTED), pero el proveedor externo
+          no confirmó la revocación todavía. Nunca se vuelve a mostrar
+          "Desvincular cuenta" en este estado, ni tampoco "Eliminar cuenta"
+          (que exige REVOKED) — solo esta indicación y su reintento. */}
+      {canUnlink && mailbox.linkStatus === 'UNLINK_REQUESTED' && (
+        <fieldset className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-4">
+          <legend className="px-1 text-sm font-medium text-amber-800">Desvinculación en proceso</legend>
+          <p className="text-sm text-amber-800">
+            La desvinculación se registró, pero todavía no se pudo confirmar con el proveedor externo.
+            La cuenta ya no admite actividad nueva. Puedes reintentar la confirmación; “Eliminar cuenta”
+            estará disponible una vez que quede confirmada.
+          </p>
+          {retryUnlinkError && <p className="text-sm text-red-600">{retryUnlinkError}</p>}
+          <button
+            type="button"
+            onClick={() => void handleRetryUnlinkConfirmation()}
+            disabled={retryingUnlink}
+            className="self-start rounded-md border border-amber-400 px-3 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
+          >
+            {retryingUnlink ? 'Reintentando…' : 'Reintentar confirmación'}
+          </button>
+        </fieldset>
+      )}
+
+      {/* G. Eliminar cuenta — solo disponible una vez desvinculada (REVOKED). Modal separado del de desvinculación. */}
       {canDelete && mailbox.linkStatus === 'REVOKED' && (
         <fieldset className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-4">
           <legend className="px-1 text-sm font-medium text-red-800">Eliminar cuenta</legend>
@@ -489,42 +555,48 @@ export function ServerLinkedMailboxPanel({
           </p>
           <p className="text-sm text-red-800">
             Al eliminar esta cuenta también se eliminarán definitivamente las imágenes de su firma
-            almacenadas en Cloudflare R2. Las imágenes podrían dejar de visualizarse en correos
-            históricos que ya las incluyan.
+            asociadas. Las imágenes podrían dejar de visualizarse en correos históricos que ya las
+            incluyan.
           </p>
-          {!confirmingDelete ? (
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              className="self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
-            >
-              Eliminar cuenta
-            </button>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-red-900">
-                ¿Confirmas que quieres eliminar {mailbox.email} de Mr Outreach?
-              </p>
+          <button
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+            className="self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
+          >
+            Eliminar cuenta
+          </button>
+
+          <Modal open={confirmingDelete} onClose={() => (deleting ? undefined : setConfirmingDelete(false))} title="Eliminar cuenta">
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-slate-900">Eliminar {mailbox.email}</h3>
+              <ul className="list-disc space-y-1 pl-4 text-sm text-slate-600">
+                <li>La cuenta desaparecerá de Cuentas de Correo, de las búsquedas y de cualquier selector.</li>
+                <li>Dejará de estar disponible operativamente: no admite nuevas Plantillas, Gestiones ni sincronización.</li>
+                <li>Se eliminarán definitivamente las imágenes de su firma almacenadas en Cloudflare R2, cuando esa integración esté activa.</li>
+                <li>Las imágenes de firma podrían dejar de visualizarse en correos históricos que ya las incluyan.</li>
+                <li>El historial de auditoría se conserva; esta acción no es reversible desde la interfaz.</li>
+              </ul>
               {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-                >
-                  {deleting ? 'Eliminando…' : 'Confirmar eliminación'}
-                </button>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
                 <button
                   type="button"
                   onClick={() => setConfirmingDelete(false)}
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                  disabled={deleting}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
                 >
                   Cancelar
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={deleting}
+                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? 'Eliminando…' : 'Confirmar eliminación'}
+                </button>
               </div>
-            </>
-          )}
+            </div>
+          </Modal>
         </fieldset>
       )}
     </div>

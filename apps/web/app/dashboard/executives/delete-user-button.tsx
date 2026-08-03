@@ -21,11 +21,13 @@ export function DeleteUserButton({
   name,
   email,
   roleName,
+  status,
 }: {
   userId: string;
   name: string;
   email: string;
   roleName: string;
+  status: 'ACTIVE' | 'INACTIVE';
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -104,6 +106,8 @@ export function DeleteUserButton({
             <dd className="text-slate-800">{email}</dd>
             <dt className="text-slate-500">Rol</dt>
             <dd className="text-slate-800">{roleName}</dd>
+            <dt className="text-slate-500">Estado</dt>
+            <dd className="text-slate-800">{status === 'ACTIVE' ? 'Activo' : 'Inactivo'}</dd>
           </dl>
 
           {loadingImpact && <p className="text-sm text-slate-500">Cargando información…</p>}
@@ -119,6 +123,11 @@ export function DeleteUserButton({
               {impact.activeExecutionCount > 0 && (
                 <li className="text-red-600">
                   Esas gestiones deben completarse, fallar o reasignarse antes de poder eliminarlo.
+                </li>
+              )}
+              {impact.mustDeactivateFirst && (
+                <li className="text-red-600">
+                  Este usuario todavía está activo — debe desactivarse antes de poder eliminarse.
                 </li>
               )}
               {impact.isLastActiveAdmin && (

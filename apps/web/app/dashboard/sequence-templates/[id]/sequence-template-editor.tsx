@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_TEMPLATE_VARIABLES, extractTemplateVariables } from '@outreach/validation';
 import { RichTextEditor } from '../../../../components/rich-text-editor/rich-text-editor';
+import { ConfirmButton } from '../../../../components/ui/confirm-button';
+import { getSequenceTemplateStepVisibility } from '../../../../lib/sequence-template-step-visibility';
 import { VariableInsertMenu } from '../../../../components/rich-text-editor/variable-insert-menu';
 import { sanitizeRichTextHtml } from '../../../../lib/sanitize-html-client';
 import type { SequenceTemplateDetail, SequenceTemplateStepSummary } from '../../../../lib/sequence-template-types';
@@ -98,7 +100,8 @@ export function SequenceTemplateEditor({
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
 
-  const [archiving, setArchiving] = useState(false);
+  // Only the setter is used — ConfirmButton owns its own loading/disabled state for the trigger button.
+  const [, setArchiving] = useState(false);
   const [reopening, setReopening] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deletability, setDeletability] = useState<{ canDelete: boolean; activeExecutionsCount: number } | null>(null);
@@ -119,6 +122,12 @@ export function SequenceTemplateEditor({
   const isPublished = template.status === 'PUBLISHED';
   const isLocked = isArchived || (isPublished && !editingUnlocked);
   const currentDraft = drafts[activeEnvio];
+  // §4/§5 — the signature editor and the 3 global Plantilla actions
+  // (Publicar/Archivar/Eliminar) only ever appear inside Envío 1; this is
+  // the single, independently-tested source of truth for that gating (see
+  // lib/sequence-template-step-visibility.spec.ts) — never re-derived
+  // ad-hoc from `activeEnvio` at each render site.
+  const stepVisibility = getSequenceTemplateStepVisibility(activeEnvio);
 
   // Consolidación contractual — derived from the full version history, never
   // "latestPublishedVersion + 1": if a previous update attempt FAILED,
@@ -197,9 +206,11 @@ export function SequenceTemplateEditor({
   }
 
   useEffect(() => {
+    const stepTimers = envioSaveTimers.current;
+
     return () => {
       if (generalSaveTimer.current) clearTimeout(generalSaveTimer.current);
-      Object.values(envioSaveTimers.current).forEach((t) => t && clearTimeout(t));
+      Object.values(stepTimers).forEach((t) => t && clearTimeout(t));
     };
   }, []);
 
@@ -335,6 +346,10 @@ export function SequenceTemplateEditor({
     }
   }
 
+  /** §8-10 — archiving/deleting never touch the mailbox's own Signature or its R2 folder; only this Plantilla's own rows. */
+  const ARCHIVE_CONFIRM_MESSAGE =
+    'Esta plantilla dejará de estar disponible para nuevas Gestiones. El historial de Gestiones anteriores se conservará. La firma de la cuenta no se ve afectada. ¿Deseas continuar?';
+
   /** §11 — reopens an archived Plantilla as an editable draft; must be published again (new version, new token) to become usable. */
   async function reopen(): Promise<void> {
     setReopening(true);
@@ -350,15 +365,18 @@ export function SequenceTemplateEditor({
     }
   }
 
-  /** §8-10 — single "Eliminar" action; the confirmation copy depends on the Plantilla's current status. */
-  async function deleteTemplate(): Promise<void> {
-    const confirmText =
+  /** §8-10 — single "Eliminar" action; the confirmation copy depends on the Plantilla's current status. Never deletes the mailbox's Signature or its R2 folder — only this Plantilla's own rows (steps, versions). */
+  function deleteConfirmMessage(): string {
+    const consequence =
       template.status === 'ARCHIVED'
-        ? 'Esta plantilla archivada dejará de estar disponible. El historial relacionado con Gestiones anteriores se conservará. ¿Deseas continuar?'
+        ? 'Esta plantilla archivada dejará de estar disponible. El historial relacionado con Gestiones anteriores se conservará.'
         : template.status === 'PUBLISHED'
-          ? 'Esta plantilla dejará de estar disponible para nuevas Gestiones. El historial de Gestiones anteriores se conservará. ¿Deseas continuar?'
-          : 'Esta Plantilla todavía no ha sido publicada. Al eliminarla se perderá toda su configuración. ¿Deseas continuar?';
-    if (!window.confirm(confirmText)) return;
+          ? 'Esta plantilla dejará de estar disponible para nuevas Gestiones. El historial de Gestiones anteriores se conservará.'
+          : 'Esta Plantilla todavía no ha sido publicada. Al eliminarla se perderá toda su configuración.';
+    return `${consequence} La firma de la cuenta y sus imágenes no se ven afectadas — solo pertenecen a la cuenta de correo, nunca a esta Plantilla. ¿Deseas continuar?`;
+  }
+
+  async function deleteTemplate(): Promise<void> {
     setDeleting(true);
     try {
       const response = await fetch(`/api/sequence-templates/${template.id}`, { method: 'DELETE' });
@@ -574,36 +592,43 @@ export function SequenceTemplateEditor({
         </fieldset>
       </div>
 
-      {/* Fase 2 (R2) — la firma pertenece a la cuenta de correo, no a esta Plantilla: cada mailbox tiene una única firma, compartida por sus 3 envíos y por cualquier otra Plantilla de la misma cuenta. Se edita únicamente en la pantalla de la cuenta — aquí solo se previsualiza. */}
-      <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-slate-700">Firma de la cuenta {template.mailboxEmail}</span>
-          <Link
-            href={`/dashboard/mailboxes/mine/${template.mailboxId}/signature`}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
-          >
-            Editar firma de la cuenta
-          </Link>
+      {/* Fase 2 (R2) — la firma pertenece a la cuenta de correo, no a esta Plantilla: cada mailbox tiene una única firma, compartida por sus 3 envíos y por cualquier otra Plantilla de la misma cuenta. Se edita únicamente en la pantalla de la cuenta — aquí solo se previsualiza. Visible solo en Envío 1: no hay un editor ni un estado independiente por envío — es la misma firma en los 3. */}
+      {stepVisibility.showSignatureEditor ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">Firma de la cuenta {template.mailboxEmail}</span>
+            <Link
+              href={`/dashboard/mailboxes/mine/${template.mailboxId}/signature`}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+            >
+              Editar firma de la cuenta
+            </Link>
+          </div>
+          <span className="text-xs text-slate-500">
+            Se incluye en los 3 envíos de esta Plantilla y en cualquier otra Plantilla de la misma cuenta —
+            hay una sola firma por cuenta. Al publicar una nueva versión, la firma vigente en ese momento
+            queda fija junto con el resto del contenido; las Gestiones ya iniciadas conservan la firma de
+            su propia versión, aunque la cuenta cambie su firma después.
+          </span>
+          {template.signatureHtml.trim() ? (
+            <div
+              className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm"
+              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(template.signatureHtml) }}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">
+              Esta cuenta todavía no tiene una firma configurada.
+            </p>
+          )}
         </div>
-        <span className="text-xs text-slate-500">
-          Se incluye en los 3 envíos de esta Plantilla y en cualquier otra Plantilla de la misma cuenta —
-          hay una sola firma por cuenta. Al publicar una nueva versión, la firma vigente en ese momento
-          queda fija junto con el resto del contenido; las Gestiones ya iniciadas conservan la firma de
-          su propia versión, aunque la cuenta cambie su firma después.
-        </span>
-        {template.signatureHtml.trim() ? (
-          <div
-            className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm"
-            dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(template.signatureHtml) }}
-          />
-        ) : (
-          <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">
-            Esta cuenta todavía no tiene una firma configurada.
-          </p>
-        )}
-      </div>
+      ) : (
+        <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">
+          La firma se administra desde Envío 1.
+        </p>
+      )}
 
-      {canPublish && !isLocked && (
+      {/* §5 — acciones globales de la Plantilla (publicar/actualizar): visibles únicamente en Envío 1, una sola vez. Publicar/actualizar siempre valida y afecta la Plantilla completa (los 3 envíos), nunca solo el envío activo. */}
+      {stepVisibility.showPublishAction && canPublish && !isLocked && (
         <div className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
           {validationErrors.length > 0 && (
             <ul className="list-inside list-disc rounded-md bg-red-50 p-3 text-sm text-red-700">
@@ -663,52 +688,57 @@ export function SequenceTemplateEditor({
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {canArchive && !isArchived && (
-            <button
-              type="button"
-              onClick={archive}
-              disabled={archiving}
-              className="self-start rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
-            >
-              {archiving ? 'Archivando…' : 'Archivar plantilla'}
-            </button>
-          )}
-          {/* §8-10 — DRAFT/PUBLISH_FAILED and ARCHIVED are always deletable; PUBLISHED only when no Gestión is still active against it. */}
-          {canArchive && (template.status === 'DRAFT' || template.status === 'PUBLISH_FAILED' || isArchived) && (
-            <button
-              type="button"
-              onClick={deleteTemplate}
-              disabled={deleting}
-              className="self-start rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
-            >
-              {deleting ? 'Eliminando…' : isArchived ? 'Eliminar plantilla archivada' : 'Eliminar plantilla'}
-            </button>
-          )}
-          {canArchive && isPublished && (
-            <button
-              type="button"
-              onClick={deleteTemplate}
-              disabled={deleting || !deletability || !deletability.canDelete}
-              title={
-                deletability && !deletability.canDelete
-                  ? 'Esta plantilla no puede eliminarse porque está siendo utilizada por una o más Gestiones activas.'
-                  : undefined
-              }
-              className="self-start rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
-            >
-              {deleting ? 'Eliminando…' : 'Eliminar plantilla'}
-            </button>
+      {/* §5 — acciones globales destructivas (archivar/eliminar): visibles únicamente en Envío 1, una sola vez, cada una con su propio modal de confirmación (nunca window.confirm). Afectan siempre la Plantilla completa, nunca un envío aislado, y nunca la firma de la cuenta ni su carpeta en R2. */}
+      {(stepVisibility.showArchiveAction || stepVisibility.showDeleteAction) && (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {stepVisibility.showArchiveAction && canArchive && !isArchived && (
+              <ConfirmButton
+                label="Archivar plantilla"
+                confirmTitle="Archivar plantilla"
+                confirmMessage={ARCHIVE_CONFIRM_MESSAGE}
+                confirmLabel="Archivar"
+                onConfirm={archive}
+                className="self-start rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              />
+            )}
+            {/* §8-10 — DRAFT/PUBLISH_FAILED and ARCHIVED are always deletable; PUBLISHED only when no Gestión is still active against it. */}
+            {stepVisibility.showDeleteAction && canArchive && (template.status === 'DRAFT' || template.status === 'PUBLISH_FAILED' || isArchived) && (
+              <ConfirmButton
+                label={isArchived ? 'Eliminar plantilla archivada' : 'Eliminar plantilla'}
+                confirmTitle="Eliminar plantilla"
+                confirmMessage={deleteConfirmMessage()}
+                confirmLabel="Eliminar"
+                onConfirm={deleteTemplate}
+                disabled={deleting}
+                className="self-start rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              />
+            )}
+            {stepVisibility.showDeleteAction && canArchive && isPublished && (
+              <ConfirmButton
+                label="Eliminar plantilla"
+                confirmTitle="Eliminar plantilla"
+                confirmMessage={deleteConfirmMessage()}
+                confirmLabel="Eliminar"
+                onConfirm={deleteTemplate}
+                disabled={deleting || !deletability || !deletability.canDelete}
+                title={
+                  deletability && !deletability.canDelete
+                    ? 'Esta plantilla no puede eliminarse porque está siendo utilizada por una o más Gestiones activas.'
+                    : undefined
+                }
+                className="self-start rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              />
+            )}
+          </div>
+          {stepVisibility.showDeleteAction && canArchive && isPublished && deletability && !deletability.canDelete && (
+            <p className="text-xs text-red-600">
+              Esta plantilla no puede eliminarse porque está siendo utilizada por {deletability.activeExecutionsCount} Gestión
+              {deletability.activeExecutionsCount === 1 ? '' : 'es'} activa{deletability.activeExecutionsCount === 1 ? '' : 's'}.
+            </p>
           )}
         </div>
-        {canArchive && isPublished && deletability && !deletability.canDelete && (
-          <p className="text-xs text-red-600">
-            Esta plantilla no puede eliminarse porque está siendo utilizada por {deletability.activeExecutionsCount} Gestión
-            {deletability.activeExecutionsCount === 1 ? '' : 'es'} activa{deletability.activeExecutionsCount === 1 ? '' : 's'}.
-          </p>
-        )}
-      </div>
+      )}
 
       {showModal && (
         <PublishConfirmationModal

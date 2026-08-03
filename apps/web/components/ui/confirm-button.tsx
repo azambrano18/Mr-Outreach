@@ -16,6 +16,7 @@ export function ConfirmButton({
   onConfirm,
   className,
   disabled,
+  title,
 }: {
   label: string;
   confirmTitle: string;
@@ -24,6 +25,8 @@ export function ConfirmButton({
   onConfirm: () => Promise<void>;
   className?: string;
   disabled?: boolean;
+  /** Native `title` tooltip on the trigger button — e.g. to explain why it's disabled. */
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -40,7 +43,7 @@ export function ConfirmButton({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} disabled={disabled} className={className}>
+      <button type="button" onClick={() => setOpen(true)} disabled={disabled} className={className} title={title}>
         {label}
       </button>
       <Modal open={open} onClose={() => (loading ? undefined : setOpen(false))} title={confirmTitle}>

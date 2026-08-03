@@ -570,6 +570,42 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
       expect(existsSync(join(process.cwd(), 'uploads', objectKey))).toBe(true);
     });
 
+    it('saves a signature made of only an uploaded image, with no text and no minimum character count enforced', async () => {
+      const email = `firma-e2e-${stamp}-imgonly@e2e.test`;
+      const mailboxId = await linkUnlinkableMailbox(email, `${stamp}-imgonly`);
+      const asset = await uploadSignatureAsset(mailboxId);
+      const imageOnlyHtml = `<img src="${asset.publicUrl}" alt="">`;
+
+      const response = await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/signature`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ htmlContent: imageOnlyHtml });
+
+      expect(response.status).toBe(201);
+      expect(response.body.activeVersion.htmlContent).toContain('<img');
+      expect(response.body.activeVersion.htmlContent).toContain(asset.assetId);
+
+      const getResponse = await request(app.getHttpServer())
+        .get(`/mailboxes/${mailboxId}/signature`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(getResponse.body.activeVersion.htmlContent).toContain('<img');
+    });
+
+    it('rejects a genuinely empty signature with a controlled 400 mentioning text or image, never a minimum-character message', async () => {
+      const email = `firma-e2e-${stamp}-empty@e2e.test`;
+      const mailboxId = await linkUnlinkableMailbox(email, `${stamp}-empty`);
+
+      for (const emptyHtml of ['', '   ', '<p></p>', '<p><br></p>']) {
+        const response = await request(app.getHttpServer())
+          .post(`/mailboxes/${mailboxId}/signature`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ htmlContent: emptyHtml });
+
+        expect(response.status).toBe(400);
+        expect(response.body.message).toBe('La firma debe contener texto o al menos una imagen válida.');
+      }
+    });
+
     it('deleting the mailbox purges its entire firmas/{correo}/ folder, but leaves a different mailbox\'s folder untouched', async () => {
       const emailToDelete = `firma-e2e-${stamp}-b@e2e.test`;
       const emailToKeep = `firma-e2e-${stamp}-c@e2e.test`;

@@ -1,4 +1,4 @@
-import { HtmlSanitizerService } from './html-sanitizer.service';
+import { hasVisibleSignatureContent, HtmlSanitizerService } from './html-sanitizer.service';
 
 describe('HtmlSanitizerService', () => {
   const sanitizer = new HtmlSanitizerService();
@@ -106,12 +106,75 @@ describe('HtmlSanitizerService', () => {
       expect(result).not.toContain('<img');
     });
 
+    it('rejects a host that appends the allowed host as a suffix (lookalike domain, e.g. an attacker-registered "assets.mejoreferido.com.atacante.com")', () => {
+      const result = sanitizer.sanitizeSignatureHtml(`<img src="https://${host}.atacante.com/x.png" alt="Logo">`, host);
+      expect(result).not.toContain('<img');
+      expect(result).not.toContain('atacante.com');
+    });
+
+    it('rejects a subdomain of the allowed host — exact hostname match only, no wildcard/suffix allowance exists', () => {
+      const result = sanitizer.sanitizeSignatureHtml(`<img src="https://sub.${host}/x.png" alt="Logo">`, host);
+      expect(result).not.toContain('<img');
+    });
+
+    it('strips onerror/onclick/onload from an <img> on the allowed host — an authorized host never grants script execution', () => {
+      const result = sanitizer.sanitizeSignatureHtml(
+        `<img src="https://${host}/x.png" onerror="alert(1)" onclick="alert(2)" onload="alert(3)" alt="Logo">`,
+        host,
+      );
+      expect(result).toContain(`https://${host}/x.png`);
+      expect(result).not.toMatch(/onerror|onclick|onload/);
+      expect(result).not.toContain('alert(');
+    });
+
     it('never emits base64/binary content in the sanitized output', () => {
       const result = sanitizer.sanitizeSignatureHtml(
         `<p>Firma</p><img src="https://${host}/signatures/x.png" alt="Logo">`,
         host,
       );
       expect(result).not.toMatch(/base64/);
+    });
+  });
+
+  /** A signature is valid with text alone, an image alone, or both — only genuinely empty content is rejected. */
+  describe('hasVisibleSignatureContent', () => {
+    it('returns true for text-only content', () => {
+      expect(hasVisibleSignatureContent('<p>Saludos</p>')).toBe(true);
+    });
+
+    it('returns true for image-only content', () => {
+      expect(hasVisibleSignatureContent('<img src="https://assets.mejoreferido.com/firmas/x/y.png" alt="">')).toBe(true);
+    });
+
+    it('returns true for text and image together', () => {
+      expect(
+        hasVisibleSignatureContent('<p>Saludos</p><img src="https://assets.mejoreferido.com/firmas/x/y.png" alt="">'),
+      ).toBe(true);
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+      ['a newline only', '\n'],
+      ['an empty paragraph', '<p></p>'],
+      ['a paragraph with only a line break', '<p><br></p>'],
+      ['an empty container', '<div></div>'],
+      ['nested empty containers', '<div><p></p><span></span></div>'],
+    ])('returns false for %s', (_label, html) => {
+      expect(hasVisibleSignatureContent(html)).toBe(false);
+    });
+
+    it('must be called on already-sanitized output — an <img> with a disallowed src should never reach it in the first place', () => {
+      // Documents the contract: this function trusts that ANY <img> present
+      // already passed the host/scheme allow-list (sanitizeSignatureHtml's
+      // job), so it never re-parses `src` itself. A caller that skips
+      // sanitization and passes raw input directly would get a false
+      // positive here — that misuse is prevented at the SignaturesService
+      // call site, not by this function.
+      const rawUnsanitized = '<img src="javascript:alert(1)">';
+      expect(hasVisibleSignatureContent(rawUnsanitized)).toBe(true);
+      const afterRealSanitization = sanitizer.sanitizeSignatureHtml(rawUnsanitized, 'assets.mejoreferido.com');
+      expect(hasVisibleSignatureContent(afterRealSanitization)).toBe(false);
     });
   });
 });

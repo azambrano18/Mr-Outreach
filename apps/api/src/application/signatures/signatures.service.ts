@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { extractTemplateVariables } from '@outreach/validation';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { EngineClient } from '../../domain/engine/engine-client';
@@ -12,6 +12,7 @@ import { Signature, SignatureStatus } from '../../domain/signature/signature.ent
 import { SignatureRepository } from '../../domain/signature/signature.repository';
 import { User } from '../../domain/user/user.entity';
 import { UserRepository } from '../../domain/user/user.repository';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { ENGINE_CLIENT } from '../../infrastructure/engine/tokens';
 import {
   AUDIT_LOG_REPOSITORY,
@@ -22,7 +23,7 @@ import {
   SIGNATURE_VERSION_REPOSITORY,
   USER_REPOSITORY,
 } from '../../infrastructure/persistence/tokens';
-import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
+import { hasVisibleSignatureContent, HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { htmlToPlainText } from '../../infrastructure/security/html-to-plain-text';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
 import { SignatureRenderContext, renderSignatureText } from './signature-variable-resolver';
@@ -47,6 +48,7 @@ export class SignaturesService {
     @Inject(ENGINE_CLIENT) private readonly engineClient: EngineClient,
     private readonly sanitizer: HtmlSanitizerService,
     private readonly secrets: SecretEncryptionService,
+    private readonly config: AppConfigService,
   ) {}
 
   /**
@@ -69,11 +71,15 @@ export class SignaturesService {
     actorId: string,
   ): Promise<SignatureSummary> {
     await this.getOwnedMailbox(organizationId, mailboxId);
+    // Validate (and sanitize) BEFORE writing anything — buildContent throws
+    // on genuinely blank content, and that must never leave behind an
+    // orphaned Signature row with no version/activeVersionId.
+    const content = this.buildContent(htmlContent, plainTextContent);
 
     const signature = await this.signatures.create({ organizationId, mailboxId });
     const version = await this.versions.create({
       signatureId: signature.id,
-      ...this.buildContent(htmlContent, plainTextContent),
+      ...content,
       createdBy: actorId,
     });
     const updated = await this.signatures.update(signature.id, { activeVersionId: version.id });
@@ -316,11 +322,28 @@ export class SignaturesService {
     }
   }
 
+  /**
+   * A signature is valid with text alone, an image alone, or both — only
+   * genuinely empty content (after sanitization strips anything unsafe or
+   * disallowed) is rejected. Uses `sanitizeSignatureHtml` (host/scheme
+   * allow-listed images only), not the generic `sanitize`, so a signature
+   * saved through this path can never reference an image from an
+   * unauthorized host — the frontend editor's own upload flow already only
+   * ever produces authorized-host URLs, but this is the boundary that
+   * can't be bypassed by a crafted request.
+   */
   private buildContent(
     htmlContent: string,
     plainTextContent: string | undefined,
   ): { htmlContent: string; plainTextContent: string } {
-    const sanitized = this.sanitizer.sanitize(htmlContent);
+    const sanitized = this.sanitizer.sanitizeSignatureHtml(
+      htmlContent,
+      this.config.signatureAssetAllowedImageHost,
+      this.config.signatureAssetAllowInsecureImageHost,
+    );
+    if (!hasVisibleSignatureContent(sanitized)) {
+      throw new BadRequestException('La firma debe contener texto o al menos una imagen válida.');
+    }
     return {
       htmlContent: sanitized,
       plainTextContent: plainTextContent?.trim() || htmlToPlainText(sanitized),

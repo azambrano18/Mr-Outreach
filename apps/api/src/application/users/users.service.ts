@@ -187,6 +187,21 @@ export class UsersService {
   ): Promise<UserSummary> {
     const existing = await this.getOwnedUser(organizationId, userId);
 
+    // Mirrors the same invariant `remove()` protects (never leave the
+    // organization without an active admin) — moved here too because
+    // `remove()` now requires a user be INACTIVE before it can be deleted,
+    // which means deactivation, not deletion, is the actual point where an
+    // admin could otherwise be reduced to zero.
+    if (status === 'INACTIVE' && existing.status === 'ACTIVE') {
+      const [role] = await this.userRoles.getRolesForUser(existing.id);
+      if (role?.name === ADMIN_ROLE_NAME) {
+        const otherActiveAdmins = await this.countOtherActiveAdmins(organizationId, existing.id);
+        if (otherActiveAdmins === 0) {
+          throw new ConflictException('No es posible desactivar al último administrador activo de la organización.');
+        }
+      }
+    }
+
     const updated = await this.users.update(existing.id, { status });
 
     await this.auditLogs.record({
@@ -223,8 +238,13 @@ export class UsersService {
    *
    * Resolvable blocks (ConflictException — the caller can fix the
    * condition and retry):
-   *   - this is the organization's last ACTIVE admin (deleting an already
-   *     -INACTIVE admin is fine — it doesn't remove an active one);
+   *   - the user is still ACTIVE — the flow is always ACTIVE -> INACTIVE ->
+   *     DELETED, never ACTIVE -> DELETED directly; deactivate first (see
+   *     `setStatus`, which is also where the "never leave the organization
+   *     without an active admin" rule is enforced now — once a user must
+   *     already be INACTIVE to reach this method, re-checking that rule
+   *     here would be checking a condition (`status === 'ACTIVE'`) that can
+   *     no longer be true);
    *   - still the PRIMARY assignee on any mailbox — a mailbox can never be
    *     left without a primary;
    *   - owns a non-terminal (draft or still-running) Gestión.
@@ -241,16 +261,12 @@ export class UsersService {
     if (existing.id === actorId) {
       throw new ForbiddenException('No puedes eliminar tu propia cuenta mientras tienes una sesión activa.');
     }
+    if (existing.status === 'ACTIVE') {
+      throw new ConflictException('El usuario debe desactivarse antes de poder eliminarse.');
+    }
 
     const [role] = await this.userRoles.getRolesForUser(existing.id);
     const roleName = role?.name ?? null;
-
-    if (roleName === ADMIN_ROLE_NAME && existing.status === 'ACTIVE') {
-      const otherActiveAdmins = await this.countOtherActiveAdmins(organizationId, existing.id);
-      if (otherActiveAdmins === 0) {
-        throw new ConflictException('No es posible eliminar al último administrador activo de la organización.');
-      }
-    }
 
     const impact = await this.computeDeletionImpact(organizationId, existing);
     if (impact.primaryMailboxCount > 0) {
@@ -300,6 +316,7 @@ export class UsersService {
     const roleName = role?.name ?? null;
     const protectedAccount = isProtectedSystemAccount(existing.email);
     const isSelf = existing.id === actorId;
+    const mustDeactivateFirst = existing.status === 'ACTIVE';
 
     let isLastActiveAdmin = false;
     if (roleName === ADMIN_ROLE_NAME && existing.status === 'ACTIVE') {
@@ -310,6 +327,7 @@ export class UsersService {
     const canDelete =
       !protectedAccount &&
       !isSelf &&
+      !mustDeactivateFirst &&
       !isLastActiveAdmin &&
       impact.primaryMailboxCount === 0 &&
       impact.activeExecutionCount === 0;
@@ -318,6 +336,7 @@ export class UsersService {
       roleName: roleName ?? '—',
       isProtectedSystemAccount: protectedAccount,
       isSelf,
+      mustDeactivateFirst,
       isLastActiveAdmin,
       primaryMailboxCount: impact.primaryMailboxCount,
       secondaryMailboxCount: impact.secondaryMailboxCount,

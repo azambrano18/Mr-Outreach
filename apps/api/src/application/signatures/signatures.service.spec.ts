@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { EngineClient } from '../../domain/engine/engine-client';
 import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
@@ -13,9 +13,12 @@ import { Signature } from '../../domain/signature/signature.entity';
 import { SignatureRepository } from '../../domain/signature/signature.repository';
 import { User } from '../../domain/user/user.entity';
 import { UserRepository } from '../../domain/user/user.repository';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { HtmlSanitizerService } from '../../infrastructure/security/html-sanitizer.service';
 import { SecretEncryptionService } from '../../infrastructure/security/secret-encryption.service';
 import { SignaturesService } from './signatures.service';
+
+const ALLOWED_IMAGE_HOST = 'assets.mejoreferido.cl';
 
 describe('SignaturesService', () => {
   let signatures: jest.Mocked<SignatureRepository>;
@@ -28,6 +31,7 @@ describe('SignaturesService', () => {
   let engineClient: jest.Mocked<EngineClient>;
   let sanitizer: jest.Mocked<HtmlSanitizerService>;
   let secrets: jest.Mocked<SecretEncryptionService>;
+  let config: jest.Mocked<AppConfigService>;
   let service: SignaturesService;
 
   const orgId = 'org_1';
@@ -156,11 +160,16 @@ describe('SignaturesService', () => {
     };
     sanitizer = {
       sanitize: jest.fn((html: string) => html),
+      sanitizeSignatureHtml: jest.fn((html: string) => html),
     } as unknown as jest.Mocked<HtmlSanitizerService>;
     secrets = {
       encrypt: jest.fn(),
       decrypt: jest.fn(() => 'decrypted-password'),
     } as unknown as jest.Mocked<SecretEncryptionService>;
+    config = {
+      signatureAssetAllowedImageHost: ALLOWED_IMAGE_HOST,
+      signatureAssetAllowInsecureImageHost: false,
+    } as unknown as jest.Mocked<AppConfigService>;
 
     service = new SignaturesService(
       signatures,
@@ -173,6 +182,7 @@ describe('SignaturesService', () => {
       engineClient,
       sanitizer,
       secrets,
+      config,
     );
   });
 
@@ -221,7 +231,11 @@ describe('SignaturesService', () => {
         'actor_1',
       );
 
-      expect(sanitizer.sanitize).toHaveBeenCalledWith('<p>Saludos, {nombre}</p>');
+      expect(sanitizer.sanitizeSignatureHtml).toHaveBeenCalledWith(
+        '<p>Saludos, {nombre}</p>',
+        ALLOWED_IMAGE_HOST,
+        false,
+      );
       expect(versions.create).toHaveBeenCalledWith(
         expect.objectContaining({
           signatureId: 'signature_1',
@@ -248,6 +262,85 @@ describe('SignaturesService', () => {
       expect(versions.create).toHaveBeenCalledWith(
         expect.objectContaining({ plainTextContent: 'Custom plain text' }),
       );
+    });
+  });
+
+  /**
+   * A signature is valid with text alone, an image alone, or both — only
+   * genuinely empty content is rejected. Exercised through the public
+   * `create()` method since `buildContent`/`hasVisibleSignatureContent` are
+   * private; `sanitizeSignatureHtml` is mocked per-test to stand in for
+   * whatever sanitization would actually produce, so these tests describe
+   * the blankness rule itself, independent of sanitize-html's own behavior.
+   */
+  describe('buildContent — image-only / text-only / blank signature validation', () => {
+    it('accepts text-only content', async () => {
+      mailboxes.findById.mockResolvedValue(buildMailbox());
+      signatures.create.mockResolvedValue(buildSignature());
+      versions.create.mockResolvedValue(buildVersion());
+      signatures.update.mockResolvedValue(buildSignature({ activeVersionId: 'version_1' }));
+      sanitizer.sanitizeSignatureHtml.mockReturnValue('<p>Saludos</p>');
+
+      await expect(
+        service.create(orgId, 'mailbox_1', '<p>Saludos</p>', undefined, 'actor_1'),
+      ).resolves.toBeDefined();
+    });
+
+    it('accepts image-only content — no minimum character count is enforced when a valid image is present', async () => {
+      mailboxes.findById.mockResolvedValue(buildMailbox());
+      signatures.create.mockResolvedValue(buildSignature());
+      versions.create.mockResolvedValue(buildVersion());
+      signatures.update.mockResolvedValue(buildSignature({ activeVersionId: 'version_1' }));
+      const imageOnlyHtml = `<img src="https://${ALLOWED_IMAGE_HOST}/firmas/ventas@example.com/asset.png" alt="">`;
+      sanitizer.sanitizeSignatureHtml.mockReturnValue(imageOnlyHtml);
+
+      await service.create(orgId, 'mailbox_1', imageOnlyHtml, undefined, 'actor_1');
+
+      expect(versions.create).toHaveBeenCalledWith(
+        expect.objectContaining({ htmlContent: imageOnlyHtml }),
+      );
+    });
+
+    it('accepts text and image together', async () => {
+      mailboxes.findById.mockResolvedValue(buildMailbox());
+      signatures.create.mockResolvedValue(buildSignature());
+      versions.create.mockResolvedValue(buildVersion());
+      signatures.update.mockResolvedValue(buildSignature({ activeVersionId: 'version_1' }));
+      const html = `<p>Saludos</p><img src="https://${ALLOWED_IMAGE_HOST}/firmas/ventas@example.com/asset.png" alt="">`;
+      sanitizer.sanitizeSignatureHtml.mockReturnValue(html);
+
+      await expect(service.create(orgId, 'mailbox_1', html, undefined, 'actor_1')).resolves.toBeDefined();
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+      ['an empty paragraph', '<p></p>'],
+      ['a paragraph with only a line break', '<p><br></p>'],
+      ['an empty container', '<div></div>'],
+    ])('rejects %s as blank, with a message that never mentions requiring text', async (_label, sanitizedOutput) => {
+      mailboxes.findById.mockResolvedValue(buildMailbox());
+      signatures.create.mockResolvedValue(buildSignature());
+      sanitizer.sanitizeSignatureHtml.mockReturnValue(sanitizedOutput);
+
+      await expect(service.create(orgId, 'mailbox_1', '<p>algo</p>', undefined, 'actor_1')).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(orgId, 'mailbox_1', '<p>algo</p>', undefined, 'actor_1')).rejects.toThrow(
+        'La firma debe contener texto o al menos una imagen válida.',
+      );
+      expect(versions.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects content whose only image was stripped by sanitization (e.g. an unauthorized host or data:) — never treats the raw, pre-sanitization HTML as evidence of a valid image', async () => {
+      mailboxes.findById.mockResolvedValue(buildMailbox());
+      signatures.create.mockResolvedValue(buildSignature());
+      // Simulates sanitizeSignatureHtml actually stripping a disallowed <img>, leaving nothing.
+      sanitizer.sanitizeSignatureHtml.mockReturnValue('');
+
+      await expect(
+        service.create(orgId, 'mailbox_1', '<img src="javascript:alert(1)">', undefined, 'actor_1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

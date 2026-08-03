@@ -34,12 +34,16 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
   const canDisable = currentUser.permissions.includes('users.disable');
   const canResetPassword = currentUser.permissions.includes('users.reset_password');
   // Available for both ADMIN and EXECUTIVE users now — never for the protected
-  // system account or for one's own account. Both exclusions are cosmetic
-  // here; the backend (UsersService.remove) rejects them independently.
+  // system account, for one's own account, or while the user is still
+  // ACTIVE (the flow is always ACTIVE -> INACTIVE -> DELETED — see
+  // ToggleStatusButton for the deactivation step). All exclusions are
+  // cosmetic here; the backend (UsersService.remove) rejects them
+  // independently.
   const canDelete =
     currentUser.permissions.includes('users.delete') &&
     !isProtectedSystemAccount(executive.email) &&
-    executive.id !== currentUser.id;
+    executive.id !== currentUser.id &&
+    executive.status === 'INACTIVE';
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -67,6 +71,7 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
               name={executive.name}
               email={executive.email}
               roleName={executive.roleName}
+              status={executive.status}
             />
           )}
         </div>

@@ -1,6 +1,7 @@
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
+import { SequenceTemplate, SequenceTemplateStatus } from '../../domain/sequence-template/sequence-template.entity';
 import { SequenceTemplateRepository } from '../../domain/sequence-template/sequence-template.repository';
 import { SequenceTemplateStepRepository } from '../../domain/sequence-template/sequence-template-step.repository';
 import { SequenceTemplateVersionRepository } from '../../domain/sequence-template/sequence-template-version.repository';
@@ -309,6 +310,23 @@ describe('SequenceTemplatesService', () => {
       };
     }
 
+    /** Same fixture as `templateWithStatus` above, but a complete, concretely-typed `SequenceTemplate` — no `as any` needed. */
+    function fullTemplateWithStatus(status: SequenceTemplateStatus): SequenceTemplate {
+      return {
+        ...templateWithStatus(status),
+        status,
+        description: null,
+        subjectTemplate: '',
+        headerText: null,
+        signatureHtml: '',
+        currentDraftVersion: 1,
+        timezone: 'America/Santiago',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      };
+    }
+
     it('hard-deletes a DRAFT template and its steps, with no server contact', async () => {
       templates.findById.mockResolvedValue(templateWithStatus('DRAFT') as any);
       await service.deleteTemplate(orgId, executiveId, 'tpl_1');
@@ -358,6 +376,24 @@ describe('SequenceTemplatesService', () => {
       templates.findById.mockResolvedValue(templateWithStatus('PUBLISHING') as any);
       await expect(service.deleteTemplate(orgId, executiveId, 'tpl_1')).rejects.toThrow(/publicando/);
     });
+
+    /**
+     * The mailbox's Signature (and its R2 folder) belongs to the account,
+     * never to a Plantilla — deleting a Plantilla must never touch it.
+     * `SequenceTemplatesService` only ever holds a READ-ONLY
+     * `Pick<SignaturesService, 'getByMailbox'>` (see this file's mocks
+     * above): it has no dependency capable of writing to or deleting a
+     * signature at all, in any status branch. This test additionally
+     * confirms the read path isn't even incidentally touched during delete.
+     */
+    it.each(['DRAFT', 'PUBLISH_FAILED', 'ARCHIVED'] as const)(
+      'deleting a %s template never touches the mailbox signature in any way',
+      async (status) => {
+        templates.findById.mockResolvedValue(fullTemplateWithStatus(status));
+        await service.deleteTemplate(orgId, executiveId, 'tpl_1');
+        expect(signatures.getByMailbox).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('canDeleteTemplate — §10 preflight', () => {

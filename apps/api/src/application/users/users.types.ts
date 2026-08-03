@@ -43,6 +43,8 @@ export interface DeletionImpact {
   roleName: string;
   isProtectedSystemAccount: boolean;
   isSelf: boolean;
+  /** ACTIVE -> INACTIVE -> DELETED is mandatory — true means the user must be deactivated first. */
+  mustDeactivateFirst: boolean;
   isLastActiveAdmin: boolean;
   primaryMailboxCount: number;
   secondaryMailboxCount: number;

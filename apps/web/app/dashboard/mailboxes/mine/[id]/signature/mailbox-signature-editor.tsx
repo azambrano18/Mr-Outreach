@@ -6,7 +6,15 @@ import { RichTextEditor } from '../../../../../../components/rich-text-editor/ri
 
 const MAX_SIGNATURE_IMAGE_BYTES = 1 * 1024 * 1024;
 
+/**
+ * A signature is valid with text alone, an image alone, or both — mirrors
+ * the server-side check in SignaturesService (`hasVisibleSignatureContent`).
+ * This client-side version is a UX convenience only (disables Save early);
+ * the backend re-validates independently after sanitization and is the
+ * only check that can't be bypassed.
+ */
 function isBlank(html: string): boolean {
+  if (/<img\b/i.test(html)) return false;
   return html.replace(/<[^>]*>/g, '').trim().length === 0;
 }
 
@@ -71,7 +79,7 @@ export function MailboxSignatureEditor({
       />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {blank && <p className="text-xs text-amber-600">Escribe al menos un carácter antes de guardar — una firma vacía no puede guardarse.</p>}
+      {blank && <p className="text-xs text-amber-600">La firma debe contener texto o al menos una imagen válida.</p>}
 
       {canUpdate && (
         <div className="flex items-center gap-3">

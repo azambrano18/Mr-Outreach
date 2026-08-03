@@ -304,11 +304,64 @@ describe('Users (e2e) — memory + mock', () => {
       expect(response.status).toBe(403);
     });
 
-    it('an admin can delete another admin while at least one other active admin remains', async () => {
+    it('rejects deactivating an admin when it would leave the organization with zero active admins', async () => {
+      // Deactivate every OTHER admin first so `adminUserId` becomes the last one standing.
+      const roster = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const otherActiveAdmins = roster.body.filter(
+        (u: { id: string; roleName: string; status: string }) =>
+          u.roleName === 'ADMIN' && u.status === 'ACTIVE' && u.id !== adminUserId,
+      );
+      for (const other of otherActiveAdmins) {
+        await request(app.getHttpServer())
+          .post(`/users/${other.id}/deactivate`)
+          .set('Authorization', `Bearer ${adminToken}`);
+      }
+
+      const response = await request(app.getHttpServer())
+        .post(`/users/${adminUserId}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(409);
+      expect(response.body.message).toMatch(/último administrador/);
+
+      const stillActive = await request(app.getHttpServer())
+        .get(`/users/${adminUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(stillActive.body.status).toBe('ACTIVE');
+    });
+
+    it('rejects deleting a user who is still ACTIVE, with a controlled domain error naming the required step', async () => {
+      const { id } = await createReadyExecutive(app, adminToken, {
+        name: 'Sigue Activo',
+        email: 'sigue.activo@mejoreferido.cl',
+        roleId: executiveRoleId,
+      });
+
+      const response = await request(app.getHttpServer())
+        .delete(`/users/${id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(409);
+      expect(response.body.message).toMatch(/desactivarse/);
+
+      const stillThere = await request(app.getHttpServer())
+        .get(`/users/${id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(stillThere.status).toBe(200);
+    });
+
+    it('an admin can delete another admin while at least one other active admin remains — once deactivated first (ACTIVE -> INACTIVE -> DELETED)', async () => {
       const created = await request(app.getHttpServer())
         .post('/users')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ firstName: 'Otro', lastName: 'Admin', email: 'otro.admin@mejoreferido.cl', roleId: adminRoleId });
+
+      const deactivateResponse = await request(app.getHttpServer())
+        .post(`/users/${created.body.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deactivateResponse.status).toBe(201);
 
       const response = await request(app.getHttpServer())
         .delete(`/users/${created.body.id}`)
@@ -360,6 +413,10 @@ describe('Users (e2e) — memory + mock', () => {
         });
       const temporaryPassword: string = created.body.temporaryPassword;
 
+      await request(app.getHttpServer())
+        .post(`/users/${created.body.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
       const deleteResponse = await request(app.getHttpServer())
         .delete(`/users/${created.body.id}`)
         .set('Authorization', `Bearer ${adminToken}`);
@@ -395,6 +452,10 @@ describe('Users (e2e) — memory + mock', () => {
         });
 
       await request(app.getHttpServer())
+        .post(`/users/${created.body.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      await request(app.getHttpServer())
         .delete(`/users/${created.body.id}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
@@ -407,12 +468,31 @@ describe('Users (e2e) — memory + mock', () => {
   });
 
   describe('GET /users/:id/deletion-impact', () => {
-    it('previews zero counts and canDelete=true for a clean executive', async () => {
+    it('flags mustDeactivateFirst=true and canDelete=false while the executive is still ACTIVE', async () => {
+      const { id } = await createReadyExecutive(app, adminToken, {
+        name: 'Todavia Activo',
+        email: 'todavia.activo@mejoreferido.cl',
+        roleId: executiveRoleId,
+      });
+
+      const response = await request(app.getHttpServer())
+        .get(`/users/${id}/deletion-impact`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.mustDeactivateFirst).toBe(true);
+      expect(response.body.canDelete).toBe(false);
+    });
+
+    it('previews zero counts and canDelete=true for a clean, already-deactivated executive', async () => {
       const { id } = await createReadyExecutive(app, adminToken, {
         name: 'Sin Dependencias',
         email: 'sin.dependencias@mejoreferido.cl',
         roleId: executiveRoleId,
       });
+      await request(app.getHttpServer())
+        .post(`/users/${id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
 
       const response = await request(app.getHttpServer())
         .get(`/users/${id}/deletion-impact`)
@@ -423,6 +503,7 @@ describe('Users (e2e) — memory + mock', () => {
         roleName: 'EXECUTIVE',
         isProtectedSystemAccount: false,
         isSelf: false,
+        mustDeactivateFirst: false,
         isLastActiveAdmin: false,
         primaryMailboxCount: 0,
         secondaryMailboxCount: 0,
