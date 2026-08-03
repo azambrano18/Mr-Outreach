@@ -515,6 +515,85 @@ describe('Mailbox link flow (e2e) — memory + simulated motor', () => {
       expect(secondDelete.status).toBe(404);
     });
 
+    it('excludes a deleted mailbox from GET /mailboxes (plain list) and from the executive-filtered variant — the same selector data source Plantillas/Gestiones use', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-list-setup-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+      const mailboxId = linkResponse.body.mailboxId;
+
+      const beforeDelete = await request(app.getHttpServer())
+        .get('/mailboxes')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(beforeDelete.body.map((m: { id: string }) => m.id)).toContain(mailboxId);
+
+      await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-list-unlink-${stamp}`)
+        .send({ reason: 'Cuenta dada de baja en e2e' });
+      await request(app.getHttpServer()).delete(`/mailboxes/${mailboxId}`).set('Authorization', `Bearer ${adminToken}`);
+
+      const afterDelete = await request(app.getHttpServer())
+        .get('/mailboxes')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(afterDelete.body.map((m: { id: string }) => m.id)).not.toContain(mailboxId);
+
+      const executiveFiltered = await request(app.getHttpServer())
+        .get('/mailboxes')
+        .query({ executiveId })
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(executiveFiltered.body.map((m: { id: string }) => m.id)).not.toContain(mailboxId);
+    });
+
+    it('keeps a deleted mailbox\'s conversations hidden — the same exclusion an unlinked (REVOKED) account already gets, now that it is DELETED too', async () => {
+      const token = issueToken();
+      const linkResponse = await request(app.getHttpServer())
+        .post('/mailboxes/link')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-conversations-setup-${stamp}`)
+        .send({ token, primaryExecutiveId: executiveId });
+      const mailboxId = linkResponse.body.mailboxId;
+
+      const adminMe = await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const conversations = app.get<ConversationRepository>(CONVERSATION_REPOSITORY);
+      const conversation = await conversations.create({
+        organizationId: adminMe.body.organizationId,
+        clientId: linkResponse.body.clientId,
+        domainId: linkResponse.body.domainId,
+        mailboxId,
+        emailThreadId: `thread-delete-${stamp}`,
+        contactEmail: 'prospecto-delete@example.com',
+        contactName: 'Prospecto Delete E2E',
+        origin: 'EXTERNAL_INBOUND',
+        subject: 'Interesado',
+        isUnread: true,
+        lastMessageAt: new Date(),
+      });
+
+      await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-delete-conversations-unlink-${stamp}`)
+        .send({ reason: 'Cuenta dada de baja en e2e' });
+      await request(app.getHttpServer()).delete(`/mailboxes/${mailboxId}`).set('Authorization', `Bearer ${adminToken}`);
+
+      const afterDelete = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ mailboxId })
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(afterDelete.body.map((c: { id: string }) => c.id)).not.toContain(conversation.id);
+
+      const directFetch = await request(app.getHttpServer())
+        .get(`/conversations/${conversation.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(directFetch.status).toBe(404);
+    });
+
     it('an executive without mailboxes.delete cannot delete a mailbox', async () => {
       const token = issueToken();
       const linkResponse = await request(app.getHttpServer())

@@ -5,7 +5,11 @@ import { getCurrentUser } from '../../../lib/session';
 import { AccessDenied } from '../access-denied';
 import { MailboxesList } from './mailboxes-list';
 
-export default async function MailboxesOverviewPage() {
+export default async function MailboxesOverviewPage({
+  searchParams,
+}: {
+  searchParams: { deleted?: string };
+}) {
   const currentUser = await getCurrentUser();
   if (!currentUser) {
     redirect('/login');
@@ -25,5 +29,7 @@ export default async function MailboxesOverviewPage() {
     loadError = error instanceof ApiError ? error.message : 'No se pudo cargar el listado.';
   }
 
-  return <MailboxesList items={items} loadError={loadError} canLink={canLink} />;
+  return (
+    <MailboxesList items={items} loadError={loadError} canLink={canLink} deletedEmail={searchParams.deleted ?? null} />
+  );
 }

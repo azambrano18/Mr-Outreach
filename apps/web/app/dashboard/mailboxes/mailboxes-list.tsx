@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import type { MailboxAdminOverviewItem } from '@outreach/shared-types';
 import {
@@ -49,13 +50,25 @@ export function MailboxesList({
   items,
   loadError,
   canLink,
+  deletedEmail,
 }: {
   items: MailboxAdminOverviewItem[];
   loadError: string | null;
   canLink: boolean;
+  /** Set by the detail page's redirect right after a successful deletion — see server-linked-mailbox-panel.tsx. */
+  deletedEmail?: string | null;
 }) {
+  const router = useRouter();
   const [search, setSearch] = useState('');
+  const [showDeletedBanner, setShowDeletedBanner] = useState(Boolean(deletedEmail));
   const hasAnyLinkedAccount = items.some((item) => item.linkSource === 'SERVER_TOKEN');
+
+  function dismissDeletedBanner(): void {
+    setShowDeletedBanner(false);
+    // Strips "?deleted=..." from the URL so reloading/reopening this page
+    // later never re-shows the banner for a long-gone deletion.
+    router.replace('/dashboard/mailboxes');
+  }
 
   const filtered = useMemo(() => {
     return items
@@ -66,6 +79,19 @@ export function MailboxesList({
 
   return (
     <div className="flex w-full flex-col gap-6">
+      {showDeletedBanner && deletedEmail && (
+        <div className="flex items-center justify-between gap-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span>Cuenta {deletedEmail} eliminada correctamente.</span>
+          <button
+            type="button"
+            onClick={dismissDeletedBanner}
+            aria-label="Cerrar aviso"
+            className="rounded-md px-2 py-0.5 text-emerald-700 hover:bg-emerald-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Cuentas de correo</h1>

@@ -219,6 +219,16 @@ export class PrismaMailboxRepository implements MailboxRepository {
         assetCleanupStatus: input.assetCleanupStatus,
         assetCleanupAttempts: input.assetCleanupAttempts,
         lastAssetCleanupError: input.lastAssetCleanupError,
+        // Root cause of a deleted mailbox staying visible as "Desvinculada":
+        // this field was missing from this explicit mapping, so
+        // DeleteMailboxUseCase's `deletedAt: new Date()` write was silently
+        // dropped before ever reaching Postgres — the audit log recorded
+        // `mailbox.delete` (a separate write, in the same transaction) but
+        // the row's own `deletedAt` column never changed. Every read path
+        // (`findById`/`findAll`/etc.) already filters `deletedAt: null`, so
+        // once this is actually persisted the row disappears from them
+        // exactly as designed — no other query needed changing.
+        deletedAt: input.deletedAt,
         ...(input.sendingLimits && {
           ...(input.sendingLimits.dailyLimit !== undefined && { dailyLimit: input.sendingLimits.dailyLimit }),
           ...(input.sendingLimits.minimumIntervalSeconds !== undefined && {

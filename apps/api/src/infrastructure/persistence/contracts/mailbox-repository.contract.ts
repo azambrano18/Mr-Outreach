@@ -98,4 +98,39 @@ export function runMailboxRepositoryContractTests(
     expect(updated.imap!.secretCiphertext).toBe('iv.tag.cipher');
     expect(updated.smtp!.host).toBe('imap.example.com');
   });
+
+  /**
+   * Regression test for a bug where PrismaMailboxRepository.update()'s
+   * explicit field mapping omitted `deletedAt`: DeleteMailboxUseCase's
+   * write silently never reached Postgres, so the mailbox kept appearing
+   * in every listing as "Desvinculada" (REVOKED, deletedAt still null)
+   * even though `mailbox.delete`/`mailbox.asset_cleanup_completed` were
+   * both audited. Runs against every driver via this shared contract, so
+   * a future field addition that repeats the same omission fails here
+   * immediately, on both memory and Postgres.
+   */
+  it('persists deletedAt on update — the mailbox then disappears from findAll/findById/findByEmail', async () => {
+    const repo = getRepository();
+    const created = await repo.create({
+      organizationId: 'org_1',
+      name: 'Ventas',
+      email: 'ventas@example.com',
+      fromName: 'Equipo de Ventas',
+      imap: protocolConfig('ventas@example.com'),
+      smtp: protocolConfig('ventas@example.com'),
+    });
+
+    const deletionTimestamp = new Date();
+    const updated = await repo.update(created.id, { deletedAt: deletionTimestamp });
+    expect(updated.deletedAt).toEqual(deletionTimestamp);
+
+    expect(await repo.findById(created.id)).toBeNull();
+    expect(await repo.findByEmail('org_1', 'ventas@example.com')).toBeNull();
+    expect(await repo.findAll('org_1')).toHaveLength(0);
+
+    // The row itself still exists — soft delete, never a hard delete.
+    const stillThere = await repo.findByIdIncludingDeleted(created.id);
+    expect(stillThere).not.toBeNull();
+    expect(stillThere!.deletedAt).toEqual(deletionTimestamp);
+  });
 }

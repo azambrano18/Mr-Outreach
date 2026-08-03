@@ -261,9 +261,17 @@ export function ServerLinkedMailboxPanel({
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setDeleteError(body.error ?? 'No se pudo eliminar la cuenta.');
+        // Deliberately does NOT close the modal or navigate away — the
+        // account stays visible and the error stays on screen, exactly as
+        // required for a failed deletion attempt.
         return;
       }
-      router.push('/dashboard/mailboxes');
+      // `replace`, never `push`: the detail URL for a just-deleted account
+      // must not remain reachable via the browser's Back button — replace
+      // removes it from history instead of merely covering it, so Back
+      // from the list skips straight past it. `refresh()` forces the list
+      // to re-fetch from the API rather than serve a cached RSC payload.
+      router.replace(`/dashboard/mailboxes?deleted=${encodeURIComponent(mailbox.email)}`);
       router.refresh();
     } catch {
       setDeleteError('No se pudo contactar la API.');

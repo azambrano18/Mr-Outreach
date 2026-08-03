@@ -22,6 +22,7 @@
     "prisma:bootstrap-admin": "ts-node --project prisma/tsconfig.json prisma/bootstrap-admin.ts",
     "prisma:sync-system-roles": "ts-node --project prisma/tsconfig.json prisma/sync-system-roles.ts",
     "prisma:cleanup-staging-test-data": "ts-node --project prisma/tsconfig.json prisma/cleanup-staging-test-data.ts",
+    "prisma:repair-mailbox-deleted-at": "ts-node --project prisma/tsconfig.json prisma/repair-mailbox-deleted-at.ts",
     "test:prisma-scripts": "jest --config jest.config.prisma.js",
     "test:web-lib": "jest --config jest.config.web.js"
   },

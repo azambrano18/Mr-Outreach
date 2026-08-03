@@ -220,4 +220,23 @@ describe('DeleteMailboxUseCase', () => {
       useCase.execute({ organizationId: orgId, mailboxId: 'missing', actorId: 'admin_1' }),
     ).rejects.toThrow(NotFoundException);
   });
+
+  /**
+   * Idempotency §7 — once a mailbox is truly deleted (deletedAt persisted),
+   * every read path including `findById` stops returning it, so a repeated
+   * DELETE call reaches this exact branch: a controlled 404, never a
+   * second soft-delete, never a second R2 purge, never a duplicate
+   * `mailbox.delete`/`mailbox.asset_cleanup_completed` audit entry.
+   */
+  it('a repeated delete on an already-deleted mailbox never re-runs the soft-delete, the audit, or the R2 purge', async () => {
+    mailboxes.findById.mockResolvedValue(null);
+
+    await expect(
+      useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(mailboxes.update).not.toHaveBeenCalled();
+    expect(auditLogs.record).not.toHaveBeenCalled();
+    expect(storage.deleteObjectsByPrefix).not.toHaveBeenCalled();
+  });
 });

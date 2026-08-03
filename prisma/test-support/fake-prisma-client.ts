@@ -53,12 +53,23 @@ export interface FakeUserRole {
 }
 
 export interface FakeAuditLog {
+  id?: string;
   organizationId: string;
   actorId: string | null;
   action: string;
   entityType: string;
   entityId: string;
   metadata: unknown;
+  createdAt?: Date;
+}
+
+export interface FakeMailbox {
+  id: string;
+  organizationId: string;
+  email: string;
+  linkStatus: string;
+  assetCleanupStatus: string;
+  deletedAt: Date | null;
 }
 
 export interface FakeStore {
@@ -69,6 +80,7 @@ export interface FakeStore {
   rolePermissions: FakeRolePermission[];
   userRoles: FakeUserRole[];
   auditLogs: FakeAuditLog[];
+  mailboxes: FakeMailbox[];
 }
 
 export function createEmptyStore(): FakeStore {
@@ -80,6 +92,7 @@ export function createEmptyStore(): FakeStore {
     rolePermissions: [],
     userRoles: [],
     auditLogs: [],
+    mailboxes: [],
   };
 }
 
@@ -305,8 +318,43 @@ export class FakePrismaClient {
     return {
       create: async ({ data }: { data: FakeAuditLog }) => {
         this.track('auditLog.create');
-        this.store.auditLogs.push({ ...data });
-        return { id: randomUUID(), createdAt: new Date(), ...data };
+        const row: FakeAuditLog = { id: randomUUID(), createdAt: new Date(), ...data };
+        this.store.auditLogs.push(row);
+        return row;
+      },
+      findMany: async ({
+        where,
+        select,
+      }: {
+        where?: { action?: string; entityType?: string };
+        select?: Record<string, boolean>;
+      } = {}) => {
+        this.track('auditLog.findMany');
+        return this.store.auditLogs
+          .filter(
+            (a) =>
+              (where?.action === undefined || a.action === where.action) &&
+              (where?.entityType === undefined || a.entityType === where.entityType),
+          )
+          .map((a) => pick(a, select));
+      },
+    };
+  }
+
+  get mailbox() {
+    return {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        this.track('mailbox.findUnique');
+        return this.store.mailboxes.find((m) => m.id === where.id) ?? null;
+      },
+      update: async ({ where, data }: { where: { id: string }; data: Partial<FakeMailbox> }) => {
+        this.track('mailbox.update');
+        const existing = this.store.mailboxes.find((m) => m.id === where.id);
+        if (!existing) {
+          throw new Error(`Fake mailbox ${where.id} not found.`);
+        }
+        Object.assign(existing, data);
+        return existing;
       },
     };
   }
