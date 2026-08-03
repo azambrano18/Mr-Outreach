@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import type { UserSummary } from '@outreach/shared-types';
 import { ApiError, apiFetch } from '../../../../lib/api';
-import { isProtectedSystemAccount } from '../../../../lib/protected-system-account';
+import { getExecutiveActionsVisibility } from '../../../../lib/executive-action-visibility';
 import { getCurrentUser } from '../../../../lib/session';
+import { parseUserStatus } from '../../../../lib/user-status';
 import { AccessDenied } from '../../access-denied';
 import { DeleteUserButton } from '../delete-user-button';
 import { ResetPasswordButton } from '../reset-password-button';
@@ -31,19 +32,31 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
   }
 
   const canUpdate = currentUser.permissions.includes('users.update');
-  const canDisable = currentUser.permissions.includes('users.disable');
   const canResetPassword = currentUser.permissions.includes('users.reset_password');
-  // Available for both ADMIN and EXECUTIVE users now — never for the protected
-  // system account, for one's own account, or while the user is still
-  // ACTIVE (the flow is always ACTIVE -> INACTIVE -> DELETED — see
-  // ToggleStatusButton for the deactivation step). All exclusions are
-  // cosmetic here; the backend (UsersService.remove) rejects them
-  // independently.
-  const canDelete =
-    currentUser.permissions.includes('users.delete') &&
-    !isProtectedSystemAccount(executive.email) &&
-    executive.id !== currentUser.id &&
-    executive.status === 'INACTIVE';
+
+  // Runtime boundary check — `UserSummary.status` being typed
+  // `'ACTIVE' | 'INACTIVE'` at compile time proves nothing about what the
+  // API actually sent (a stale deploy, a serialization bug, or a future
+  // third status would all satisfy the type while being something else in
+  // practice). Never logs the executive's name/email — only the id and
+  // the literal unexpected value, neither of which is sensitive.
+  if (parseUserStatus(executive.status) === null) {
+    console.warn(
+      `[executives] Unexpected user.status for executive detail: userId=${executive.id} status=${JSON.stringify(executive.status)}`,
+    );
+  }
+
+  // Single source of truth for the Activar/Desactivar/Eliminar gating —
+  // see getExecutiveActionsVisibility's own comment for why every action
+  // is derived from two INDEPENDENT, explicit checks (`status ===
+  // 'ACTIVE'` / `status === 'INACTIVE'`), never from one negating the
+  // other. That exact `!isActive` shortcut previously let "Activar" show
+  // while "Eliminar" silently never did, and would let any unrecognized
+  // status value enable Eliminar too. All exclusions (protected account,
+  // self, unknown/still-ACTIVE status) are cosmetic here; the backend
+  // (UsersService.remove/setStatus) rejects them independently regardless
+  // of what this computes.
+  const visibility = getExecutiveActionsVisibility(executive, currentUser);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -61,11 +74,11 @@ export default async function ExecutiveProfilePage({ params }: { params: { id: s
               Editar ejecutivo
             </Link>
           )}
-          {canDisable && (
-            <ToggleStatusButton userId={executive.id} active={executive.status === 'ACTIVE'} />
+          {(visibility.showDeactivate || visibility.showActivate) && (
+            <ToggleStatusButton userId={executive.id} active={visibility.showDeactivate} />
           )}
           {canResetPassword && <ResetPasswordButton userId={executive.id} />}
-          {canDelete && (
+          {visibility.showDelete && (
             <DeleteUserButton
               userId={executive.id}
               name={executive.name}

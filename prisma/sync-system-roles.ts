@@ -207,10 +207,19 @@ function printDiagnosis(config: SyncConfig, diagnosis: Diagnosis): void {
       : `  -> ${diagnosis.organizations.length} match(es) (expected exactly 1)`,
   );
   console.log(`Missing catalog permissions: ${diagnosis.missingCatalogPermissionKeys.length}/${PERMISSION_CATALOG.length}`);
+  if (diagnosis.missingCatalogPermissionKeys.length > 0) {
+    console.log(`  -> ${diagnosis.missingCatalogPermissionKeys.join(', ')}`);
+  }
   for (const role of [diagnosis.adminRole, diagnosis.executiveRole]) {
     console.log(
       `${role.roleName} role: ${role.roleId ?? '(does not exist yet)'} — ${role.existingPermissionKeys.length} permission(s) present, ${role.missingPermissionKeys.length} missing`,
     );
+    // Named explicitly (not just a count) — this is exactly what lets an
+    // operator answer "is permission X specifically assigned to this
+    // role?" from --check output alone, without guessing from a number.
+    if (role.missingPermissionKeys.length > 0) {
+      console.log(`  -> missing: ${role.missingPermissionKeys.join(', ')}`);
+    }
   }
   console.log(`\nProjected result: ${diagnosis.result}`);
   console.log('Reasons:');

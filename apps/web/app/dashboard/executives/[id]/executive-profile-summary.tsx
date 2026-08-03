@@ -1,17 +1,33 @@
 'use client';
 
 import type { UserSummary } from '@outreach/shared-types';
+import { parseUserStatus } from '../../../../lib/user-status';
 
-function StatusPill({ label, tone }: { label: string; tone: 'green' | 'slate' }) {
+function StatusPill({ label, tone }: { label: string; tone: 'green' | 'slate' | 'amber' }) {
   const toneClasses = {
     green: 'bg-emerald-100 text-emerald-700',
     slate: 'bg-slate-200 text-slate-600',
+    amber: 'bg-amber-100 text-amber-800',
   }[tone];
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${toneClasses}`}>
       {label}
     </span>
   );
+}
+
+/**
+ * Same runtime check `getExecutiveActionsVisibility` is built on — the
+ * badge must never silently render "Inactivo" for a status it doesn't
+ * actually recognize (that "anything not ACTIVE reads as inactive"
+ * shortcut is exactly what let this page disagree with itself about
+ * whether an executive was inactive; see executive-action-visibility.ts).
+ */
+function statusPillProps(rawStatus: unknown): { label: string; tone: 'green' | 'slate' | 'amber' } {
+  const status = parseUserStatus(rawStatus);
+  if (status === 'ACTIVE') return { label: 'Activo', tone: 'green' };
+  if (status === 'INACTIVE') return { label: 'Inactivo', tone: 'slate' };
+  return { label: 'Estado desconocido', tone: 'amber' };
 }
 
 /**
@@ -43,10 +59,7 @@ export function ExecutiveProfileSummary({ executive }: { executive: UserSummary 
       <div>
         <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado</span>
         <p>
-          <StatusPill
-            label={executive.status === 'ACTIVE' ? 'Activo' : 'Inactivo'}
-            tone={executive.status === 'ACTIVE' ? 'green' : 'slate'}
-          />
+          <StatusPill {...statusPillProps(executive.status)} />
         </p>
       </div>
       <div>

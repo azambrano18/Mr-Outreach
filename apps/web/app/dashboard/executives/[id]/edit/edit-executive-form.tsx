@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { RoleSummary, UserSummary } from '@outreach/shared-types';
+import { parseUserStatus } from '../../../../../lib/user-status';
 import { ToggleStatusButton } from '../../toggle-status-button';
 
 export function EditExecutiveForm({
@@ -86,7 +87,7 @@ export function EditExecutiveForm({
       <div className="flex flex-col gap-1 text-sm text-slate-700">
         Estado
         <div>
-          <ToggleStatusButton userId={executive.id} active={executive.status === 'ACTIVE'} />
+          <ToggleStatusButton userId={executive.id} active={parseUserStatus(executive.status) === 'ACTIVE'} />
         </div>
       </div>
 
