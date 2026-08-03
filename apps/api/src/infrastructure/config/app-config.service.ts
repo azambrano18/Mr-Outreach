@@ -52,6 +52,16 @@ export class AppConfigService {
     return this.config.get<string>('NODE_ENV', 'development');
   }
 
+  /**
+   * The real deployment environment — never confuse with `nodeEnv`, which
+   * is only Node/Nest's technical execution mode. Railway staging runs
+   * with NODE_ENV=production (forced by `npm run start:prod`), so any
+   * production-only restriction must gate on this, never on `nodeEnv`.
+   */
+  get appEnv(): string {
+    return this.config.get<string>('APP_ENV', this.nodeEnv);
+  }
+
   get port(): number {
     return this.config.get<number>('PORT', 3001);
   }

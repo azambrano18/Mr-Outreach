@@ -10,6 +10,22 @@ export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'staging', 'production', 'test')
     .default('development'),
+  // Railway's `npm run start:prod` always sets NODE_ENV=production — that
+  // is Node/Nest's technical execution mode (enables production
+  // optimizations), not a statement about which real environment this is.
+  // Railway staging runs with NODE_ENV=production too, so any check that
+  // used NODE_ENV to gate a production-only restriction (see the incident
+  // this variable fixes, below) would incorrectly also block staging.
+  // APP_ENV is the explicit, application-controlled signal for which real
+  // environment this is; it never gets a platform-imposed value the way
+  // NODE_ENV does. Defaults to NODE_ENV's value only so existing
+  // deployments that haven't set APP_ENV yet keep their exact prior
+  // behavior (never a silent weakening of production's own protection) —
+  // every environment should still set APP_ENV explicitly going forward
+  // (see docs/environment-variables.md).
+  APP_ENV: Joi.string()
+    .valid('development', 'staging', 'production', 'test')
+    .default(Joi.ref('NODE_ENV')),
   PORT: Joi.number().default(3001),
   WEB_ORIGIN: Joi.string().uri().default('http://localhost:3000'),
 
@@ -193,9 +209,15 @@ export const envValidationSchema = Joi.object({
   // `.custom()` on the whole object is the reliable way to fail closed
   // here, including when the variable is left unset entirely (the
   // default must never silently resolve to 'simulated' in production).
-  if (value.NODE_ENV === 'production' && value.MAILBOX_MOTOR_DRIVER !== 'http') {
+  //
+  // Deliberately keyed on APP_ENV, never NODE_ENV: Railway staging runs
+  // with NODE_ENV=production (that's just Node's execution mode, forced
+  // by `npm run start:prod`), so a NODE_ENV-based check here would
+  // incorrectly refuse to boot staging too — see the incident this
+  // variable fixes.
+  if (value.APP_ENV === 'production' && value.MAILBOX_MOTOR_DRIVER !== 'http') {
     return helpers.message({
-      custom: 'MAILBOX_MOTOR_DRIVER must be "http" when NODE_ENV=production — the simulated adapter must never run in production.',
+      custom: 'MAILBOX_MOTOR_DRIVER must be "http" when APP_ENV=production — the simulated adapter must never run in the real production environment.',
     });
   }
   return value;

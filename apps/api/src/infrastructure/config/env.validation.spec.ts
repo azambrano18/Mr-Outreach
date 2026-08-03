@@ -90,41 +90,125 @@ describe('envValidationSchema', () => {
     expect(error).toBeUndefined();
   });
 
-  it('refuses to boot in production with MAILBOX_MOTOR_DRIVER=simulated — the simulator is a dev/staging-only tool', () => {
-    const { error } = envValidationSchema.validate({
-      ...BASE_MEMORY_ENV,
-      NODE_ENV: 'production',
-      MAILBOX_MOTOR_DRIVER: 'simulated',
-      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
-      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+  /**
+   * Incident: Railway staging runs `npm run start:prod`, which sets
+   * NODE_ENV=production unconditionally — that's Node/Nest's execution
+   * mode, not a statement about which real environment this is. An
+   * earlier version of this guard checked NODE_ENV directly and refused
+   * to boot staging entirely. APP_ENV is the explicit, app-controlled
+   * signal for the real environment; every case below drives the guard
+   * from APP_ENV only, several of them deliberately with
+   * NODE_ENV=production to prove staging boots under Railway's actual
+   * runtime combination.
+   */
+  describe('APP_ENV / MAILBOX_MOTOR_DRIVER matrix (production must require http; staging must not)', () => {
+    it('rejects an unknown APP_ENV value', () => {
+      const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, APP_ENV: 'qa' });
+      expect(error?.message).toMatch(/APP_ENV/);
     });
-    expect(error?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
-  });
 
-  it('refuses to boot in production when MAILBOX_MOTOR_DRIVER is left unset — the default must never silently resolve to simulated', () => {
-    const { error } = envValidationSchema.validate({
-      ...BASE_MEMORY_ENV,
-      NODE_ENV: 'production',
-      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
-      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+    it('1) NODE_ENV=production + APP_ENV=production + driver=http -> allowed', () => {
+      const { error } = envValidationSchema.validate({
+        ...BASE_MEMORY_ENV,
+        NODE_ENV: 'production',
+        APP_ENV: 'production',
+        MAILBOX_MOTOR_DRIVER: 'http',
+        MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+        MAILBOX_MOTOR_API_KEY: 'a-real-key',
+      });
+      expect(error).toBeUndefined();
     });
-    expect(error?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
-  });
 
-  it('accepts production with MAILBOX_MOTOR_DRIVER=http', () => {
-    const { error } = envValidationSchema.validate({
-      ...BASE_MEMORY_ENV,
-      NODE_ENV: 'production',
-      MAILBOX_MOTOR_DRIVER: 'http',
-      MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
-      MAILBOX_MOTOR_API_KEY: 'a-real-key',
+    it('2) NODE_ENV=production + APP_ENV=production + driver=simulated -> rejected', () => {
+      const { error } = envValidationSchema.validate({
+        ...BASE_MEMORY_ENV,
+        NODE_ENV: 'production',
+        APP_ENV: 'production',
+        MAILBOX_MOTOR_DRIVER: 'simulated',
+      });
+      expect(error?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
+      expect(error?.message).toMatch(/APP_ENV=production/);
     });
-    expect(error).toBeUndefined();
-  });
 
-  it('still allows MAILBOX_MOTOR_DRIVER=simulated in staging/development/test — only production is restricted', () => {
-    const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, NODE_ENV: 'staging' });
-    expect(error).toBeUndefined();
+    it('3) NODE_ENV=production + APP_ENV=staging + driver=simulated -> allowed (exactly Railway staging today)', () => {
+      const { error } = envValidationSchema.validate({
+        ...BASE_MEMORY_ENV,
+        NODE_ENV: 'production',
+        APP_ENV: 'staging',
+        MAILBOX_MOTOR_DRIVER: 'simulated',
+      });
+      expect(error).toBeUndefined();
+    });
+
+    it('4) NODE_ENV=production + APP_ENV=staging + driver=http -> allowed (staging testing the real motor)', () => {
+      const { error } = envValidationSchema.validate({
+        ...BASE_MEMORY_ENV,
+        NODE_ENV: 'production',
+        APP_ENV: 'staging',
+        MAILBOX_MOTOR_DRIVER: 'http',
+        MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+        MAILBOX_MOTOR_API_KEY: 'a-real-key',
+      });
+      expect(error).toBeUndefined();
+    });
+
+    it('5) APP_ENV=development + driver=simulated -> allowed', () => {
+      const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, APP_ENV: 'development', MAILBOX_MOTOR_DRIVER: 'simulated' });
+      expect(error).toBeUndefined();
+    });
+
+    it('6) APP_ENV=test + driver=simulated -> allowed', () => {
+      const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, APP_ENV: 'test', MAILBOX_MOTOR_DRIVER: 'simulated' });
+      expect(error).toBeUndefined();
+    });
+
+    it('7) unknown APP_ENV -> rejected', () => {
+      const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, APP_ENV: 'not-a-real-environment' });
+      expect(error?.message).toMatch(/APP_ENV/);
+    });
+
+    it('8) APP_ENV=production with MAILBOX_MOTOR_DRIVER left unset (default is simulated) -> rejected', () => {
+      const { error } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, APP_ENV: 'production' });
+      expect(error?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
+    });
+
+    it('9) the validation never falls back to NODE_ENV as a substitute for APP_ENV: NODE_ENV=production + APP_ENV=development is treated as development, not production', () => {
+      const { error } = envValidationSchema.validate({
+        ...BASE_MEMORY_ENV,
+        NODE_ENV: 'production',
+        APP_ENV: 'development',
+        MAILBOX_MOTOR_DRIVER: 'simulated',
+      });
+      expect(error).toBeUndefined();
+    });
+
+    it('APP_ENV left entirely unset defaults to NODE_ENV\'s value — never silently weakens an existing production deployment that hasn\'t set APP_ENV yet', () => {
+      const { value, error: errorWithHttp } = envValidationSchema.validate({
+        ...BASE_MEMORY_ENV,
+        NODE_ENV: 'production',
+        MAILBOX_MOTOR_DRIVER: 'http',
+        MAILBOX_MOTOR_BASE_URL: 'https://motor.internal',
+        MAILBOX_MOTOR_API_KEY: 'a-real-key',
+      });
+      expect(errorWithHttp).toBeUndefined();
+      expect(value.APP_ENV).toBe('production');
+
+      const { error: errorRejected } = envValidationSchema.validate({ ...BASE_MEMORY_ENV, NODE_ENV: 'production', MAILBOX_MOTOR_DRIVER: 'simulated' });
+      expect(errorRejected?.message).toMatch(/MAILBOX_MOTOR_DRIVER/);
+    });
+
+    it('reproduces the exact Railway staging runtime combination end to end: NODE_ENV=production, APP_ENV=staging, MAILBOX_MOTOR_DRIVER=simulated — must validate without error', () => {
+      const { error } = envValidationSchema.validate(
+        {
+          ...BASE_MEMORY_ENV,
+          NODE_ENV: 'production',
+          APP_ENV: 'staging',
+          MAILBOX_MOTOR_DRIVER: 'simulated',
+        },
+        { abortEarly: false },
+      );
+      expect(error).toBeUndefined();
+    });
   });
 
   it('accepts the default simulated SEQUENCE_MOTOR_MODE without a SEQUENCE_MOTOR_API_KEY', () => {

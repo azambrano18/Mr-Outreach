@@ -15,7 +15,8 @@ en el código, no por inferencia).
 
 | Variable | Obligatoria | Secreto | Origen | Ejemplo enmascarado | Validación runtime |
 |---|---|---|---|---|---|
-| `NODE_ENV` | Sí | No | Railway (fijo por servicio) | `production` | `Joi.valid('development','staging','production','test')` |
+| `NODE_ENV` | Sí | No | Railway (fijo por servicio, vía `npm run start:prod`) | `production` — **también en Staging**, ver la sección de incidente más abajo | `Joi.valid('development','staging','production','test')` |
+| `APP_ENV` | Recomendada explícitamente en todo despliegue real (Staging y Production) | No | Railway (fijo por servicio) | `staging` en el servicio de Staging, `production` en el de Production | `Joi.valid('development','staging','production','test')`, por defecto toma el valor de `NODE_ENV` si se omite — ver incidente abajo |
 | `PORT` | No (default 3001) | No | Railway (inyectado automáticamente en algunos planes) | `3001` | `Joi.number()` |
 | `WEB_ORIGIN` | Sí en production (CORS estricto) | No | Railway | `https://app.***.com` | `Joi.string().uri()` — usado tal cual en `app.enableCors()`, nunca `*` |
 | `PERSISTENCE_DRIVER` | Sí | No | Railway (fijo) | `postgres` | `Joi.valid('memory','postgres')` |
@@ -25,7 +26,7 @@ en el código, no por inferencia).
 | `ENGINE_BASE_URL` | Solo si `ENGINE_DRIVER=http` | No | Railway | `https://engine.***.internal` | `Joi.uri().required()` condicional |
 | `ENGINE_API_KEY` | Solo si `ENGINE_DRIVER=http` | **Sí** | Railway | `***` | Opcional hoy — no forzado a `.required()` en el schema actual |
 | `MAIL_ENGINE_MODE` | Sí | No | Railway (fijo) | `simulation` (**nunca `remote` todavía** — el adaptador remoto es un stub) | `Joi.valid('simulation','remote')` |
-| `MAILBOX_MOTOR_DRIVER` | Sí | No | Railway (fijo) | `http` (una vez exista el motor real; `simulated` mientras tanto) | `Joi.valid('simulated','http')` |
+| `MAILBOX_MOTOR_DRIVER` | Sí | No | Railway (fijo) | `http` en Production; `simulated` o `http` en Staging | `Joi.valid('simulated','http')` — **además**, el proceso rehúsa arrancar si `APP_ENV=production` y este valor no es exactamente `http` (nunca si `NODE_ENV=production`, ver incidente abajo) |
 | `MAILBOX_MOTOR_BASE_URL` | Solo si `MAILBOX_MOTOR_DRIVER=http` | No | Railway | `https://motor.***.internal` | `Joi.uri().required()` condicional |
 | `MAILBOX_MOTOR_API_KEY` | Solo si `MAILBOX_MOTOR_DRIVER=http` | **Sí** | Railway | `***` | `Joi.min(1).required()` condicional |
 | `MAILBOX_MOTOR_TIMEOUT_MS` | No (default 10000) | No | Railway | `10000` | `Joi.number()` |
@@ -51,6 +52,49 @@ en el código, no por inferencia).
 | `API_PUBLIC_URL` | No (opcional — solo afecta URLs de `/uploads/...`) | No | Railway | `https://api.***.com` | `Joi.uri()` |
 | `DEV_ADMIN_EMAIL` / `DEV_ADMIN_PASSWORD` | **No en production** | `DEV_ADMIN_PASSWORD` sí sería secreto si se usara | — | — | Solo obligatorias cuando `PERSISTENCE_DRIVER=memory` — **nunca debe usarse memory en production**; omitir ambas variables en Railway |
 | `DEV_EXECUTIVE_EMAIL` / `DEV_EXECUTIVE_PASSWORD` | **No en production** | Igual que arriba | — | — | Igual que arriba — omitir en Railway |
+
+## Incidente corregido: `NODE_ENV` no distingue Staging de Production en Railway
+
+**Síntoma (2026-08-03)**: el servicio `mr-outreach-api` en Railway Staging
+dejó de arrancar con:
+
+```
+Config validation error: MAILBOX_MOTOR_DRIVER must be "http" when NODE_ENV=production — the simulated adapter must never run in production.
+```
+
+**Causa raíz**: Railway ejecuta `npm run start:prod` en todo servicio,
+incluido Staging, y ese script fija `NODE_ENV=production`
+incondicionalmente — es el modo técnico de ejecución de Node/Nest
+(activa optimizaciones de producción), **no** una afirmación de que ese
+servicio sea el ambiente productivo real. Una validación agregada
+previamente usaba `NODE_ENV === 'production'` para exigir
+`MAILBOX_MOTOR_DRIVER=http`, y por eso bloqueaba el arranque de Staging
+también — Staging necesita poder usar `simulated` para poder probar el
+flujo determinístico de desvinculación de cuentas sin depender del motor
+real.
+
+**Corrección**: se introdujo `APP_ENV` como la señal explícita del
+ambiente real de despliegue, separada de `NODE_ENV`. La validación de
+`MAILBOX_MOTOR_DRIVER` ahora depende exclusivamente de `APP_ENV`, nunca
+de `NODE_ENV` — ver
+[`env.validation.ts`](../apps/api/src/infrastructure/config/env.validation.ts).
+Si `APP_ENV` no está configurada, por compatibilidad hacia atrás toma el
+mismo valor que `NODE_ENV` (para no debilitar silenciosamente un
+despliegue de Production que todavía no la tenga configurada) — pero
+**todo servicio de Railway debe configurar `APP_ENV` explícitamente** en
+vez de depender de ese valor por defecto.
+
+### Variables requeridas por servicio de Railway (`mr-outreach-api`)
+
+| Servicio Railway | `NODE_ENV` | `APP_ENV` | `MAILBOX_MOTOR_DRIVER` |
+|---|---|---|---|
+| Staging | `production` (correcto — no cambiar) | `staging` | `simulated` (o `http` si se decide probar el motor real) |
+| Production | `production` | `production` | `http` (obligatorio — `simulated` hace que el proceso rehúse arrancar) |
+
+**No configurar `NODE_ENV=staging` en Railway Staging** para "solucionar"
+este problema — `NODE_ENV` debe seguir siendo `production` ahí (es el
+modo de ejecución correcto); `APP_ENV=staging` es la variable que
+distingue el ambiente.
 
 ## Servicio Web (`apps/web`)
 
