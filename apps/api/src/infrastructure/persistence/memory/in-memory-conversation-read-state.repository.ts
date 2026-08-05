@@ -45,4 +45,10 @@ export class InMemoryConversationReadStateRepository implements ConversationRead
     this.store.conversationReadStates.set(k, state);
     return state;
   }
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    for (const key of this.store.conversationReadStates.keys()) {
+      if (key.startsWith(`${conversationId}:`)) this.store.conversationReadStates.delete(key);
+    }
+  }
 }

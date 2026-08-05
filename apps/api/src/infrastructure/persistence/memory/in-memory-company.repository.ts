@@ -113,4 +113,8 @@ export class InMemoryCompanyRepository implements CompanyRepository {
     for (const company of created) this.store.companies.set(company.id, company);
     return created;
   }
+
+  async delete(id: string): Promise<void> {
+    this.store.companies.delete(id);
+  }
 }

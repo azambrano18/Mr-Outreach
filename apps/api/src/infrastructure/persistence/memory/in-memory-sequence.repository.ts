@@ -107,4 +107,8 @@ export class InMemorySequenceRepository implements SequenceRepository {
     this.store.sequences.set(id, { ...existing, publishStatus: toStatus, updatedAt: new Date() });
     return 1;
   }
+
+  async delete(id: string): Promise<void> {
+    this.store.sequences.delete(id);
+  }
 }

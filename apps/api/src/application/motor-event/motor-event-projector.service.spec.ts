@@ -240,6 +240,9 @@ describe('MotorEventProjector', () => {
       resolvedAt: null,
       resolvedBy: null,
       archivedAt: null,
+      isSimulation: false,
+      simulationBatchId: null,
+      simulationScenario: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       deletedAt: null,
@@ -351,6 +354,7 @@ describe('MotorEventProjector', () => {
       addTag: jest.fn(),
       removeTag: jest.fn(),
       listTagIds: jest.fn(),
+      delete: jest.fn(),
     };
     messages = {
       findByConversation: jest.fn(),
@@ -360,6 +364,7 @@ describe('MotorEventProjector', () => {
       findLastInboundForConversations: jest.fn().mockResolvedValue(new Map()),
       create: jest.fn().mockImplementation((input) => Promise.resolve(buildMessage(input as Partial<ConversationMessage>))),
       update: jest.fn().mockImplementation((id, input) => Promise.resolve({ ...buildMessage(), id, ...input })),
+      deleteByConversation: jest.fn(),
     };
     companies = {
       findById: jest.fn().mockResolvedValue(company),

@@ -39,6 +39,7 @@ import {
   SIGNATURE_ASSET_REPOSITORY,
   SIGNATURE_REPOSITORY,
   SIGNATURE_VERSION_REPOSITORY,
+  SIMULATION_CONVERSATION_BATCH_REPOSITORY,
   TEMPLATE_REPOSITORY,
   TRANSACTION_MANAGER,
   USER_REPOSITORY,
@@ -88,6 +89,7 @@ import { InMemorySequenceExecutionRepository } from './memory/in-memory-sequence
 import { InMemoryProspectImportRepository } from './memory/in-memory-prospect-import.repository';
 import { InMemoryProspectImportRowRepository } from './memory/in-memory-prospect-import-row.repository';
 import { InMemoryEmailBodyAssetRepository } from './memory/in-memory-email-body-asset.repository';
+import { InMemorySimulationConversationBatchRepository } from './memory/in-memory-simulation-conversation-batch.repository';
 import { InMemorySignatureAssetRepository } from './memory/in-memory-signature-asset.repository';
 import { InMemoryUserRepository } from './memory/in-memory-user.repository';
 import { InMemoryUserRoleRepository } from './memory/in-memory-user-role.repository';
@@ -127,6 +129,7 @@ import { PrismaSequenceExecutionRepository } from './prisma/prisma-sequence-exec
 import { PrismaProspectImportRepository } from './prisma/prisma-prospect-import.repository';
 import { PrismaProspectImportRowRepository } from './prisma/prisma-prospect-import-row.repository';
 import { PrismaEmailBodyAssetRepository } from './prisma/prisma-email-body-asset.repository';
+import { PrismaSimulationConversationBatchRepository } from './prisma/prisma-simulation-conversation-batch.repository';
 import { PrismaSignatureAssetRepository } from './prisma/prisma-signature-asset.repository';
 import { PrismaTransactionManager } from './prisma/prisma-transaction-manager';
 import { InMemoryTransactionManager } from './memory/in-memory-transaction-manager';
@@ -485,6 +488,14 @@ const repositoryProviders: Provider[] = [
         : new InMemoryEmailBodyAssetRepository(store),
     inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
   },
+  {
+    provide: SIMULATION_CONVERSATION_BATCH_REPOSITORY,
+    useFactory: (config: AppConfigService, prisma: PrismaService | null, store: MemoryStore) =>
+      config.persistenceDriver === 'postgres'
+        ? new PrismaSimulationConversationBatchRepository(prisma!)
+        : new InMemorySimulationConversationBatchRepository(store),
+    inject: [AppConfigService, PRISMA_SERVICE, MemoryStore],
+  },
 ];
 
 @Module({
@@ -539,6 +550,7 @@ const repositoryProviders: Provider[] = [
     PROSPECT_IMPORT_ROW_REPOSITORY,
     SIGNATURE_ASSET_REPOSITORY,
     EMAIL_BODY_ASSET_REPOSITORY,
+    SIMULATION_CONVERSATION_BATCH_REPOSITORY,
     PersistenceHealthIndicator,
   ],
 })

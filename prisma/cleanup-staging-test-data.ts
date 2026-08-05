@@ -52,7 +52,9 @@
  * in prisma/schema.prisma as of the migration that introduced R2 asset
  * storage — see docs/staging-cleanup-procedure.md for the full FK graph this
  * was derived from): conversation read-states/tag-assignments/notes/messages
- * -> conversations -> conversation tags -> scheduled emails -> prospect
+ * -> conversations -> simulation conversation batches ("Conversaciones de
+ * prueba" (QA) ledger — its conversations are already gone by this point) ->
+ * conversation tags -> scheduled emails -> prospect
  * import rows -> sequence step versions -> sequence steps -> sequence
  * contacts -> prospect imports -> sequence import rows -> sequence imports
  * -> contacts -> sequence executions -> sequence template versions ->
@@ -338,6 +340,13 @@ function buildTableCountQueries(client: PrismaClient | Prisma.TransactionClient,
     { table: 'conversationNote', count: () => client.conversationNote.count({ where: { organizationId } }) },
     { table: 'conversationMessage', count: () => client.conversationMessage.count({ where: { organizationId } }) },
     { table: 'conversation', count: () => client.conversation.count({ where: { organizationId } }) },
+    // "Conversaciones de prueba" (QA) — a dedicated line so --check makes
+    // the presence of QA batches explicit, even though their conversations/
+    // messages/contacts/companies/sequences are already included in the
+    // generic counts above/below (this script wipes the whole org, real and
+    // synthetic data alike — it never distinguishes the two for any other
+    // table either).
+    { table: 'simulationConversationBatch', count: () => client.simulationConversationBatch.count({ where: { organizationId } }) },
     { table: 'conversationTag', count: () => client.conversationTag.count({ where: { organizationId } }) },
     { table: 'scheduledEmail', count: () => client.scheduledEmail.count({ where: { organizationId } }) },
     { table: 'prospectImportRow', count: () => client.prospectImportRow.count({ where: { organizationId } }) },
@@ -664,6 +673,11 @@ async function runApply(client: PrismaClient, config: CleanupConfig): Promise<Ap
       await record('conversationNote', tx.conversationNote.deleteMany({ where: { organizationId } }));
       await record('conversationMessage', tx.conversationMessage.deleteMany({ where: { organizationId } }));
       await record('conversation', tx.conversation.deleteMany({ where: { organizationId } }));
+      // "Conversaciones de prueba" (QA) — its conversations are already gone
+      // (deleted just above via the generic `conversation` wipe, which
+      // includes every isSimulation row too), so this only removes the
+      // now-childless batch ledger row itself.
+      await record('simulationConversationBatch', tx.simulationConversationBatch.deleteMany({ where: { organizationId } }));
       await record('conversationTag', tx.conversationTag.deleteMany({ where: { organizationId } }));
       await record('scheduledEmail', tx.scheduledEmail.deleteMany({ where: { organizationId } }));
       await record('prospectImportRow', tx.prospectImportRow.deleteMany({ where: { organizationId } }));

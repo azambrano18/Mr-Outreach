@@ -23,6 +23,7 @@ import { ProspectImportRow } from '../../../domain/prospect-import/prospect-impo
 import { Role } from '../../../domain/role/role.entity';
 import { ScheduledEmail } from '../../../domain/scheduled-email/scheduled-email.entity';
 import { SequenceExecution } from '../../../domain/sequence-execution/sequence-execution.entity';
+import { SimulationConversationBatch } from '../../../domain/simulation-conversation/simulation-conversation-batch.entity';
 import { SequenceTemplateStep } from '../../../domain/sequence-template/sequence-template-step.entity';
 import { SequenceTemplateVersion } from '../../../domain/sequence-template/sequence-template-version.entity';
 import { SequenceTemplate } from '../../../domain/sequence-template/sequence-template.entity';
@@ -96,6 +97,7 @@ export class MemoryStore {
   readonly prospectImportRows = new Map<string, ProspectImportRow>();
   readonly signatureAssets = new Map<string, SignatureAsset>();
   readonly emailBodyAssets = new Map<string, EmailBodyAsset>();
+  readonly simulationConversationBatches = new Map<string, SimulationConversationBatch>();
 
   /** Used by tests to start each case from a clean slate. */
   reset(): void {
@@ -141,5 +143,6 @@ export class MemoryStore {
     this.prospectImportRows.clear();
     this.signatureAssets.clear();
     this.emailBodyAssets.clear();
+    this.simulationConversationBatches.clear();
   }
 }

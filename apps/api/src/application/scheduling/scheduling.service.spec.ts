@@ -138,6 +138,7 @@ describe('SchedulingService.createBatch', () => {
       bulkSetScheduled: jest.fn(),
       conditionalRemove: jest.fn(),
       bulkRemoveByCompany: jest.fn(),
+      delete: jest.fn(),
     };
     steps = {
       findById: jest.fn(),
@@ -158,6 +159,7 @@ describe('SchedulingService.createBatch', () => {
       create: jest.fn(),
       update: jest.fn(),
       conditionalUpdatePublishStatus: jest.fn(),
+      delete: jest.fn(),
     };
 
     service = new SchedulingService(scheduledEmails, sequenceContacts, sequences, steps, stepVersions, mailboxes, auditLogs);

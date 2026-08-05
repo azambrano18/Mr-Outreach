@@ -53,4 +53,10 @@ export class InMemoryConversationNoteRepository implements ConversationNoteRepos
     this.store.conversationNotes[index] = updated;
     return updated;
   }
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    const remaining = this.store.conversationNotes.filter((n) => n.conversationId !== conversationId);
+    this.store.conversationNotes.length = 0;
+    this.store.conversationNotes.push(...remaining);
+  }
 }

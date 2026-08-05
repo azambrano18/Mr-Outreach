@@ -24,6 +24,10 @@ export default async function IntegrationMonitorPage() {
   }
 
   return (
-    <IntegrationMonitorClient canManage={currentUser.permissions.includes('simulation.manage')} />
+    <IntegrationMonitorClient
+      canManage={currentUser.permissions.includes('simulation.manage')}
+      canGenerateSimulationConversations={currentUser.permissions.includes('simulation_conversations.create')}
+      canDeleteSimulationConversations={currentUser.permissions.includes('simulation_conversations.delete')}
+    />
   );
 }

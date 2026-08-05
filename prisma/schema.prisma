@@ -1704,23 +1704,31 @@ model Conversation {
   resolvedAt          DateTime?
   resolvedBy          String?
   archivedAt          DateTime?
+
+  /// "Conversaciones de prueba" (QA) — true only for rows created by GenerateSimulationConversationsUseCase; never true for a real conversation.
+  isSimulation       Boolean                      @default(false)
+  simulationBatchId  String?
+  /// The SUGGESTED scenario shown as a hint in the UI — never auto-applied to responseOutcome, which only a manual classification ever sets.
+  simulationScenario ConversationResponseOutcome?
+
   createdAt           DateTime                     @default(now())
   updatedAt           DateTime                     @updatedAt
   deletedAt           DateTime?
 
-  organization      Organization                @relation(fields: [organizationId], references: [id])
-  client            ManagedClient?              @relation(fields: [clientId], references: [id])
-  domain            Domain?                     @relation(fields: [domainId], references: [id])
-  mailbox           Mailbox                     @relation(fields: [mailboxId], references: [id])
-  contact           Contact?                    @relation(fields: [contactId], references: [id])
-  company           Company?                    @relation(fields: [companyId], references: [id])
-  sequenceContact   SequenceContact?            @relation(fields: [sequenceContactId], references: [id])
-  originatingEmail  ScheduledEmail?             @relation(fields: [originatingScheduledEmailId], references: [id])
-  sequence          Sequence?                   @relation(fields: [sequenceId], references: [id])
-  sequenceStep      SequenceStep?               @relation(fields: [sequenceStepId], references: [id])
-  sequenceExecution SequenceExecution?          @relation(fields: [sequenceExecutionId], references: [id])
-  prospectImportRow ProspectImportRow?          @relation(fields: [prospectImportRowId], references: [id])
-  assignedExecutive User?                       @relation("ConversationAssignedExecutive", fields: [assignedExecutiveId], references: [id])
+  organization      Organization                  @relation(fields: [organizationId], references: [id])
+  client            ManagedClient?                @relation(fields: [clientId], references: [id])
+  domain            Domain?                       @relation(fields: [domainId], references: [id])
+  mailbox           Mailbox                       @relation(fields: [mailboxId], references: [id])
+  contact           Contact?                      @relation(fields: [contactId], references: [id])
+  company           Company?                      @relation(fields: [companyId], references: [id])
+  sequenceContact   SequenceContact?              @relation(fields: [sequenceContactId], references: [id])
+  originatingEmail  ScheduledEmail?               @relation(fields: [originatingScheduledEmailId], references: [id])
+  sequence          Sequence?                     @relation(fields: [sequenceId], references: [id])
+  sequenceStep      SequenceStep?                 @relation(fields: [sequenceStepId], references: [id])
+  sequenceExecution SequenceExecution?            @relation(fields: [sequenceExecutionId], references: [id])
+  prospectImportRow ProspectImportRow?            @relation(fields: [prospectImportRowId], references: [id])
+  assignedExecutive User?                         @relation("ConversationAssignedExecutive", fields: [assignedExecutiveId], references: [id])
+  simulationBatch   SimulationConversationBatch?  @relation(fields: [simulationBatchId], references: [id], onDelete: SetNull)
   messages          ConversationMessage[]
   notes             ConversationNote[]
   tagAssignments    ConversationTagAssignment[]
@@ -1736,7 +1744,31 @@ model Conversation {
   @@index([sequenceExecutionId])
   @@index([prospectImportRowId])
   @@index([sequenceContactId])
+  @@index([simulationBatchId])
   @@map("conversations")
+}
+
+/// "Conversaciones de prueba" (QA) — one generation of the 4 fixed scenario
+/// conversations (Interesado/No interesado/No contactar/Deriva) against one
+/// real, staging-only Mailbox. Holds no relations to the synthetic
+/// Contact/Company/Sequence/SequenceContact it caused to be created — those
+/// are found by querying Conversation.simulationBatchId at deletion time
+/// (see DeleteSimulationConversationsUseCase), since every synthetic row is
+/// reachable from its Conversation's own foreign keys.
+model SimulationConversationBatch {
+  id              String   @id @default(uuid())
+  organizationId  String
+  mailboxId       String
+  createdByUserId String
+  idempotencyKey  String
+  createdAt       DateTime @default(now())
+  metadata        Json?
+
+  conversations Conversation[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@map("simulation_conversation_batches")
 }
 
 enum ConversationDirection {

@@ -56,4 +56,8 @@ export class PrismaConversationNoteRepository implements ConversationNoteReposit
     const row = await this.prisma.conversationNote.update({ where: { id }, data: input });
     return toDomain(row);
   }
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    await this.prisma.conversationNote.deleteMany({ where: { conversationId } });
+  }
 }

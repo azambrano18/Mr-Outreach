@@ -133,4 +133,8 @@ export class InMemoryContactRepository implements ContactRepository {
     for (const contact of created) this.store.contacts.set(contact.id, contact);
     return created;
   }
+
+  async delete(id: string): Promise<void> {
+    this.store.contacts.delete(id);
+  }
 }

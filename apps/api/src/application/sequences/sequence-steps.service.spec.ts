@@ -136,6 +136,7 @@ describe('SequenceStepsService', () => {
       create: jest.fn(),
       update: jest.fn(),
       conditionalUpdatePublishStatus: jest.fn(),
+      delete: jest.fn(),
     };
     mailboxes = {
       findById: jest.fn(),

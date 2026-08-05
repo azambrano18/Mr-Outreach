@@ -124,6 +124,7 @@ describe('ConfirmProspectImportUseCase', () => {
           deletedAt: null,
         })),
       ),
+      delete: jest.fn(),
     };
     contacts = {
       findById: jest.fn(),
@@ -136,6 +137,7 @@ describe('ConfirmProspectImportUseCase', () => {
       createMany: jest.fn().mockImplementation(async (inputs) =>
         inputs.map((i: { id: string; email: string }) => ({ id: i.id, email: i.email })),
       ),
+      delete: jest.fn(),
     };
     sequenceContacts = {
       findById: jest.fn(),
@@ -149,6 +151,7 @@ describe('ConfirmProspectImportUseCase', () => {
       bulkSetScheduled: jest.fn(),
       conditionalRemove: jest.fn(),
       bulkRemoveByCompany: jest.fn(),
+      delete: jest.fn(),
     };
     sequences = {
       findById: jest.fn().mockResolvedValue({
@@ -164,6 +167,7 @@ describe('ConfirmProspectImportUseCase', () => {
       create: jest.fn(),
       update: jest.fn(),
       conditionalUpdatePublishStatus: jest.fn(),
+      delete: jest.fn(),
     };
     steps = {
       findById: jest.fn(),

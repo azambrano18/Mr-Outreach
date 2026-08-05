@@ -22,4 +22,6 @@ export interface SequenceRepository {
     toStatus: SequencePublishStatus,
     ctx?: TransactionContext,
   ): Promise<number>;
+  /** "Conversaciones de prueba" (QA) — hard delete, never soft-delete: only ever called on the synthetic QA Sequence by DeleteSimulationConversationsUseCase. */
+  delete(id: string, ctx?: TransactionContext): Promise<void>;
 }

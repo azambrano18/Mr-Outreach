@@ -104,4 +104,10 @@ export class InMemoryConversationMessageRepository implements ConversationMessag
     this.store.conversationMessages.push(message);
     return message;
   }
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    const remaining = this.store.conversationMessages.filter((m) => m.conversationId !== conversationId);
+    this.store.conversationMessages.length = 0;
+    this.store.conversationMessages.push(...remaining);
+  }
 }

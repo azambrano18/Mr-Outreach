@@ -131,6 +131,7 @@ describe('SequencesService', () => {
       create: jest.fn(),
       update: jest.fn(),
       conditionalUpdatePublishStatus: jest.fn(),
+      delete: jest.fn(),
     };
     steps = {
       findById: jest.fn(),

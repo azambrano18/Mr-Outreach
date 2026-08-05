@@ -203,4 +203,8 @@ export class PrismaSequenceContactRepository implements SequenceContactRepositor
       WHERE c.id = v.contact_id
     `;
   }
+
+  async delete(id: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).sequenceContact.delete({ where: { id } });
+  }
 }

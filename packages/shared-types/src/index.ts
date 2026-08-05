@@ -935,6 +935,10 @@ export interface ConversationSummary {
   archivedAt: string | null;
   tagIds: string[];
   isUnmatched: boolean;
+  /** "Conversaciones de prueba" (QA) — true only for a synthetic row created by "Generar conversaciones de prueba". */
+  isSimulation: boolean;
+  /** Set only when isSimulation — the SUGGESTED scenario, shown as a hint only; never equal to the actual classification unless an admin picked it manually. */
+  simulationScenario: ResponseOutcome | null;
   createdAt: string;
 }
 

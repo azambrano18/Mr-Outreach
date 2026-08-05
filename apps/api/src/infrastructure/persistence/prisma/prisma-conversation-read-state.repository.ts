@@ -59,4 +59,8 @@ export class PrismaConversationReadStateRepository implements ConversationReadSt
     });
     return toDomain(row);
   }
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    await this.prisma.conversationReadState.deleteMany({ where: { conversationId } });
+  }
 }

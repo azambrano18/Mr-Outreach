@@ -289,6 +289,16 @@ describe('cleanup-staging-test-data', () => {
     expect(diagnosis.tableCounts.find((t) => t.table === 'conversation')?.count).toBe(1);
   });
 
+  it('"Conversaciones de prueba" (QA) — --check reports the simulation_conversation_batches count as its own line', async () => {
+    const fake = baseFake({
+      mailbox: [{ id: 'mb-1', organizationId: 'org-1', email: 'ventas@cliente.cl' }],
+      conversation: [{ id: 'conv-qa-1', organizationId: 'org-1', simulationBatchId: 'batch-1' }],
+      simulationConversationBatch: [{ id: 'batch-1', organizationId: 'org-1', mailboxId: 'mb-1', createdByUserId: 'user-admin', idempotencyKey: 'key-1' }],
+    });
+    const diagnosis = await diagnose(fake as any, fixedConfig());
+    expect(diagnosis.tableCounts.find((t) => t.table === 'simulationConversationBatch')?.count).toBe(1);
+  });
+
   it('counts a relation-scoped table (signatureVersion) correctly via its parent signature', async () => {
     const fake = baseFake({
       signature: [{ id: 'sig-1', organizationId: 'org-1', mailboxId: 'mb-1' }],
@@ -314,7 +324,8 @@ describe('cleanup-staging-test-data', () => {
       user: [ADMIN_USER, EXEC_USER, otherUser],
       userRole: [...BASE_USER_ROLES, { userId: 'user-other', roleId: 'role-exec' }],
       mailbox: [{ id: 'mb-1', organizationId: 'org-1', email: 'ventas@cliente.cl' }],
-      conversation: [{ id: 'conv-1', organizationId: 'org-1' }],
+      conversation: [{ id: 'conv-1', organizationId: 'org-1' }, { id: 'conv-qa-1', organizationId: 'org-1', simulationBatchId: 'batch-1' }],
+      simulationConversationBatch: [{ id: 'batch-1', organizationId: 'org-1', mailboxId: 'mb-1', createdByUserId: 'user-admin', idempotencyKey: 'key-1' }],
       signature: [{ id: 'sig-1', organizationId: 'org-1', mailboxId: 'mb-1' }],
       signatureVersion: [{ id: 'sv-1', signatureId: 'sig-1', versionNumber: 1 }],
       auditLog: [preExistingAudit],
@@ -327,6 +338,7 @@ describe('cleanup-staging-test-data', () => {
     expect(fake.store.userRole.map((ur) => ur.userId).sort()).toEqual(['user-admin', 'user-exec']);
     expect(fake.store.mailbox).toHaveLength(0);
     expect(fake.store.conversation).toHaveLength(0);
+    expect(fake.store.simulationConversationBatch).toHaveLength(0);
     expect(fake.store.signature).toHaveLength(0);
     expect(fake.store.signatureVersion).toHaveLength(0);
     expect(fake.store.organization).toEqual([ORG]);

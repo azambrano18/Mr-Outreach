@@ -161,4 +161,8 @@ export class PrismaContactRepository implements ContactRepository {
       deletedAt: null,
     }));
   }
+
+  async delete(id: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).contact.delete({ where: { id } });
+  }
 }

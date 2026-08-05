@@ -182,4 +182,8 @@ export class InMemorySequenceContactRepository implements SequenceContactReposit
       });
     }
   }
+
+  async delete(id: string): Promise<void> {
+    this.store.sequenceContacts.delete(id);
+  }
 }

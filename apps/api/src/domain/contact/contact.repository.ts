@@ -19,4 +19,6 @@ export interface ContactRepository {
   createMany(inputs: Array<CreateContactInput & { id: string }>, ctx?: TransactionContext): Promise<Contact[]>;
   /** Fase 2, Caso C — one query to resolve every contact enrolled in a sequence, never one per row. */
   findManyByIds(ids: string[], ctx?: TransactionContext): Promise<Contact[]>;
+  /** "Conversaciones de prueba" (QA) — hard delete, never soft-delete: only ever called on a synthetic, batch-scoped Contact by DeleteSimulationConversationsUseCase. */
+  delete(id: string, ctx?: TransactionContext): Promise<void>;
 }

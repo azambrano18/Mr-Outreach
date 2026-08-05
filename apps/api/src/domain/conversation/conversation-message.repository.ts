@@ -27,4 +27,6 @@ export interface ConversationMessageRepository {
   create(input: CreateConversationMessageInput, ctx?: TransactionContext): Promise<ConversationMessage>;
   /** OUTBOUND_MESSAGE_SENT updates the same row OUTBOUND_MESSAGE_CREATED made — never a second row. */
   update(id: string, input: UpdateConversationMessageInput, ctx?: TransactionContext): Promise<ConversationMessage>;
+  /** "Conversaciones de prueba" (QA) — hard delete every message of a batch-scoped Conversation. Only ever called by DeleteSimulationConversationsUseCase. */
+  deleteByConversation(conversationId: string, ctx?: TransactionContext): Promise<void>;
 }

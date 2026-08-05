@@ -101,6 +101,7 @@ describe('PublishSequenceUseCase', () => {
       create: jest.fn(),
       update: jest.fn().mockImplementation(async (_id, patch) => buildSequence(patch)),
       conditionalUpdatePublishStatus: jest.fn().mockResolvedValue(1),
+      delete: jest.fn(),
     };
     steps = {
       findById: jest.fn(),
@@ -132,6 +133,7 @@ describe('PublishSequenceUseCase', () => {
       bulkSetScheduled: jest.fn(),
       conditionalRemove: jest.fn(),
       bulkRemoveByCompany: jest.fn(),
+      delete: jest.fn(),
     };
     contacts = { findManyByIds: jest.fn().mockResolvedValue([]) };
     companies = { findManyByIds: jest.fn().mockResolvedValue([]) };

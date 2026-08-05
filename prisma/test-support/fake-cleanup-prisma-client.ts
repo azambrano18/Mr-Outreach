@@ -34,6 +34,7 @@ const ORG_SCOPED_TABLES = [
   'conversationNote',
   'conversationMessage',
   'conversation',
+  'simulationConversationBatch',
   'conversationTag',
   'scheduledEmail',
   'prospectImportRow',

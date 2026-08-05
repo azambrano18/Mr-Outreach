@@ -25,6 +25,9 @@ export interface ConversationFilter {
   responseOutcome?: ResponseOutcome | 'UNCLASSIFIED';
   tagId?: string;
   isUnread?: boolean;
+  /** "Todas/Reales/Simulación" filter — undefined means no filter (both). */
+  isSimulation?: boolean;
+  simulationBatchId?: string;
   /** Case-insensitive substring match against subject/contact name/contact email. */
   search?: string;
   /** Conversations belonging to a mailbox that has no client/domain yet — "Mensajes sin identificar". */
@@ -43,4 +46,6 @@ export interface ConversationRepository {
   addTag(conversationId: string, tagId: string, appliedBy: string, ctx?: TransactionContext): Promise<void>;
   removeTag(conversationId: string, tagId: string, ctx?: TransactionContext): Promise<void>;
   listTagIds(conversationId: string): Promise<string[]>;
+  /** "Conversaciones de prueba" (QA) — hard delete, never soft-delete: only ever called on a batch-scoped Conversation by DeleteSimulationConversationsUseCase. */
+  delete(id: string, ctx?: TransactionContext): Promise<void>;
 }

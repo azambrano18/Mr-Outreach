@@ -12,9 +12,29 @@ import type {
   SequenceContactStatus,
 } from '@outreach/shared-types';
 import { sanitizeRichTextHtml } from '../../lib/sanitize-html-client';
+import { JsonViewer } from '../integration/json-viewer';
 import { AccountsTree, TreeSelection } from './accounts-tree';
 import { ResponseOutcomeConfirmPayload, ResponseOutcomeModal } from './response-outcome-modal';
 import { ThreadActionsMenu } from './thread-actions-menu';
+
+type SimulationFilterScope = 'all' | 'real' | 'simulation';
+
+interface ClassificationResult {
+  action: 'not-interested' | 'do-not-contact' | 'interested' | 'refer';
+  actionLabel: string;
+  previousResponseOutcome: ResponseOutcome | null;
+  newResponseOutcome: ResponseOutcome | null;
+  note: string | null;
+  timestamp: string;
+  raw: Record<string, unknown>;
+}
+
+const ACTION_LABEL: Record<ClassificationResult['action'], string> = {
+  'not-interested': 'No interesado',
+  'do-not-contact': 'No contactar',
+  interested: 'Interesado',
+  refer: 'Deriva',
+};
 
 const OUTCOME_TO_ACTION: Record<ResponseOutcome, 'not-interested' | 'do-not-contact' | 'interested' | 'refer'> = {
   NOT_INTERESTED: 'not-interested',
@@ -66,6 +86,14 @@ function ResponseOutcomeBadge({ outcome }: { outcome: ResponseOutcome | null }) 
   return (
     <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONSE_OUTCOME_STYLE[outcome]}`}>
       {RESPONSE_OUTCOME_LABEL[outcome]}
+    </span>
+  );
+}
+
+function SimulationBadge() {
+  return (
+    <span className="inline-flex w-fit items-center rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700">
+      Simulación
     </span>
   );
 }
@@ -129,6 +157,9 @@ export function AccountsWorkspace({
   const [actionPending, setActionPending] = useState(false);
   const [outcomeModalOpen, setOutcomeModalOpen] = useState<ResponseOutcome | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [simulationFilter, setSimulationFilter] = useState<SimulationFilterScope>('all');
+  const [lastClassificationResult, setLastClassificationResult] = useState<ClassificationResult | null>(null);
+  const [showRawResult, setShowRawResult] = useState(false);
 
   // Admin-only filters (spec §7.3) — applied on top of the tree's mailbox selection.
   const [executiveFilter, setExecutiveFilter] = useState('');
@@ -144,6 +175,12 @@ export function AccountsWorkspace({
     void refreshList(selection);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-applies the Todas/Reales/Simulación filter live, without requiring the admin-only "Filtrar" button.
+  useEffect(() => {
+    void refreshList(selection);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulationFilter]);
 
   // Keeps the tree's unread counters in sync whenever the server component
   // re-renders with a fresh `tree` (e.g. a full navigation) — client-side
@@ -181,6 +218,7 @@ export function AccountsWorkspace({
       if (filter.clientId) params.set('clientId', filter.clientId);
       if (filter.domainId) params.set('domainId', filter.domainId);
       if (filter.mailboxId) params.set('mailboxId', filter.mailboxId);
+      if (simulationFilter !== 'all') params.set('isSimulation', simulationFilter === 'simulation' ? 'true' : 'false');
       if (mode === 'admin') {
         if (executiveFilter) params.set('executiveId', executiveFilter);
         if (sequenceFilter) params.set('sequenceId', sequenceFilter);
@@ -217,6 +255,8 @@ export function AccountsWorkspace({
     setMobileShowDetail(true);
     setActionError(null);
     setOutcomeModalOpen(null);
+    setLastClassificationResult(null);
+    setShowRawResult(false);
     const params = new URLSearchParams();
     const filter = selectionToFilter(selection);
     if (filter.clientId) params.set('clientId', filter.clientId);
@@ -299,12 +339,22 @@ export function AccountsWorkspace({
         setActionError(result.message ?? result.error ?? 'No se pudo completar la acción.');
         return;
       }
+      const previousResponseOutcome = detail.responseOutcome;
       if (result.conversation) {
         setDetail((current) => (current ? { ...current, ...result.conversation } : current));
         setConversations((current) =>
           current.map((c) => (c.id === detail.id ? { ...c, ...result.conversation } : c)),
         );
       }
+      setLastClassificationResult({
+        action,
+        actionLabel: ACTION_LABEL[action],
+        previousResponseOutcome,
+        newResponseOutcome: result.conversation?.responseOutcome ?? null,
+        note: typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : null,
+        timestamp: new Date().toISOString(),
+        raw: result,
+      });
       setOutcomeModalOpen(null);
     } catch {
       setActionError('No se pudo contactar la API. Intenta nuevamente.');
@@ -453,6 +503,20 @@ export function AccountsWorkspace({
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Conversaciones</h2>
           {loadingList && <span className="text-xs text-slate-400">Cargando…</span>}
         </div>
+        <div className="border-b border-slate-100 px-3 py-2">
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span>Mostrar</span>
+            <select
+              value={simulationFilter}
+              onChange={(event) => setSimulationFilter(event.target.value as SimulationFilterScope)}
+              className="rounded border border-slate-300 px-1.5 py-1 text-[11px]"
+            >
+              <option value="all">Todas</option>
+              <option value="real">Reales</option>
+              <option value="simulation">Simulación</option>
+            </select>
+          </label>
+        </div>
         {conversations.length === 0 && !loadingList && (
           <p className="px-4 py-6 text-center text-sm text-slate-500">
             {!selection
@@ -485,7 +549,10 @@ export function AccountsWorkspace({
             </div>
             <span className="truncate text-sm text-slate-600">{conversation.subject}</span>
             <span className="truncate text-[11px] text-slate-400">{conversation.companyName ?? 'Empresa sin identificar'}</span>
-            <ResponseOutcomeBadge outcome={conversation.responseOutcome} />
+            <span className="flex flex-wrap gap-1">
+              {conversation.isSimulation && <SimulationBadge />}
+              <ResponseOutcomeBadge outcome={conversation.responseOutcome} />
+            </span>
             {mode === 'admin' && (
               <span className="truncate text-[11px] text-slate-400">
                 Ejecutivo: {conversation.assignedExecutiveName ?? 'Sin asignar'}
@@ -518,6 +585,7 @@ export function AccountsWorkspace({
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-semibold text-slate-900">{detail.subject}</h3>
+                  {detail.isSimulation && <SimulationBadge />}
                   <ResponseOutcomeBadge outcome={detail.responseOutcome} />
                 </div>
                 <p className="text-xs text-slate-500">
@@ -605,6 +673,67 @@ export function AccountsWorkspace({
                 }}
                 onConfirm={confirmOutcome}
               />
+            )}
+
+            {mode === 'self' && lastClassificationResult && lastClassificationResult.raw && (
+              <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Resultado de la clasificación</h4>
+                  <button
+                    type="button"
+                    onClick={() => setShowRawResult((v) => !v)}
+                    className="text-[11px] font-medium text-emerald-700 hover:underline"
+                  >
+                    {showRawResult ? 'Ocultar JSON' : 'Ver JSON'}
+                  </button>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-emerald-900">
+                  <dt className="font-medium">Clasificación elegida</dt>
+                  <dd>{lastClassificationResult.actionLabel}</dd>
+                  <dt className="font-medium">Nota interna</dt>
+                  <dd>{lastClassificationResult.note ?? '— (no se registró nota)'}</dd>
+                  <dt className="font-medium">Usuario que clasificó</dt>
+                  <dd>Tú (sesión actual)</dd>
+                  <dt className="font-medium">Fecha</dt>
+                  <dd>{new Date(lastClassificationResult.timestamp).toLocaleString('es-CL')}</dd>
+                  <dt className="font-medium">Estado anterior</dt>
+                  <dd>{lastClassificationResult.previousResponseOutcome ? RESPONSE_OUTCOME_LABEL[lastClassificationResult.previousResponseOutcome] : 'Sin clasificar'}</dd>
+                  <dt className="font-medium">Estado nuevo</dt>
+                  <dd>{lastClassificationResult.newResponseOutcome ? RESPONSE_OUTCOME_LABEL[lastClassificationResult.newResponseOutcome] : '—'}</dd>
+                  {typeof lastClassificationResult.raw.cancelledJobs === 'number' && (
+                    <>
+                      <dt className="font-medium">Jobs cancelados</dt>
+                      <dd>{lastClassificationResult.raw.cancelledJobs}</dd>
+                    </>
+                  )}
+                  {typeof lastClassificationResult.raw.affectedContacts === 'number' && (
+                    <>
+                      <dt className="font-medium">Contactos afectados</dt>
+                      <dd>{lastClassificationResult.raw.affectedContacts}</dd>
+                    </>
+                  )}
+                  {typeof lastClassificationResult.raw.affectedSequences === 'number' && (
+                    <>
+                      <dt className="font-medium">Secuencias afectadas</dt>
+                      <dd>{lastClassificationResult.raw.affectedSequences}</dd>
+                    </>
+                  )}
+                  <dt className="font-medium">Contacto afectado</dt>
+                  <dd>{detail.contactName ?? detail.contactEmail}</dd>
+                  <dt className="font-medium">Empresa afectada</dt>
+                  <dd>{detail.companyName ?? 'Sin empresa asociada'}</dd>
+                  {Boolean((lastClassificationResult.raw.command as { commandId?: string } | undefined)?.commandId) && (
+                    <>
+                      <dt className="font-medium">Command ID</dt>
+                      <dd className="font-mono">{(lastClassificationResult.raw.command as { commandId: string }).commandId}</dd>
+                    </>
+                  )}
+                </dl>
+                <p className="text-[10px] text-emerald-700">
+                  Auditoría registrada automáticamente por el servidor (audit_logs) — no se muestra aquí para mantener esta vista simple.
+                </p>
+                {showRawResult && <JsonViewer value={lastClassificationResult.raw} fileName="resultado-clasificacion.json" />}
+              </div>
             )}
 
             <div className="flex flex-col gap-2">

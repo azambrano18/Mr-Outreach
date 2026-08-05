@@ -197,6 +197,18 @@ export const PERMISSION_CATALOG: Permission[] = [
     key: 'simulation.manage',
     description: 'Choose simulated scenarios and drive the Monitor de integración (simulation mode only).',
   },
+  // "Conversaciones de prueba" (QA) — ADMIN-only by omission from
+  // EXECUTIVE_PERMISSION_KEYS below, same convention as `simulation.manage`
+  // and `dev_tools.*`. Gated additionally by AdminSimulationConversationsController's
+  // own environment check (APP_ENV/MAIL_ENGINE_MODE) — see that controller.
+  {
+    key: 'simulation_conversations.create',
+    description: 'Generate the 4 fixed QA test conversations (Interesado/No interesado/No contactar/Deriva) against a real staging mailbox — never in production.',
+  },
+  {
+    key: 'simulation_conversations.delete',
+    description: 'Delete a QA test-conversation batch and everything it created — never touches real data.',
+  },
 
   // Etapa "cuenta del ejecutivo" — Plantilla/Gestión. Distinct prefixes
   // (sequence_templates.*/sequence_executions.*) so these never collide

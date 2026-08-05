@@ -128,4 +128,8 @@ export class PrismaCompanyRepository implements CompanyRepository {
       deletedAt: null,
     }));
   }
+
+  async delete(id: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).company.delete({ where: { id } });
+  }
 }

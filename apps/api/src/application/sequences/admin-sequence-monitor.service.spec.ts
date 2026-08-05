@@ -96,6 +96,7 @@ describe('AdminSequenceMonitorService', () => {
       create: jest.fn(),
       update: jest.fn(),
       conditionalUpdatePublishStatus: jest.fn(),
+      delete: jest.fn(),
     };
     steps = {
       findById: jest.fn(),
@@ -117,6 +118,7 @@ describe('AdminSequenceMonitorService', () => {
       bulkSetScheduled: jest.fn(),
       conditionalRemove: jest.fn(),
       bulkRemoveByCompany: jest.fn(),
+      delete: jest.fn(),
     };
     scheduledEmails = {
       findById: jest.fn(),

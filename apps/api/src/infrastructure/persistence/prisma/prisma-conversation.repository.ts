@@ -40,6 +40,9 @@ function toDomain(row: PrismaConversationRow): Conversation {
     resolvedAt: row.resolvedAt,
     resolvedBy: row.resolvedBy,
     archivedAt: row.archivedAt,
+    isSimulation: row.isSimulation,
+    simulationBatchId: row.simulationBatchId,
+    simulationScenario: row.simulationScenario,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
@@ -101,6 +104,8 @@ export class PrismaConversationRepository implements ConversationRepository {
       where.responseOutcome = filter.responseOutcome as never;
     }
     if (filter.isUnread !== undefined) where.isUnread = filter.isUnread;
+    if (filter.isSimulation !== undefined) where.isSimulation = filter.isSimulation;
+    if (filter.simulationBatchId) where.simulationBatchId = filter.simulationBatchId;
     if (filter.tagId) {
       where.tagAssignments = { some: { tagId: filter.tagId } };
     }
@@ -151,6 +156,9 @@ export class PrismaConversationRepository implements ConversationRepository {
         classification: (input.classification ?? 'UNCLASSIFIED') as never,
         isUnread: input.isUnread,
         lastMessageAt: input.lastMessageAt,
+        isSimulation: input.isSimulation ?? false,
+        simulationBatchId: input.simulationBatchId ?? null,
+        simulationScenario: (input.simulationScenario ?? null) as never,
       },
     });
     return toDomain(row);
@@ -189,5 +197,9 @@ export class PrismaConversationRepository implements ConversationRepository {
       select: { tagId: true },
     });
     return rows.map((r) => r.tagId);
+  }
+
+  async delete(id: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).conversation.delete({ where: { id } });
   }
 }

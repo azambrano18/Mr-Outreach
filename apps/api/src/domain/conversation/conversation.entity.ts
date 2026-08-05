@@ -77,6 +77,12 @@ export interface Conversation {
   resolvedAt: Date | null;
   resolvedBy: string | null;
   archivedAt: Date | null;
+  /** "Conversaciones de prueba" (QA) — true only for rows created by GenerateSimulationConversationsUseCase. Never true for a real conversation. */
+  isSimulation: boolean;
+  /** Set only when isSimulation — which QA batch this row belongs to; null for every real conversation. */
+  simulationBatchId: string | null;
+  /** Set only when isSimulation — the SUGGESTED scenario shown as a hint ("Prueba — Interesado" etc.); never auto-applied to `responseOutcome`, which is only ever set by an admin's own manual classification. */
+  simulationScenario: ResponseOutcome | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -106,6 +112,10 @@ export interface CreateConversationInput {
   classification?: ConversationClassification;
   isUnread: boolean;
   lastMessageAt: Date;
+  /** Defaults to false — only GenerateSimulationConversationsUseCase ever passes true. */
+  isSimulation?: boolean;
+  simulationBatchId?: string | null;
+  simulationScenario?: ResponseOutcome | null;
 }
 
 export interface UpdateConversationInput {

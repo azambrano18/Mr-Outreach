@@ -55,6 +55,8 @@ describe('Admin operational capabilities — permission wiring', () => {
       'sequence_executions.resume_all',
       'sequence_executions.stop_all',
       'sequence_executions.restart_all',
+      'simulation_conversations.create',
+      'simulation_conversations.delete',
       'mailboxes.read.all',
       'mailboxes.assign',
       'mailboxes.link',

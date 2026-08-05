@@ -140,4 +140,8 @@ export class PrismaSequenceRepository implements SequenceRepository {
     });
     return result.count;
   }
+
+  async delete(id: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).sequence.delete({ where: { id } });
+  }
 }

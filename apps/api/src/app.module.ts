@@ -20,6 +20,7 @@ import { SequenceImportsModule } from './modules/sequence-imports/sequence-impor
 import { SequenceTemplatesModule } from './modules/sequence-templates/sequence-templates.module';
 import { SequencesModule } from './modules/sequences/sequences.module';
 import { SignaturesModule } from './modules/signatures/signatures.module';
+import { SimulationConversationsModule } from './modules/simulation-conversations/simulation-conversations.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { SignatureAssetsModule } from './modules/signature-assets/signature-assets.module';
@@ -67,6 +68,7 @@ const NODE_ENV = process.env.NODE_ENV ?? 'development';
     ConversationsModule,
     AuditModule,
     IntegrationMonitorModule,
+    SimulationConversationsModule,
   ],
 })
 export class AppModule {}

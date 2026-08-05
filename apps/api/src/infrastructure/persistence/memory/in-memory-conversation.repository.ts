@@ -105,6 +105,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
     if (filter.isUnread !== undefined) {
       results = results.filter((c) => c.isUnread === filter.isUnread);
     }
+    if (filter.isSimulation !== undefined) {
+      results = results.filter((c) => c.isSimulation === filter.isSimulation);
+    }
+    if (filter.simulationBatchId) {
+      results = results.filter((c) => c.simulationBatchId === filter.simulationBatchId);
+    }
     if (filter.tagId) {
       results = results.filter((c) =>
         this.store.conversationTagAssignments.some(
@@ -162,6 +168,9 @@ export class InMemoryConversationRepository implements ConversationRepository {
       resolvedAt: null,
       resolvedBy: null,
       archivedAt: null,
+      isSimulation: input.isSimulation ?? false,
+      simulationBatchId: input.simulationBatchId ?? null,
+      simulationScenario: input.simulationScenario ?? null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -206,5 +215,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
     return this.store.conversationTagAssignments
       .filter((a) => a.conversationId === conversationId)
       .map((a) => a.tagId);
+  }
+
+  async delete(id: string): Promise<void> {
+    this.store.conversations.delete(id);
+    const remainingAssignments = this.store.conversationTagAssignments.filter((a) => a.conversationId !== id);
+    this.store.conversationTagAssignments.length = 0;
+    this.store.conversationTagAssignments.push(...remainingAssignments);
   }
 }

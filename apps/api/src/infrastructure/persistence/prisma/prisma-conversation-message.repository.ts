@@ -130,4 +130,8 @@ export class PrismaConversationMessageRepository implements ConversationMessageR
     });
     return toDomain(row);
   }
+
+  async deleteByConversation(conversationId: string, ctx?: TransactionContext): Promise<void> {
+    await resolveClient(this.prisma, ctx).conversationMessage.deleteMany({ where: { conversationId } });
+  }
 }

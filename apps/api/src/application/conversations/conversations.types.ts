@@ -46,6 +46,10 @@ export interface ConversationSummary {
   tagIds: string[];
   /** True when the underlying mailbox has no client/domain yet — surfaces in "Mensajes sin identificar". */
   isUnmatched: boolean;
+  /** "Conversaciones de prueba" (QA) — true only for a synthetic row created by "Generar conversaciones de prueba". Drives the "Simulación" badge and the Todas/Reales/Simulación filter. */
+  isSimulation: boolean;
+  /** Set only when isSimulation — the SUGGESTED scenario, shown as a hint only; never equal to the actual classification unless an admin picked it manually. */
+  simulationScenario: ResponseOutcome | null;
   createdAt: Date;
 }
 
@@ -91,6 +95,8 @@ export interface ConversationListFilter {
   responseOutcome?: ResponseOutcome | 'UNCLASSIFIED';
   tagId?: string;
   isUnread?: boolean;
+  /** "Todas/Reales/Simulación" filter — undefined means no filter. */
+  isSimulation?: boolean;
   search?: string;
   unmatchedOnly?: boolean;
   dateFrom?: string;

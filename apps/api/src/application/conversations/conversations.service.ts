@@ -1186,6 +1186,8 @@ export class ConversationsService {
       archivedAt: conversation.archivedAt,
       tagIds,
       isUnmatched: !mailbox?.clientId,
+      isSimulation: conversation.isSimulation,
+      simulationScenario: conversation.simulationScenario,
       createdAt: conversation.createdAt,
     };
   }

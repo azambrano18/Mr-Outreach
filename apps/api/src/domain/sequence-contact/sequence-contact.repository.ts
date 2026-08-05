@@ -45,4 +45,6 @@ export interface SequenceContactRepository {
     reason: string,
     ctx?: TransactionContext,
   ): Promise<number>;
+  /** "Conversaciones de prueba" (QA) — hard delete, never soft-delete: only ever called on a synthetic, batch-scoped SequenceContact by DeleteSimulationConversationsUseCase. */
+  delete(id: string, ctx?: TransactionContext): Promise<void>;
 }
