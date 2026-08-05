@@ -3,8 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { AssignedMailboxSummary } from '@outreach/shared-types';
-import type { SequenceExecutionSummary } from '../../../../lib/sequence-execution-types';
+import type { RestartEligibility, SequenceExecutionSummary } from '../../../../lib/sequence-execution-types';
 import type { SequenceTemplateSummary } from '../../../../lib/sequence-template-types';
+import { Modal } from '../../../../components/ui/modal';
 
 type SimulatableState = 'QUEUED' | 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'REJECTED';
 
@@ -24,6 +25,12 @@ const STATUS_LABELS: Record<string, string> = {
   SUBMISSION_UNKNOWN: 'Verificando envío…',
   ACCEPTED: 'Aceptada',
   RUNNING: 'En ejecución',
+  PAUSE_REQUESTED: 'Pausando…',
+  PAUSED: 'Pausada',
+  RESUME_REQUESTED: 'Reanudando…',
+  STOP_REQUESTED: 'Deteniendo…',
+  STOPPED: 'Detenida',
+  RESTART_REQUESTED: 'Reiniciando…',
   COMPLETED: 'Completada',
   FAILED: 'Fallida',
   REJECTED: 'Rechazada',
@@ -57,6 +64,10 @@ export function SequenceExecutionDetail({
   mailboxes = [],
   templates = [],
   canSimulate = false,
+  canPause = false,
+  canResume = false,
+  canStop = false,
+  canRestart = false,
 }: {
   initialExecution: SequenceExecutionSummary;
   canRefresh: boolean;
@@ -68,6 +79,11 @@ export function SequenceExecutionDetail({
   templates?: SequenceTemplateSummary[];
   /** Dev-only — true only for admins, and only actually rendered once /api/dev/simulated/executions/config confirms the tool is enabled (SEQUENCE_MOTOR_MODE=simulated, non-production). */
   canSimulate?: boolean;
+  /** "Control operativo de Gestiones" — ADMIN-only; each gated by its own sequence_executions.{pause,resume,stop,restart}_all permission, never by role. */
+  canPause?: boolean;
+  canResume?: boolean;
+  canStop?: boolean;
+  canRestart?: boolean;
 }) {
   const router = useRouter();
   const [execution, setExecution] = useState(initialExecution);
@@ -208,6 +224,103 @@ export function SequenceExecutionDetail({
     }
   }
 
+  const [controlPending, setControlPending] = useState<'pause' | 'resume' | 'stop' | 'restart' | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const [showStopModal, setShowStopModal] = useState(false);
+  const [stopReason, setStopReason] = useState('');
+  const [showRestartModal, setShowRestartModal] = useState(false);
+  const [restartPreview, setRestartPreview] = useState<RestartEligibility | null>(null);
+  const [restartPreviewError, setRestartPreviewError] = useState<string | null>(null);
+  const [restartPreviewLoading, setRestartPreviewLoading] = useState(false);
+  const [restartReason, setRestartReason] = useState('');
+  const [restartedExecutionId, setRestartedExecutionId] = useState<string | null>(null);
+
+  const isTransitionalControlState =
+    execution.status === 'PAUSE_REQUESTED' ||
+    execution.status === 'RESUME_REQUESTED' ||
+    execution.status === 'STOP_REQUESTED' ||
+    execution.status === 'RESTART_REQUESTED';
+
+  async function runControlAction(action: 'pause' | 'resume' | 'stop', body: Record<string, string> = {}): Promise<void> {
+    setControlError(null);
+    setControlPending(action);
+    try {
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const response = await fetch(`/api/admin/sequence-executions/${execution.id}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(body),
+      });
+      const responseBody = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setControlError(responseBody.error ?? 'No se pudo completar la acción.');
+        return;
+      }
+      setExecution(responseBody);
+      setShowPauseModal(false);
+      setShowResumeModal(false);
+      setShowStopModal(false);
+      setStopReason('');
+      router.refresh();
+    } catch {
+      setControlError('No se pudo contactar la API.');
+    } finally {
+      setControlPending(null);
+    }
+  }
+
+  async function openRestartModal(): Promise<void> {
+    setRestartedExecutionId(null);
+    setRestartPreviewError(null);
+    setShowRestartModal(true);
+    setRestartPreviewLoading(true);
+    try {
+      const response = await fetch(`/api/admin/sequence-executions/${execution.id}/restart-preview`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRestartPreviewError(body.error ?? 'No se pudo calcular la vista previa del reinicio.');
+        return;
+      }
+      setRestartPreview(body);
+    } catch {
+      setRestartPreviewError('No se pudo contactar la API.');
+    } finally {
+      setRestartPreviewLoading(false);
+    }
+  }
+
+  async function confirmRestart(): Promise<void> {
+    setControlError(null);
+    setControlPending('restart');
+    try {
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const response = await fetch(`/api/admin/sequence-executions/${execution.id}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(restartReason.trim() ? { reason: restartReason.trim() } : {}),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRestartPreviewError(body.error ?? 'No se pudo reiniciar la gestión.');
+        return;
+      }
+      setRestartedExecutionId(body.id);
+      router.refresh();
+    } catch {
+      setRestartPreviewError('No se pudo contactar la API.');
+    } finally {
+      setControlPending(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -318,6 +431,273 @@ export function SequenceExecutionDetail({
           {refreshing ? 'Actualizando…' : 'Actualizar estado'}
         </button>
       )}
+
+      {(canPause || canResume || canStop || canRestart) && (
+        <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
+          <h2 className="text-sm font-medium text-slate-700">Control operativo de la gestión</h2>
+
+          {controlError && <p className="text-sm text-red-600">{controlError}</p>}
+
+          {isTransitionalControlState && (
+            <p className="flex items-center gap-2 text-sm text-amber-700">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+              {STATUS_LABELS[execution.status] ?? execution.status}
+            </p>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {execution.status === 'RUNNING' && canPause && (
+              <button
+                type="button"
+                onClick={() => setShowPauseModal(true)}
+                disabled={controlPending !== null}
+                className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+              >
+                {controlPending === 'pause' ? 'Pausando…' : 'Pausar'}
+              </button>
+            )}
+            {execution.status === 'PAUSED' && canResume && (
+              <button
+                type="button"
+                onClick={() => setShowResumeModal(true)}
+                disabled={controlPending !== null}
+                className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+              >
+                {controlPending === 'resume' ? 'Reanudando…' : 'Reanudar'}
+              </button>
+            )}
+            {(execution.status === 'RUNNING' || execution.status === 'PAUSED') && canStop && (
+              <button
+                type="button"
+                onClick={() => setShowStopModal(true)}
+                disabled={controlPending !== null}
+                className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              >
+                {controlPending === 'stop' ? 'Deteniendo…' : 'Detener'}
+              </button>
+            )}
+            {execution.status === 'STOPPED' && canRestart && (
+              <button
+                type="button"
+                onClick={openRestartModal}
+                disabled={controlPending !== null}
+                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+              >
+                Reiniciar
+              </button>
+            )}
+            {execution.status !== 'RUNNING' &&
+              execution.status !== 'PAUSED' &&
+              execution.status !== 'STOPPED' &&
+              !isTransitionalControlState && <p className="text-sm text-slate-500">No hay acciones disponibles para el estado actual.</p>}
+          </div>
+        </div>
+      )}
+
+      <Modal open={showPauseModal} onClose={() => (controlPending ? undefined : setShowPauseModal(false))} title="Pausar gestión">
+        <div className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-slate-900">Pausar gestión</h3>
+          <p className="text-xs text-slate-600">
+            No se enviarán nuevos correos mientras esté pausada. Los envíos ya en curso se completarán con normalidad. Esta
+            acción es reversible — podrás reanudarla en cualquier momento.
+          </p>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => setShowPauseModal(false)}
+              disabled={controlPending !== null}
+              className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => runControlAction('pause')}
+              disabled={controlPending !== null}
+              className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {controlPending === 'pause' ? 'Pausando…' : 'Confirmar pausa'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showResumeModal} onClose={() => (controlPending ? undefined : setShowResumeModal(false))} title="Reanudar gestión">
+        <div className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-slate-900">Reanudar gestión</h3>
+          <p className="text-xs text-slate-600">
+            Se reanudará el envío respetando el orden original, el horario laboral y los límites de envío. No se
+            duplicará ningún correo ya enviado.
+          </p>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => setShowResumeModal(false)}
+              disabled={controlPending !== null}
+              className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => runControlAction('resume')}
+              disabled={controlPending !== null}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {controlPending === 'resume' ? 'Reanudando…' : 'Confirmar reanudación'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showStopModal}
+        onClose={() => {
+          if (controlPending) return;
+          setShowStopModal(false);
+          setStopReason('');
+        }}
+        title="Detener gestión"
+      >
+        <div className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-slate-900">Detener gestión</h3>
+          <p className="rounded-md bg-red-50 p-2 text-xs text-red-800">
+            Esta acción cancela permanentemente los envíos futuros de esta gestión. Todo lo ya enviado, el historial y
+            la auditoría se conservan. No es reversible con &quot;Reanudar&quot; — solo se podrá reiniciar como una
+            gestión nueva, que excluirá a los contactos que ya recibieron algún envío.
+          </p>
+          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+            Motivo (obligatorio, 3-300 caracteres)
+            <textarea
+              value={stopReason}
+              onChange={(event) => setStopReason(event.target.value)}
+              rows={3}
+              maxLength={300}
+              placeholder="Ej: el cliente solicitó detener la campaña por cambio de estrategia comercial."
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-xs font-normal text-slate-800 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
+            />
+          </label>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowStopModal(false);
+                setStopReason('');
+              }}
+              disabled={controlPending !== null}
+              className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => runControlAction('stop', { reason: stopReason.trim() })}
+              disabled={controlPending !== null || stopReason.trim().length < 3 || stopReason.trim().length > 300}
+              className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {controlPending === 'stop' ? 'Deteniendo…' : 'Confirmar detención'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showRestartModal}
+        onClose={() => (controlPending ? undefined : setShowRestartModal(false))}
+        title="Reiniciar gestión"
+      >
+        <div className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-slate-900">Reiniciar gestión</h3>
+
+          {restartedExecutionId ? (
+            <>
+              <p className="rounded-md bg-emerald-50 p-2 text-xs text-emerald-800">
+                Se creó una nueva gestión (intento {execution.executionAttempt + 1}) con los contactos elegibles.
+              </p>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRestartModal(false)}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/dashboard/admin/sequence-executions/${restartedExecutionId}`)}
+                  className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                >
+                  Ir a la nueva gestión
+                </button>
+              </div>
+            </>
+          ) : restartPreviewLoading ? (
+            <p className="text-xs text-slate-500">Calculando contactos elegibles…</p>
+          ) : restartPreviewError ? (
+            <p className="text-xs text-red-600">{restartPreviewError}</p>
+          ) : restartPreview ? (
+            <>
+              <p className="text-xs text-slate-600">
+                Se creará una nueva gestión a partir de esta, sin modificarla. Solo se incluirán los contactos que
+                nunca recibieron ningún envío en el intento anterior.
+              </p>
+              <dl className="grid grid-cols-3 gap-2 rounded-md bg-slate-50 p-3 text-center text-xs">
+                <div>
+                  <dt className="text-slate-500">Total</dt>
+                  <dd className="text-sm font-semibold text-slate-800">{restartPreview.totalContacts}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Ya contactados</dt>
+                  <dd className="text-sm font-semibold text-slate-800">{restartPreview.alreadyContactedCount}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Elegibles</dt>
+                  <dd className="text-sm font-semibold text-emerald-700">{restartPreview.eligibleCount}</dd>
+                </div>
+              </dl>
+              <p className="text-xs text-slate-600">
+                Cuenta: {restartPreview.mailboxEmail} · Plantilla: {restartPreview.templateName} (v
+                {restartPreview.templateVersionNumber})
+              </p>
+              {restartPreview.eligibleCount === 0 ? (
+                <p className="rounded-md bg-red-50 p-2 text-xs text-red-800">
+                  No existen contactos pendientes que puedan reiniciarse sin duplicar envíos.
+                </p>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                  Motivo (opcional)
+                  <textarea
+                    value={restartReason}
+                    onChange={(event) => setRestartReason(event.target.value)}
+                    rows={2}
+                    maxLength={300}
+                    placeholder="Ej: se reactiva la campaña con los contactos restantes."
+                    className="rounded-md border border-slate-300 px-2 py-1.5 text-xs font-normal text-slate-800 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
+                  />
+                </label>
+              )}
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRestartModal(false)}
+                  disabled={controlPending !== null}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmRestart}
+                  disabled={controlPending !== null || restartPreview.eligibleCount === 0}
+                  className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {controlPending === 'restart' ? 'Reiniciando…' : 'Confirmar reinicio'}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </Modal>
 
       {/* §12 — only while DRAFT: template and account (while still assigned) remain editable. There is no start date to edit — it no longer exists. */}
       {isDraft && canUpdate && (

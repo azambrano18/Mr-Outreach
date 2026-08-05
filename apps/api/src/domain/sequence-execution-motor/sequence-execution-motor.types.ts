@@ -70,3 +70,35 @@ export interface SequenceExecutionStatusSnapshot {
   lastError: string | null;
   checkedAt: Date;
 }
+
+/**
+ * Fase "Control operativo de Gestiones" — the shared input for
+ * pause/resume/stop. Idempotent by `idempotencyKey`, same convention as
+ * `StartSequenceExecutionInput`. `reason` is only ever populated for stop
+ * (an admin-provided, 3-300 character justification); pause/resume never
+ * send one.
+ */
+export interface ExecutionControlCommandInput {
+  idempotencyKey: string;
+  correlationId: string;
+  localExecutionId: string;
+  serverExecutionId: string;
+  reason?: string | null;
+}
+
+export type ExecutionControlOutcome = 'ACCEPTED' | 'REJECTED';
+
+/**
+ * Never thrown for a well-formed, reachable request — a business
+ * rejection (e.g. the motor's own state disagrees with ours) is
+ * `{accepted: false, status: 'REJECTED', ...}`, exactly like
+ * `StartSequenceExecutionResult`. Only `ServiceUnavailableException` for
+ * an unreachable motor.
+ */
+export interface ExecutionControlCommandResult {
+  accepted: boolean;
+  status: ExecutionControlOutcome;
+  rejectionReason: string | null;
+  /** The motor's own confirmation instant — never a value Mr Outreach picked. */
+  acknowledgedAt: Date | null;
+}

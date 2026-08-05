@@ -12,6 +12,14 @@ import { ProspectExecutionState } from '../prospect-import/prospect-import-row.e
  * status later (surfaced via `serverStatus`), but that is the server's
  * own business, never a decision Mr Outreach made or requested.
  */
+/**
+ * Fase "Control operativo de Gestiones" — RUNNING can now also move through
+ * an admin-initiated pause/stop lifecycle: RUNNING -> PAUSE_REQUESTED ->
+ * PAUSED -> RESUME_REQUESTED -> RUNNING, or RUNNING/PAUSED -> STOP_REQUESTED
+ * -> STOPPED (terminal for this execution; only reachable again via a brand
+ * new execution row — see previousExecutionId). See
+ * ControlSequenceExecutionUseCase for the exact transition table.
+ */
 export type SequenceExecutionStatus =
   | 'DRAFT'
   | 'VALIDATING'
@@ -19,6 +27,12 @@ export type SequenceExecutionStatus =
   | 'SUBMISSION_UNKNOWN'
   | 'ACCEPTED'
   | 'RUNNING'
+  | 'PAUSE_REQUESTED'
+  | 'PAUSED'
+  | 'RESUME_REQUESTED'
+  | 'STOP_REQUESTED'
+  | 'STOPPED'
+  | 'RESTART_REQUESTED'
   | 'COMPLETED'
   | 'FAILED'
   | 'REJECTED';
@@ -78,6 +92,20 @@ export interface SequenceExecution {
   /** §11 — the idempotencyKey used for the most recent /start attempt; reused verbatim on a retry so the motor treats it as the same command instead of creating a duplicate. */
   lastSubmissionIdempotencyKey: string | null;
 
+  /** Fase "Control operativo" — set once, on the first successful pause/resume/stop; never cleared. */
+  pausedAt: Date | null;
+  resumedAt: Date | null;
+  stoppedAt: Date | null;
+  /** Admin-provided reason for STOP — required by ControlSequenceExecutionUseCase, 3-300 chars. */
+  stopReason: string | null;
+  /** Reused verbatim on retry of the SAME control command, mirroring lastSubmissionIdempotencyKey. */
+  lastControlIdempotencyKey: string | null;
+
+  /** Fase "Reiniciar Gestión" — 1 for an original execution, N for its Nth restart attempt. */
+  executionAttempt: number;
+  /** Set only on a restart attempt — points at the STOPPED execution it was restarted from. Never set on the original. */
+  previousExecutionId: string | null;
+
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -91,6 +119,9 @@ export interface CreateSequenceExecutionInput {
   templateVersionId: string;
   timezone: string;
   createdBy: string;
+  /** Fase "Reiniciar Gestión" — omitted (defaults to 1/null) for an original execution. */
+  executionAttempt?: number;
+  previousExecutionId?: string | null;
 }
 
 export interface UpdateSequenceExecutionInput {
@@ -122,4 +153,9 @@ export interface UpdateSequenceExecutionInput {
   serverExecutionId?: string | null;
   executionTokenCiphertext?: string | null;
   lastSubmissionIdempotencyKey?: string | null;
+  pausedAt?: Date | null;
+  resumedAt?: Date | null;
+  stoppedAt?: Date | null;
+  stopReason?: string | null;
+  lastControlIdempotencyKey?: string | null;
 }

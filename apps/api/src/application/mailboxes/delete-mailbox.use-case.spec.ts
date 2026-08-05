@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+﻿import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
@@ -91,6 +91,7 @@ describe('DeleteMailboxUseCase', () => {
       update: jest.fn(),
       delete: jest.fn(),
       conditionalUpdateStatus: jest.fn(),
+      conditionalUpdateStatusFromAllowed: jest.fn(),
     };
     auditLogs = { record: jest.fn(), findAll: jest.fn() };
     storage = { deleteObjectsByPrefix: jest.fn().mockResolvedValue({ deletedCount: 0 }) };

@@ -30,4 +30,20 @@ export interface SequenceExecutionRepository {
     toStatus: SequenceExecutionStatus,
     ctx?: TransactionContext,
   ): Promise<number>;
+  /**
+   * Fase "Control operativo de Gestiones" — the allow-list mirror of
+   * `conditionalUpdateStatus` above, used by pause/resume/stop: succeeds
+   * (returns 1) only when the current `status` IS one of
+   * `allowedFromStatuses`; returns 0 otherwise (caller throws 409). An
+   * allow-list reads far more safely here than a block-list would — the
+   * status enum keeps growing, and a pause/resume/stop transition should
+   * only ever leave one specific, named starting state, never "every
+   * status except these few".
+   */
+  conditionalUpdateStatusFromAllowed(
+    id: string,
+    allowedFromStatuses: SequenceExecutionStatus[],
+    toStatus: SequenceExecutionStatus,
+    ctx?: TransactionContext,
+  ): Promise<number>;
 }

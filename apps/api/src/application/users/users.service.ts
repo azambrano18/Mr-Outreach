@@ -41,6 +41,10 @@ const NON_TERMINAL_EXECUTION_STATUSES: SequenceExecutionStatus[] = [
   'SUBMISSION_UNKNOWN',
   'ACCEPTED',
   'RUNNING',
+  'PAUSE_REQUESTED',
+  'PAUSED',
+  'RESUME_REQUESTED',
+  'STOP_REQUESTED',
 ];
 
 @Injectable()

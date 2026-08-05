@@ -39,6 +39,15 @@ export interface SequenceExecutionSummary {
   lastSyncedAt: string | null;
   lastError: string | null;
   serverExecutionId: string | null;
+  /** Fase "Control operativo de Gestiones" — set once, on the first successful pause/resume/stop; never cleared. */
+  pausedAt: string | null;
+  resumedAt: string | null;
+  stoppedAt: string | null;
+  stopReason: string | null;
+  /** Fase "Reiniciar Gestión" — 1 for an original execution, N for its Nth restart attempt. */
+  executionAttempt: number;
+  /** Set only on a restart attempt — the STOPPED execution it was restarted from. */
+  previousExecutionId: string | null;
   createdAt: string;
   updatedAt: string;
 }

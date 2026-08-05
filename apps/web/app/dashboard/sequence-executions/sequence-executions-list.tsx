@@ -21,6 +21,12 @@ const STATUS_LABELS: Record<string, string> = {
   SUBMISSION_UNKNOWN: 'Verificando envío…',
   ACCEPTED: 'Aceptada',
   RUNNING: 'En ejecución',
+  PAUSE_REQUESTED: 'Pausando…',
+  PAUSED: 'Pausada',
+  RESUME_REQUESTED: 'Reanudando…',
+  STOP_REQUESTED: 'Deteniendo…',
+  STOPPED: 'Detenida',
+  RESTART_REQUESTED: 'Reiniciando…',
   COMPLETED: 'Completada',
   FAILED: 'Fallida',
   REJECTED: 'Rechazada',
@@ -33,6 +39,12 @@ const STATUS_STYLES: Record<string, string> = {
   SUBMISSION_UNKNOWN: 'bg-amber-100 text-amber-700',
   ACCEPTED: 'bg-emerald-100 text-emerald-700',
   RUNNING: 'bg-emerald-100 text-emerald-700',
+  PAUSE_REQUESTED: 'bg-amber-100 text-amber-700',
+  PAUSED: 'bg-slate-200 text-slate-700',
+  RESUME_REQUESTED: 'bg-amber-100 text-amber-700',
+  STOP_REQUESTED: 'bg-amber-100 text-amber-700',
+  STOPPED: 'bg-slate-200 text-slate-700',
+  RESTART_REQUESTED: 'bg-amber-100 text-amber-700',
   COMPLETED: 'bg-emerald-100 text-emerald-700',
   FAILED: 'bg-red-100 text-red-700',
   REJECTED: 'bg-red-100 text-red-700',
@@ -47,12 +59,20 @@ const TAB_LABELS: Record<TabKey, string> = {
   problems: 'Con problemas',
 };
 
-/** §6 — visually separate sections, not a status filter over one shared table. "En ejecución" groups every server-submitted-but-not-finished state (SUBMITTING/SUBMISSION_UNKNOWN/ACCEPTED/RUNNING — QUEUED/PROCESSING are server-reported substates of these, not distinct local statuses). */
+/**
+ * §6 — visually separate sections, not a status filter over one shared table. "En ejecución"
+ * groups every server-submitted-but-not-finished state (SUBMITTING/SUBMISSION_UNKNOWN/ACCEPTED/
+ * RUNNING — QUEUED/PROCESSING are server-reported substates of these, not distinct local
+ * statuses) plus the pause/resume control states (PAUSE_REQUESTED/PAUSED/RESUME_REQUESTED/
+ * STOP_REQUESTED) — a paused Gestión is still "in flight", not finished. STOPPED is grouped
+ * under "Con problemas" since, unlike COMPLETED, it never finished its own sends and needs
+ * admin attention (restart) to continue.
+ */
 function bucketFor(execution: SequenceExecutionSummary): TabKey {
   if (execution.status === 'DRAFT' || execution.status === 'VALIDATING') return 'drafts';
   if (execution.status === 'COMPLETED') return 'completed';
-  if (execution.status === 'FAILED' || execution.status === 'REJECTED') return 'problems';
-  return 'running'; // SUBMITTING, SUBMISSION_UNKNOWN, ACCEPTED, RUNNING
+  if (execution.status === 'FAILED' || execution.status === 'REJECTED' || execution.status === 'STOPPED') return 'problems';
+  return 'running'; // SUBMITTING, SUBMISSION_UNKNOWN, ACCEPTED, RUNNING, PAUSE_REQUESTED, PAUSED, RESUME_REQUESTED, STOP_REQUESTED, RESTART_REQUESTED
 }
 
 function nameOrDraftLabel(execution: SequenceExecutionSummary): string {

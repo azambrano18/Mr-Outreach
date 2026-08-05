@@ -39,7 +39,24 @@ export type CommandType =
    * SequenceExecutionMotorPort, strictly outside any open transaction.
    */
   | 'TEMPLATE_PUBLISH_REQUESTED'
-  | 'SEQUENCE_EXECUTION_START_REQUESTED';
+  | 'SEQUENCE_EXECUTION_START_REQUESTED'
+  /**
+   * Fase "Control operativo de Gestiones" — admin pause/resume/stop of an
+   * already-running Gestión. Same "motor called directly via
+   * SequenceExecutionMotorPort, strictly outside any open transaction"
+   * rule as SEQUENCE_EXECUTION_START_REQUESTED above.
+   */
+  | 'SEQUENCE_EXECUTION_PAUSE_REQUESTED'
+  | 'SEQUENCE_EXECUTION_RESUME_REQUESTED'
+  | 'SEQUENCE_EXECUTION_STOP_REQUESTED'
+  /**
+   * Fase "Reiniciar Gestión" — purely local idempotency/audit record for
+   * creating a new execution attempt from a STOPPED one; never talks to
+   * the motor (the new attempt's own eventual submission goes through the
+   * ordinary SEQUENCE_EXECUTION_START_REQUESTED flow instead), same
+   * "local-only" shape as MAILBOX_REASSIGN_PRIMARY_REQUESTED above.
+   */
+  | 'SEQUENCE_EXECUTION_RESTART_REQUESTED';
 
 export type EventType =
   | 'MAILBOX_PROVISION_ACCEPTED'
@@ -83,7 +100,23 @@ export type EventType =
   | 'INBOUND_MESSAGE_RECEIVED'
   | 'EXECUTION_COMPLETED'
   | 'EXECUTION_FAILED'
-  | 'FUTURE_JOBS_CANCELLED';
+  | 'FUTURE_JOBS_CANCELLED'
+  /**
+   * Fase "Control operativo de Gestiones" — one ACCEPTED + one terminal
+   * event per pause/resume/stop command, generated synchronously by
+   * ControlSequenceExecutionUseCase (the simulated motor never defers a
+   * webhook) and run through the exact same ProcessMotorEventUseCase/
+   * MotorEventProjector pipeline a real asynchronous motor's callback
+   * would use — so this is never a parallel/simplified path, only a
+   * synchronous producer of the same events. aggregateType is always
+   * EXECUTION.
+   */
+  | 'EXECUTION_PAUSE_ACCEPTED'
+  | 'EXECUTION_PAUSED'
+  | 'EXECUTION_RESUME_ACCEPTED'
+  | 'EXECUTION_RESUMED'
+  | 'EXECUTION_STOP_ACCEPTED'
+  | 'EXECUTION_STOPPED';
 
 /** The envelope every command carries, regardless of `commandType` — §9. */
 export interface CommandEnvelope<TPayload = Record<string, unknown>> {

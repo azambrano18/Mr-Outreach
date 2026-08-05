@@ -1,4 +1,6 @@
 import {
+  ExecutionControlCommandInput,
+  ExecutionControlCommandResult,
   SequenceExecutionStatusSnapshot,
   StartSequenceExecutionInput,
   StartSequenceExecutionResult,
@@ -27,6 +29,20 @@ export interface SequenceExecutionMotorPort {
 
   /** Throws `ServiceUnavailableException` if the motor can't be reached. */
   getExecutionStatus(serverExecutionId: string): Promise<SequenceExecutionStatusSnapshot>;
+
+  /**
+   * Fase "Control operativo de Gestiones" — pause/resume/stop a running (or
+   * paused) Gestión. All three share `ExecutionControlCommandInput`/
+   * `ExecutionControlCommandResult` and the same idempotent-by-key,
+   * never-throws-for-a-well-formed-request contract as `startExecution`.
+   * There is deliberately no `restartExecution`: a restart's actual
+   * dispatch is a brand new Gestión attempt, submitted through the
+   * existing `startExecution` for the new local execution row — see
+   * RestartSequenceExecutionUseCase.
+   */
+  pauseExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult>;
+  resumeExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult>;
+  stopExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult>;
 }
 
 export const SEQUENCE_EXECUTION_MOTOR_PORT = Symbol('SEQUENCE_EXECUTION_MOTOR_PORT');

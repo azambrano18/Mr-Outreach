@@ -45,6 +45,13 @@ function toDomain(row: PrismaExecutionRow): SequenceExecution {
     serverExecutionId: row.serverExecutionId,
     executionTokenCiphertext: row.executionTokenCiphertext,
     lastSubmissionIdempotencyKey: row.lastSubmissionIdempotencyKey,
+    pausedAt: row.pausedAt,
+    resumedAt: row.resumedAt,
+    stoppedAt: row.stoppedAt,
+    stopReason: row.stopReason,
+    lastControlIdempotencyKey: row.lastControlIdempotencyKey,
+    executionAttempt: row.executionAttempt,
+    previousExecutionId: row.previousExecutionId,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -86,6 +93,8 @@ export class PrismaSequenceExecutionRepository implements SequenceExecutionRepos
         templateVersionId: input.templateVersionId,
         timezone: input.timezone,
         createdBy: input.createdBy,
+        ...(input.executionAttempt !== undefined && { executionAttempt: input.executionAttempt }),
+        ...(input.previousExecutionId !== undefined && { previousExecutionId: input.previousExecutionId }),
       },
     });
     return toDomain(row);
@@ -123,6 +132,11 @@ export class PrismaSequenceExecutionRepository implements SequenceExecutionRepos
         serverExecutionId: input.serverExecutionId,
         executionTokenCiphertext: input.executionTokenCiphertext,
         lastSubmissionIdempotencyKey: input.lastSubmissionIdempotencyKey,
+        pausedAt: input.pausedAt,
+        resumedAt: input.resumedAt,
+        stoppedAt: input.stoppedAt,
+        stopReason: input.stopReason,
+        lastControlIdempotencyKey: input.lastControlIdempotencyKey,
       },
     });
     return toDomain(row);
@@ -141,6 +155,20 @@ export class PrismaSequenceExecutionRepository implements SequenceExecutionRepos
     const client = resolveClient(this.prisma, ctx);
     const result = await client.sequenceExecution.updateMany({
       where: { id, status: { notIn: blockedStatuses } },
+      data: { status: toStatus },
+    });
+    return result.count;
+  }
+
+  async conditionalUpdateStatusFromAllowed(
+    id: string,
+    allowedFromStatuses: SequenceExecutionStatus[],
+    toStatus: SequenceExecutionStatus,
+    ctx?: TransactionContext,
+  ): Promise<number> {
+    const client = resolveClient(this.prisma, ctx);
+    const result = await client.sequenceExecution.updateMany({
+      where: { id, status: { in: allowedFromStatuses } },
       data: { status: toStatus },
     });
     return result.count;

@@ -5,7 +5,13 @@ import { AccessDenied } from '../../../access-denied';
 import type { SequenceExecutionSummary } from '../../../../../lib/sequence-execution-types';
 import { SequenceExecutionDetail } from '../../../sequence-executions/[id]/sequence-execution-detail';
 
-/** §23 — same read-only detail component as the executive's own view; only the data source and refresh endpoint are admin-scoped. */
+/**
+ * §23 — same detail component as the executive's own view; the data source and refresh
+ * endpoint are admin-scoped, and "Control operativo de Gestiones" (pausar/reanudar/detener/
+ * reiniciar) is additionally rendered here, gated per-action by its own
+ * sequence_executions.{pause,resume,stop,restart}_all permission — never shown on the
+ * executive's own page, which never passes these props.
+ */
 export default async function AdminSequenceExecutionDetailPage({ params }: { params: { id: string } }) {
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect('/login');
@@ -30,6 +36,10 @@ export default async function AdminSequenceExecutionDetailPage({ params }: { par
         canRefresh={currentUser.permissions.includes('sequence_executions.refresh_status_all')}
         refreshEndpoint={`/api/admin/sequence-executions/${execution.id}/refresh-status`}
         canSimulate={currentUser.permissions.includes('dev_tools.simulate_execution_state')}
+        canPause={currentUser.permissions.includes('sequence_executions.pause_all')}
+        canResume={currentUser.permissions.includes('sequence_executions.resume_all')}
+        canStop={currentUser.permissions.includes('sequence_executions.stop_all')}
+        canRestart={currentUser.permissions.includes('sequence_executions.restart_all')}
       />
     </div>
   );

@@ -247,6 +247,12 @@ export class SequenceExecutionsService {
       lastSyncedAt: execution.lastSyncedAt ? execution.lastSyncedAt.toISOString() : null,
       lastError: execution.lastError,
       serverExecutionId: execution.serverExecutionId,
+      pausedAt: execution.pausedAt ? execution.pausedAt.toISOString() : null,
+      resumedAt: execution.resumedAt ? execution.resumedAt.toISOString() : null,
+      stoppedAt: execution.stoppedAt ? execution.stoppedAt.toISOString() : null,
+      stopReason: execution.stopReason,
+      executionAttempt: execution.executionAttempt,
+      previousExecutionId: execution.previousExecutionId,
       createdAt: execution.createdAt.toISOString(),
       updatedAt: execution.updatedAt.toISOString(),
     };

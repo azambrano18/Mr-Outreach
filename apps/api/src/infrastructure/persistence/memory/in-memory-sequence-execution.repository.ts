@@ -67,6 +67,13 @@ export class InMemorySequenceExecutionRepository implements SequenceExecutionRep
       serverExecutionId: null,
       executionTokenCiphertext: null,
       lastSubmissionIdempotencyKey: null,
+      pausedAt: null,
+      resumedAt: null,
+      stoppedAt: null,
+      stopReason: null,
+      lastControlIdempotencyKey: null,
+      executionAttempt: input.executionAttempt ?? 1,
+      previousExecutionId: input.previousExecutionId ?? null,
       createdBy: input.createdBy,
       createdAt: now,
       updatedAt: now,
@@ -95,6 +102,18 @@ export class InMemorySequenceExecutionRepository implements SequenceExecutionRep
     const existing = this.store.sequenceExecutions.get(id);
     if (!existing) return 0;
     if (blockedStatuses.includes(existing.status)) return 0;
+    this.store.sequenceExecutions.set(id, { ...existing, status: toStatus, updatedAt: new Date() });
+    return 1;
+  }
+
+  async conditionalUpdateStatusFromAllowed(
+    id: string,
+    allowedFromStatuses: SequenceExecutionStatus[],
+    toStatus: SequenceExecutionStatus,
+  ): Promise<number> {
+    const existing = this.store.sequenceExecutions.get(id);
+    if (!existing) return 0;
+    if (!allowedFromStatuses.includes(existing.status)) return 0;
     this.store.sequenceExecutions.set(id, { ...existing, status: toStatus, updatedAt: new Date() });
     return 1;
   }

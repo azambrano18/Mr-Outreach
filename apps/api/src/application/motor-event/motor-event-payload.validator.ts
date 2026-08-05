@@ -64,6 +64,15 @@ export function validateMotorEventPayload(
         errors.push('payload.contactId o payload.companyId es obligatorio.');
       }
       break;
+    case 'EXECUTION_PAUSE_ACCEPTED':
+    case 'EXECUTION_PAUSED':
+    case 'EXECUTION_RESUME_ACCEPTED':
+    case 'EXECUTION_RESUMED':
+    case 'EXECUTION_STOP_ACCEPTED':
+      break;
+    case 'EXECUTION_STOPPED':
+      errors = requireStrings(payload, ['reason']);
+      break;
     default: {
       const exhaustive: never = eventType;
       errors.push(`Tipo de evento desconocido: ${String(exhaustive)}`);

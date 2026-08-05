@@ -117,6 +117,7 @@ describe('UsersService', () => {
       update: jest.fn(),
       delete: jest.fn(),
       conditionalUpdateStatus: jest.fn(),
+      conditionalUpdateStatusFromAllowed: jest.fn(),
     };
     clientExecutiveAssignments = {
       upsert: jest.fn(),

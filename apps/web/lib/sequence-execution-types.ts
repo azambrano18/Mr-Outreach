@@ -5,6 +5,12 @@ export type SequenceExecutionStatus =
   | 'SUBMISSION_UNKNOWN'
   | 'ACCEPTED'
   | 'RUNNING'
+  | 'PAUSE_REQUESTED'
+  | 'PAUSED'
+  | 'RESUME_REQUESTED'
+  | 'STOP_REQUESTED'
+  | 'STOPPED'
+  | 'RESTART_REQUESTED'
   | 'COMPLETED'
   | 'FAILED'
   | 'REJECTED';
@@ -64,6 +70,27 @@ export interface SequenceExecutionSummary {
   lastSyncedAt: string | null;
   lastError: string | null;
   serverExecutionId: string | null;
+  /** Set once, on the first successful pause/resume/stop; never cleared. */
+  pausedAt: string | null;
+  resumedAt: string | null;
+  stoppedAt: string | null;
+  stopReason: string | null;
+  /** 1 for an original execution, N for its Nth restart attempt. */
+  executionAttempt: number;
+  /** Set only on a restart attempt — the STOPPED execution it was restarted from. */
+  previousExecutionId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Populated by GET /admin/sequence-executions/:id/restart-preview — feeds the restart confirmation modal. */
+export interface RestartEligibility {
+  executionId: string;
+  managementName: string | null;
+  mailboxEmail: string;
+  templateName: string;
+  templateVersionNumber: number;
+  totalContacts: number;
+  alreadyContactedCount: number;
+  eligibleCount: number;
 }

@@ -4,12 +4,22 @@ import { AppConfigService } from '../../config/app-config.service';
 import { ProspectExecutionState } from '../../../domain/prospect-import/prospect-import-row.entity';
 import { SequenceExecutionMotorPort } from '../../../domain/sequence-execution-motor/sequence-execution-motor-port';
 import {
+  ExecutionControlCommandInput,
+  ExecutionControlCommandResult,
+  ExecutionControlOutcome,
   SequenceExecutionServerStatus,
   SequenceExecutionStatusSnapshot,
   SequenceExecutionSubmitStatus,
   StartSequenceExecutionInput,
   StartSequenceExecutionResult,
 } from '../../../domain/sequence-execution-motor/sequence-execution-motor.types';
+
+interface WireControlResponse {
+  accepted: boolean;
+  status: ExecutionControlOutcome;
+  rejectionReason?: string | null;
+  acknowledgedAt: string | null;
+}
 
 interface WireStartResponse {
   accepted: boolean;
@@ -110,6 +120,48 @@ export class HttpSequenceExecutionMotorAdapter implements SequenceExecutionMotor
       startedAt: body.startedAt ? new Date(body.startedAt) : null,
       lastError: body.lastError,
       checkedAt: new Date(body.checkedAt),
+    };
+  }
+
+  async pauseExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult> {
+    return this.sendControlCommand('pause', 'SEQUENCE_EXECUTION_PAUSE', input);
+  }
+
+  async resumeExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult> {
+    return this.sendControlCommand('resume', 'SEQUENCE_EXECUTION_RESUME', input);
+  }
+
+  async stopExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult> {
+    return this.sendControlCommand('stop', 'SEQUENCE_EXECUTION_STOP', input);
+  }
+
+  private async sendControlCommand(
+    path: 'pause' | 'resume' | 'stop',
+    commandType: string,
+    input: ExecutionControlCommandInput,
+  ): Promise<ExecutionControlCommandResult> {
+    const response = await this.request(
+      `/v1/sequence-executions/${encodeURIComponent(input.serverExecutionId)}/${path}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          schemaVersion: '3.0',
+          commandType,
+          commandId: randomUUID(),
+          idempotencyKey: input.idempotencyKey,
+          correlationId: input.correlationId,
+          execution: { localExecutionId: input.localExecutionId, serverExecutionId: input.serverExecutionId },
+          ...(input.reason ? { reason: input.reason } : {}),
+        }),
+      },
+      { idempotencyKey: input.idempotencyKey, correlationId: input.correlationId },
+    );
+    const body = await this.parseJson<WireControlResponse>(response);
+    return {
+      accepted: body.accepted,
+      status: body.status,
+      rejectionReason: body.rejectionReason ?? null,
+      acknowledgedAt: body.acknowledgedAt ? new Date(body.acknowledgedAt) : null,
     };
   }
 

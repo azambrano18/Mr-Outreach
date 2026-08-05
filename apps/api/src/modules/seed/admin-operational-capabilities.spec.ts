@@ -51,6 +51,10 @@ describe('Admin operational capabilities — permission wiring', () => {
     const adminOnlyKeys = [
       'sequence_executions.monitor_all',
       'sequence_executions.refresh_status_all',
+      'sequence_executions.pause_all',
+      'sequence_executions.resume_all',
+      'sequence_executions.stop_all',
+      'sequence_executions.restart_all',
       'mailboxes.read.all',
       'mailboxes.assign',
       'mailboxes.link',

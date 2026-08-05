@@ -1,4 +1,4 @@
-import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+﻿import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { Company } from '../../domain/company/company.entity';
 import { CompanyRepository } from '../../domain/company/company.repository';
 import { Contact } from '../../domain/contact/contact.entity';
@@ -92,6 +92,13 @@ describe('MotorEventProjector', () => {
     serverExecutionId: 'srv_exec_1',
     executionTokenCiphertext: null,
     lastSubmissionIdempotencyKey: null,
+    pausedAt: null,
+    resumedAt: null,
+    stoppedAt: null,
+    stopReason: null,
+    lastControlIdempotencyKey: null,
+    executionAttempt: 1,
+    previousExecutionId: null,
     createdBy: 'user_exec',
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -308,6 +315,7 @@ describe('MotorEventProjector', () => {
       update: jest.fn().mockImplementation((_id, input) => Promise.resolve({ ...execution, ...input })),
       delete: jest.fn(),
       conditionalUpdateStatus: jest.fn(),
+      conditionalUpdateStatusFromAllowed: jest.fn(),
     };
     prospectRows = {
       findById: jest.fn().mockResolvedValue(buildRow()),
@@ -445,6 +453,84 @@ describe('MotorEventProjector', () => {
       expect(conversations.create).not.toHaveBeenCalled();
       expect(conversations.update).not.toHaveBeenCalled();
       expect(messages.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Fase "Control operativo de Gestiones" — EXECUTION_PAUSE/RESUME/STOP', () => {
+    it('EXECUTION_PAUSE_ACCEPTED is purely informational — never touches the execution row', async () => {
+      const event = buildEvent({ eventType: 'EXECUTION_PAUSE_ACCEPTED', commandId: 'cmd_1' });
+      await projector.project(event, ctx);
+      expect(executions.update).not.toHaveBeenCalled();
+      expect(auditLogs.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'sequence_execution.motor_event.execution_pause_accepted', entityId: 'exec_1' }),
+        ctx,
+      );
+    });
+
+    it('EXECUTION_PAUSED moves the execution to PAUSED and stamps pausedAt', async () => {
+      const event = buildEvent({ eventType: 'EXECUTION_PAUSED' });
+      await projector.project(event, ctx);
+      expect(executions.update).toHaveBeenCalledWith(
+        'exec_1',
+        expect.objectContaining({ status: 'PAUSED', pausedAt: expect.any(Date) }),
+        ctx,
+      );
+    });
+
+    it('EXECUTION_PAUSED is idempotent — a re-projection never overwrites an already-set pausedAt', async () => {
+      const alreadyPausedAt = new Date('2026-08-01T10:00:00.000Z');
+      executions.findById.mockResolvedValue({ ...execution, status: 'PAUSED', pausedAt: alreadyPausedAt });
+      await projector.project(buildEvent({ eventType: 'EXECUTION_PAUSED' }), ctx);
+      expect(executions.update).toHaveBeenCalledWith(
+        'exec_1',
+        expect.objectContaining({ status: 'PAUSED', pausedAt: alreadyPausedAt }),
+        ctx,
+      );
+    });
+
+    it('EXECUTION_RESUME_ACCEPTED is purely informational — never touches the execution row', async () => {
+      await projector.project(buildEvent({ eventType: 'EXECUTION_RESUME_ACCEPTED' }), ctx);
+      expect(executions.update).not.toHaveBeenCalled();
+    });
+
+    it('EXECUTION_RESUMED moves the execution back to RUNNING and stamps resumedAt', async () => {
+      await projector.project(buildEvent({ eventType: 'EXECUTION_RESUMED' }), ctx);
+      expect(executions.update).toHaveBeenCalledWith(
+        'exec_1',
+        expect.objectContaining({ status: 'RUNNING', resumedAt: expect.any(Date) }),
+        ctx,
+      );
+    });
+
+    it('EXECUTION_STOP_ACCEPTED is purely informational — never touches the execution row', async () => {
+      await projector.project(buildEvent({ eventType: 'EXECUTION_STOP_ACCEPTED' }), ctx);
+      expect(executions.update).not.toHaveBeenCalled();
+    });
+
+    it('EXECUTION_STOPPED moves the execution to STOPPED and stamps stoppedAt', async () => {
+      await projector.project(buildEvent({ eventType: 'EXECUTION_STOPPED', payload: { reason: 'Cliente solicitó detener la campaña.' } }), ctx);
+      expect(executions.update).toHaveBeenCalledWith(
+        'exec_1',
+        expect.objectContaining({ status: 'STOPPED', stoppedAt: expect.any(Date) }),
+        ctx,
+      );
+    });
+
+    it('every control event links its IntegrationCommand and never touches Conversation/ConversationMessage', async () => {
+      const event = buildEvent({ eventType: 'EXECUTION_STOPPED', commandId: 'cmd_1' });
+      commands.findByCommandId.mockResolvedValue({ ...buildCommand(), id: 'cmdrow_1', commandId: 'cmd_1' });
+      await projector.project(event, ctx);
+      expect(commands.update).toHaveBeenCalledWith('cmdrow_1', expect.objectContaining({ status: 'COMPLETED' }), ctx);
+      expect(conversations.create).not.toHaveBeenCalled();
+      expect(messages.create).not.toHaveBeenCalled();
+    });
+
+    it('throws a non-retryable error when the SequenceExecution does not exist', async () => {
+      executions.findById.mockResolvedValue(null);
+      await expect(projector.project(buildEvent({ eventType: 'EXECUTION_PAUSED' }), ctx)).rejects.toMatchObject({
+        retryable: false,
+        errorCode: 'EXECUTION_NOT_FOUND',
+      });
     });
   });
 

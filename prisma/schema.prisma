@@ -1403,6 +1403,13 @@ model SequenceTemplateVersion {
 
 /// §7 — no SCHEDULED: the executive never picks a start date/time, so there is nothing to "schedule" locally. SUBMISSION_UNKNOWN means the /start call itself timed out — distinct from SUBMITTING, never silently conflated with it nor reverted to DRAFT.
 /// §11 — ACCEPTED is the outcome of a successful submission; the server may separately report its own internal QUEUED status later (surfaced via serverStatus), never a decision Mr Outreach made.
+/// Fase "Control operativo de Gestiones" — the six *_REQUESTED/PAUSED/STOPPED values below are
+/// admin-initiated control states, layered on top of the existing submission lifecycle above.
+/// RUNNING is unchanged (still set once the motor reports EXECUTION_PROCESSING); PAUSED/STOPPED
+/// are new terminal-ish operative states reachable only from RUNNING/PAUSED via their own
+/// *_REQUESTED transitional state — see ControlSequenceExecutionUseCase for the full transition
+/// table. COMPLETED/FAILED/REJECTED remain the only truly terminal values; a paused or stopped
+/// Gestión never loses its RUNNING-era progress counters.
 enum SequenceExecutionStatus {
   DRAFT
   VALIDATING
@@ -1410,6 +1417,12 @@ enum SequenceExecutionStatus {
   SUBMISSION_UNKNOWN
   ACCEPTED
   RUNNING
+  PAUSE_REQUESTED
+  PAUSED
+  RESUME_REQUESTED
+  STOP_REQUESTED
+  STOPPED
+  RESTART_REQUESTED
   COMPLETED
   FAILED
   REJECTED
@@ -1461,6 +1474,29 @@ model SequenceExecution {
   createdBy                    String
   createdAt                    DateTime                       @default(now())
   updatedAt                    DateTime                       @updatedAt
+
+  // Fase "Control operativo de Gestiones" — admin pause/resume/stop instants and the
+  // idempotency key reused across a control command's REQUESTED->ACCEPTED->terminal
+  // lifecycle (same "reuse verbatim on retry" convention as lastSubmissionIdempotencyKey
+  // above), plus the reason an admin gave for stopping. Never cleared once set — a
+  // stopped-then-restarted execution keeps its own pausedAt/stoppedAt history; the NEW
+  // attempt row is a separate execution (see previousExecutionId below).
+  pausedAt                   DateTime?
+  resumedAt                  DateTime?
+  stoppedAt                  DateTime?
+  stopReason                 String?
+  lastControlIdempotencyKey  String?
+
+  // Fase "Reiniciar Gestión" — restarting a STOPPED execution never rewrites it: it creates
+  // a brand-new SequenceExecution row (this one, self-linked to the STOPPED one it restarts)
+  // scoped to only the contacts that never received any email in the previous attempt.
+  // previousExecutionId is unique because each stopped execution can be restarted into at
+  // most one new attempt at a time (a second restart attempt targets the newest one, not
+  // the original). executionAttempt starts at 1 and increments by 1 per restart.
+  executionAttempt   Int                 @default(1)
+  previousExecutionId String?            @unique
+  previousExecution   SequenceExecution? @relation("SequenceExecutionRestart", fields: [previousExecutionId], references: [id])
+  restartedAsExecution SequenceExecution? @relation("SequenceExecutionRestart")
 
   organization    Organization            @relation(fields: [organizationId], references: [id])
   executive       User                    @relation(fields: [executiveId], references: [id])

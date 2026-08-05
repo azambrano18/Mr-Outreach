@@ -40,6 +40,15 @@ const COMMAND_STATUS_BY_EVENT_TYPE: Partial<Record<string, CommandStatus>> = {
   EXECUTION_PROCESSING: 'PROCESSING',
   EXECUTION_COMPLETED: 'COMPLETED',
   EXECUTION_FAILED: 'FAILED',
+  // Fase "Control operativo de Gestiones" — same ACCEPTED-then-terminal
+  // shape, advancing whichever control command this event's commandId
+  // references (linkCommand resolves it generically by id).
+  EXECUTION_PAUSE_ACCEPTED: 'ACCEPTED',
+  EXECUTION_PAUSED: 'COMPLETED',
+  EXECUTION_RESUME_ACCEPTED: 'ACCEPTED',
+  EXECUTION_RESUMED: 'COMPLETED',
+  EXECUTION_STOP_ACCEPTED: 'ACCEPTED',
+  EXECUTION_STOPPED: 'COMPLETED',
 };
 
 function normalizeEmail(email: string): string {
@@ -88,6 +97,18 @@ export class MotorEventProjector {
         return this.projectExecutionFailed(event, ctx);
       case 'FUTURE_JOBS_CANCELLED':
         return this.projectFutureJobsCancelled(event, ctx);
+      case 'EXECUTION_PAUSE_ACCEPTED':
+        return this.projectControlAccepted(event, ctx);
+      case 'EXECUTION_PAUSED':
+        return this.projectControlTerminal(event, ctx, 'PAUSED');
+      case 'EXECUTION_RESUME_ACCEPTED':
+        return this.projectControlAccepted(event, ctx);
+      case 'EXECUTION_RESUMED':
+        return this.projectControlTerminal(event, ctx, 'RUNNING');
+      case 'EXECUTION_STOP_ACCEPTED':
+        return this.projectControlAccepted(event, ctx);
+      case 'EXECUTION_STOPPED':
+        return this.projectControlTerminal(event, ctx, 'STOPPED');
       default:
         throw new MotorEventProjectionError(`Tipo de evento no proyectable: ${event.eventType}`, false, 'UNKNOWN_EVENT_TYPE');
     }
@@ -140,6 +161,44 @@ export class MotorEventProjector {
     await this.linkCommand(event, ctx);
     // §"no borrar conversaciones ni mensajes ya creados" — this handler never touches Conversation/ConversationMessage at all.
     await this.audit(event, ctx, 'sequence_execution.motor_event.failed', 'SequenceExecution', execution.id, { errorMessage });
+  }
+
+  // --- Fase "Control operativo de Gestiones" -----------------------------
+
+  /**
+   * ACCEPTED-phase confirmation for pause/resume/stop — purely
+   * informational (the local status was already moved to its
+   * *_REQUESTED transitional value by ControlSequenceExecutionUseCase
+   * before the motor was ever called), so this only advances the linked
+   * command and leaves an audit trail. Never touches the execution row.
+   */
+  private async projectControlAccepted(event: IntegrationEvent, ctx: TransactionContext): Promise<void> {
+    const execution = await this.requireExecution(event, ctx);
+    await this.linkCommand(event, ctx);
+    await this.audit(event, ctx, `sequence_execution.motor_event.${event.eventType.toLowerCase()}`, 'SequenceExecution', execution.id);
+  }
+
+  /**
+   * Terminal confirmation for pause/resume/stop. Idempotent: if
+   * ControlSequenceExecutionUseCase's own synchronous transaction already
+   * moved the execution to this exact status (the normal case for the
+   * synchronous simulated motor), this is a harmless no-op re-write of
+   * the same value — kept so a future real, genuinely asynchronous motor
+   * can rely on this event alone to reach the terminal state.
+   */
+  private async projectControlTerminal(
+    event: IntegrationEvent,
+    ctx: TransactionContext,
+    status: 'PAUSED' | 'RUNNING' | 'STOPPED',
+  ): Promise<void> {
+    const execution = await this.requireExecution(event, ctx);
+    const timestampField =
+      status === 'PAUSED' ? { pausedAt: execution.pausedAt ?? new Date() }
+      : status === 'RUNNING' ? { resumedAt: execution.resumedAt ?? new Date() }
+      : { stoppedAt: execution.stoppedAt ?? new Date() };
+    await this.executions.update(execution.id, { status, lastSyncedAt: new Date(), ...timestampField }, ctx);
+    await this.linkCommand(event, ctx);
+    await this.audit(event, ctx, `sequence_execution.motor_event.${event.eventType.toLowerCase()}`, 'SequenceExecution', execution.id);
   }
 
   // --- OUTBOUND_MESSAGE_* ------------------------------------------------
