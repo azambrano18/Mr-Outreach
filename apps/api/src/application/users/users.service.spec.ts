@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { ClientExecutiveAssignmentRepository } from '../../domain/client/client-executive-assignment.repository';
 import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { Role } from '../../domain/role/role.entity';
@@ -18,6 +19,7 @@ describe('UsersService', () => {
   let auditLogs: jest.Mocked<AuditLogRepository>;
   let mailboxAssignments: jest.Mocked<MailboxAssignmentRepository>;
   let sequenceExecutions: jest.Mocked<SequenceExecutionRepository>;
+  let clientExecutiveAssignments: jest.Mocked<ClientExecutiveAssignmentRepository>;
   let service: UsersService;
 
   const orgId = 'org_1';
@@ -80,6 +82,7 @@ describe('UsersService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findByEmailAnyOrganization: jest.fn(),
+      findByEmailIncludingDeleted: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -115,8 +118,24 @@ describe('UsersService', () => {
       delete: jest.fn(),
       conditionalUpdateStatus: jest.fn(),
     };
+    clientExecutiveAssignments = {
+      upsert: jest.fn(),
+      remove: jest.fn(),
+      findByClient: jest.fn(),
+      findByUser: jest.fn().mockResolvedValue([]),
+      ensureDerivedVisibility: jest.fn(),
+      removeDerivedVisibilityIfPresent: jest.fn(),
+    };
 
-    service = new UsersService(users, roles, userRoles, auditLogs, mailboxAssignments, sequenceExecutions);
+    service = new UsersService(
+      users,
+      roles,
+      userRoles,
+      auditLogs,
+      mailboxAssignments,
+      sequenceExecutions,
+      clientExecutiveAssignments,
+    );
   });
 
   describe('create', () => {
@@ -199,6 +218,149 @@ describe('UsersService', () => {
         ),
       ).rejects.toThrow(BadRequestException);
       expect(users.create).not.toHaveBeenCalled();
+    });
+
+    describe('restore-on-create (reusing a soft-deleted user’s email)', () => {
+      it('restores the same userId instead of inserting a new row: clears deletedAt, sets ACTIVE, assigns the selected role, generates a new temporary password, forces mustChangePassword, clears stale client assignments, and audits user.restored', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        const deletedUser = buildUser({
+          id: 'user_1',
+          status: 'INACTIVE',
+          deletedAt: new Date('2026-08-03T18:28:52.180Z'),
+          mustChangePassword: false,
+          passwordChangedAt: new Date('2026-01-01T00:00:00.000Z'),
+        });
+        users.findByEmailIncludingDeleted.mockResolvedValue(deletedUser);
+        users.update.mockImplementation(async (_id, patch) => ({ ...deletedUser, ...patch }) as User);
+        userRoles.getRolesForUser.mockResolvedValueOnce([{ ...executiveRole, id: 'role_old' }]);
+        clientExecutiveAssignments.findByUser.mockResolvedValueOnce([
+          { id: 'a1', organizationId: orgId, clientId: 'client_1', userId: 'user_1', role: 'SECONDARY', visibilitySource: 'MANUAL', assignedBy: 'someone', assignedAt: new Date() },
+        ]);
+
+        const result = await service.create(
+          orgId,
+          { firstName: 'Alejandro', lastName: 'Zambrano', email: 'exec@example.com', roleId: 'role_exec' },
+          'admin_1',
+        );
+
+        expect(users.create).not.toHaveBeenCalled();
+        expect(users.update).toHaveBeenCalledWith(
+          'user_1',
+          expect.objectContaining({ status: 'ACTIVE', mustChangePassword: true, passwordChangedAt: null, deletedAt: null }),
+        );
+        expect(result.id).toBe('user_1');
+        expect(result.restored).toBe(true);
+        expect(typeof result.temporaryPassword).toBe('string');
+        expect(result.temporaryPassword.length).toBeGreaterThanOrEqual(16);
+
+        expect(userRoles.unassign).toHaveBeenCalledWith('user_1', 'role_old');
+        expect(userRoles.assign).toHaveBeenCalledWith('user_1', executiveRole.id);
+
+        expect(clientExecutiveAssignments.remove).toHaveBeenCalledWith('client_1', 'user_1');
+
+        expect(auditLogs.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'user.restored', entityId: 'user_1', organizationId: orgId, actorId: 'admin_1' }),
+        );
+        const auditCall = auditLogs.record.mock.calls.find((call) => call[0].action === 'user.restored')?.[0];
+        expect(JSON.stringify(auditCall)).not.toContain(result.temporaryPassword);
+      });
+
+      it('rejects with a clear conflict when the email already belongs to an ACTIVE user', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        users.findByEmailIncludingDeleted.mockResolvedValue(buildUser({ status: 'ACTIVE', deletedAt: null }));
+
+        await expect(
+          service.create(orgId, { firstName: 'A', lastName: 'B', email: 'exec@example.com', roleId: 'role_exec' }, 'admin_1'),
+        ).rejects.toThrow(ConflictException);
+        expect(users.create).not.toHaveBeenCalled();
+        expect(users.update).not.toHaveBeenCalled();
+      });
+
+      it('rejects with a message pointing to the profile when the email belongs to an INACTIVE (not deleted) user', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        users.findByEmailIncludingDeleted.mockResolvedValue(buildUser({ status: 'INACTIVE', deletedAt: null }));
+
+        await expect(
+          service.create(orgId, { firstName: 'A', lastName: 'B', email: 'exec@example.com', roleId: 'role_exec' }, 'admin_1'),
+        ).rejects.toThrow(/actívalo desde su perfil/i);
+        expect(users.create).not.toHaveBeenCalled();
+        expect(users.update).not.toHaveBeenCalled();
+      });
+
+      it('never restores a deleted user belonging to a different organization — creates a brand new one in the current organization instead', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        // findByEmailIncludingDeleted is already org-scoped — a different org's deleted user is simply never found.
+        users.findByEmailIncludingDeleted.mockResolvedValue(null);
+        const created = buildUser({ id: 'user_new', mustChangePassword: true });
+        users.create.mockResolvedValue(created);
+
+        const result = await service.create(
+          orgId,
+          { firstName: 'A', lastName: 'B', email: 'exec@example.com', roleId: 'role_exec' },
+          'admin_1',
+        );
+
+        expect(users.findByEmailIncludingDeleted).toHaveBeenCalledWith(orgId, 'exec@example.com');
+        expect(users.create).toHaveBeenCalled();
+        expect(users.update).not.toHaveBeenCalled();
+        expect(result.restored).toBe(false);
+      });
+
+      it('creating a fresh sistema@mejoreferido.cl (no existing row at all) is unaffected by the restore guard — protection is enforced elsewhere (setStatus/update/remove), not by blocking its creation', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        users.findByEmailIncludingDeleted.mockResolvedValue(null);
+        const created = buildUser({ id: 'user_sistema', email: 'sistema@mejoreferido.cl', mustChangePassword: true });
+        users.create.mockResolvedValue(created);
+
+        const result = await service.create(
+          orgId,
+          { firstName: 'Sistema', lastName: 'Principal', email: 'sistema@mejoreferido.cl', roleId: 'role_exec' },
+          'admin_1',
+        );
+
+        expect(users.create).toHaveBeenCalled();
+        expect(result.restored).toBe(false);
+      });
+
+      it('defense in depth: never restores a soft-deleted row whose email matches the protected system account, even though remove() already makes that state unreachable in practice', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        const deletedSistema = buildUser({
+          id: 'user_sistema',
+          email: 'sistema@mejoreferido.cl',
+          status: 'INACTIVE',
+          deletedAt: new Date('2026-01-01T00:00:00.000Z'),
+        });
+        users.findByEmailIncludingDeleted.mockResolvedValue(deletedSistema);
+
+        await expect(
+          service.create(
+            orgId,
+            { firstName: 'A', lastName: 'B', email: 'sistema@mejoreferido.cl', roleId: 'role_exec' },
+            'admin_1',
+          ),
+        ).rejects.toThrow(ForbiddenException);
+        expect(users.update).not.toHaveBeenCalled();
+      });
+
+      it('matches the protected system account’s email case-insensitively and trimming whitespace, blocking the restore', async () => {
+        roles.findById.mockResolvedValue(executiveRole);
+        const deletedSistema = buildUser({
+          id: 'user_sistema',
+          email: 'sistema@mejoreferido.cl',
+          status: 'INACTIVE',
+          deletedAt: new Date('2026-01-01T00:00:00.000Z'),
+        });
+        users.findByEmailIncludingDeleted.mockResolvedValue(deletedSistema);
+
+        await expect(
+          service.create(
+            orgId,
+            { firstName: 'A', lastName: 'B', email: '  Sistema@MejoReferido.CL  ', roleId: 'role_exec' },
+            'admin_1',
+          ),
+        ).rejects.toThrow(ForbiddenException);
+        expect(users.update).not.toHaveBeenCalled();
+      });
     });
   });
 

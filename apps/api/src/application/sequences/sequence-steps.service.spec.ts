@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { EngineClient } from '../../domain/engine/engine-client';
 import { Mailbox } from '../../domain/mailbox/mailbox.entity';
@@ -159,6 +159,7 @@ describe('SequenceStepsService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findByEmailAnyOrganization: jest.fn(),
+      findByEmailIncludingDeleted: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),

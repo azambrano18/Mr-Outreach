@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { DomainRepository } from '../../domain/domain-entity/domain.repository';
 import { EngineClient, TestMailboxResult } from '../../domain/engine/engine-client';
@@ -139,6 +139,7 @@ describe('MailboxesService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findByEmailAnyOrganization: jest.fn(),
+      findByEmailIncludingDeleted: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),

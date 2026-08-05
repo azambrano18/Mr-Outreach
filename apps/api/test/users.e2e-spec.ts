@@ -524,6 +524,122 @@ describe('Users (e2e) — memory + mock', () => {
     });
   });
 
+  describe('POST /users — restore-on-create (reusing a deleted user’s email)', () => {
+    /**
+     * Before the fix: organizationId+email is a hard database unique
+     * constraint that doesn't account for deletedAt, so re-submitting
+     * "Crear usuario" with a deleted user's email attempted an INSERT that
+     * collided with the still-present deleted row and crashed as an
+     * unhandled 500 ("An unexpected error occurred") — never a 201, never
+     * a clean 409. This suite proves the real HTTP flow now restores
+     * instead.
+     */
+    it('the HTTP "Crear usuario" flow restores a deleted user instead of crashing: same id, ACTIVE, correct role, restored:true, a brand-new one-time password, and no second row', async () => {
+      const email = 'restaurable.e2e@mejoreferido.cl';
+      const created = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Restaurable', lastName: 'Persona', email, roleId: executiveRoleId });
+      expect(created.status).toBe(201);
+      const originalId = created.body.id;
+      const originalTemporaryPassword = created.body.temporaryPassword;
+
+      await request(app.getHttpServer())
+        .post(`/users/${originalId}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      const deleteResponse = await request(app.getHttpServer())
+        .delete(`/users/${originalId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deleteResponse.status).toBe(204);
+
+      const missingAfterDelete = await request(app.getHttpServer())
+        .get(`/users/${originalId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(missingAfterDelete.status).toBe(404);
+
+      // Re-submitting "Crear usuario" with the exact same email — this is
+      // the crash reproduction: must now return 201, never 500.
+      const restoredResponse = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Restaurable', lastName: 'Persona', email, roleId: executiveRoleId });
+
+      expect(restoredResponse.status).toBe(201);
+      expect(restoredResponse.body.id).toBe(originalId);
+      expect(restoredResponse.body.status).toBe('ACTIVE');
+      expect(restoredResponse.body.roleName).toBe('EXECUTIVE');
+      expect(restoredResponse.body.restored).toBe(true);
+      expect(restoredResponse.body.mustChangePassword).toBe(true);
+      expect(typeof restoredResponse.body.temporaryPassword).toBe('string');
+      expect(restoredResponse.body.temporaryPassword).not.toBe(originalTemporaryPassword);
+
+      // Now reachable again, and no second row exists with this email.
+      const detailAfterRestore = await request(app.getHttpServer())
+        .get(`/users/${originalId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(detailAfterRestore.status).toBe(200);
+      expect(detailAfterRestore.body.status).toBe('ACTIVE');
+
+      const listResponse = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const matches = listResponse.body.filter((u: { email: string }) => u.email === email);
+      expect(matches).toHaveLength(1);
+      expect(matches[0].id).toBe(originalId);
+
+      // The restored account can actually log in with its new temporary password.
+      const restoredLogin = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email, password: restoredResponse.body.temporaryPassword });
+      expect(restoredLogin.status).toBe(200);
+      expect(restoredLogin.body.user.mustChangePassword).toBe(true);
+    });
+
+    it('rejects creating a user whose email already belongs to a currently-ACTIVE user, with a clear conflict — never a crash', async () => {
+      const email = 'ya.activo.e2e@mejoreferido.cl';
+      await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Ya', lastName: 'Activo', email, roleId: executiveRoleId });
+
+      const conflict = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Otro', lastName: 'Intento', email, roleId: executiveRoleId });
+
+      expect(conflict.status).toBe(409);
+      expect(conflict.body.message).toMatch(/activo/i);
+    });
+
+    it('rejects creating a user whose email belongs to an INACTIVE (not deleted) user, pointing to their profile — never a crash, never a restore', async () => {
+      const email = 'inactivo.e2e@mejoreferido.cl';
+      const created = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Sera', lastName: 'Inactivo', email, roleId: executiveRoleId });
+
+      await request(app.getHttpServer())
+        .post(`/users/${created.body.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      const conflict = await request(app.getHttpServer())
+        .post('/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ firstName: 'Otro', lastName: 'Intento', email, roleId: executiveRoleId });
+
+      expect(conflict.status).toBe(409);
+      expect(conflict.body.message).toMatch(/actívalo desde su perfil/i);
+
+      // Still exactly one row for this email — no ghost second user created.
+      const listResponse = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const matches = listResponse.body.filter((u: { email: string }) => u.email === email);
+      expect(matches).toHaveLength(1);
+    });
+
+  });
+
   describe('GET /users/:id/deletion-impact', () => {
     it('flags mustDeactivateFirst=true and canDelete=false while the executive is still ACTIVE', async () => {
       const { id } = await createReadyExecutive(app, adminToken, {

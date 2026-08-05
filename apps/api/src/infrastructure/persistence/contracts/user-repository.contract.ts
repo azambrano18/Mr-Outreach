@@ -126,4 +126,66 @@ export function runUserRepositoryContractTests(
     expect(updated.firstName).toBe('New');
     expect(updated.status).toBe('INACTIVE');
   });
+
+  /**
+   * Restore-on-create-by-email needs to distinguish "no user ever had this
+   * email" from "one did, and was soft-deleted" — findByEmail alone can't
+   * do that (it's deletedAt-filtered by design), so a dedicated lookup
+   * must see the deleted row while every ordinary read path keeps
+   * ignoring it.
+   */
+  it('findByEmailIncludingDeleted finds a soft-deleted user that findByEmail correctly ignores', async () => {
+    const repo = getRepository();
+    const created = await repo.create({
+      organizationId: 'org_1',
+      firstName: 'Deleted',
+      lastName: 'User',
+      email: 'deleted@example.com',
+      passwordHash: 'h',
+    });
+    await repo.update(created.id, { status: 'INACTIVE', deletedAt: new Date() });
+
+    expect(await repo.findByEmail('org_1', 'deleted@example.com')).toBeNull();
+    const foundIncludingDeleted = await repo.findByEmailIncludingDeleted('org_1', 'deleted@example.com');
+    expect(foundIncludingDeleted?.id).toBe(created.id);
+    expect(foundIncludingDeleted?.deletedAt).not.toBeNull();
+  });
+
+  it('findByEmailIncludingDeleted returns null for a different organization', async () => {
+    const repo = getRepository();
+    const created = await repo.create({
+      organizationId: 'org_1',
+      firstName: 'Deleted',
+      lastName: 'User',
+      email: 'deleted@example.com',
+      passwordHash: 'h',
+    });
+    await repo.update(created.id, { status: 'INACTIVE', deletedAt: new Date() });
+
+    expect(await repo.findByEmailIncludingDeleted('org_2', 'deleted@example.com')).toBeNull();
+  });
+
+  it('restores a soft-deleted user by clearing deletedAt — the row becomes visible to every ordinary read path again', async () => {
+    const repo = getRepository();
+    const created = await repo.create({
+      organizationId: 'org_1',
+      firstName: 'Deleted',
+      lastName: 'User',
+      email: 'deleted@example.com',
+      passwordHash: 'h',
+    });
+    await repo.update(created.id, { status: 'INACTIVE', deletedAt: new Date() });
+
+    const restored = await repo.update(created.id, {
+      status: 'ACTIVE',
+      mustChangePassword: true,
+      passwordChangedAt: null,
+      deletedAt: null,
+    });
+
+    expect(restored.id).toBe(created.id);
+    expect(restored.deletedAt).toBeNull();
+    expect(await repo.findById(created.id)).not.toBeNull();
+    expect(await repo.findByEmail('org_1', 'deleted@example.com')).not.toBeNull();
+  });
 }

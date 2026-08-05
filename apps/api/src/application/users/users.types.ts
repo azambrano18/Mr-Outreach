@@ -17,6 +17,8 @@ export interface UserSummary {
 /** Returned once, only from the endpoint call that generated the password. */
 export interface CreateUserResult extends UserSummary {
   temporaryPassword: string;
+  /** True when this call restored a previously soft-deleted user (same email, same organization) instead of inserting a new row. */
+  restored: boolean;
 }
 
 export interface ResetPasswordResult {

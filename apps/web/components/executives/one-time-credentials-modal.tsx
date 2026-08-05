@@ -15,13 +15,16 @@ export function OneTimeCredentialsModal({
   email,
   temporaryPassword,
   roleLabel,
+  restored,
 }: {
   open: boolean;
   onClose: () => void;
   email: string;
   temporaryPassword: string;
-  /** e.g. "Administrador"/"Ejecutivo" — shown as "{roleLabel} creado correctamente." when provided. */
+  /** e.g. "Administrador"/"Ejecutivo" — shown as "{roleLabel} creado/restaurado correctamente." when provided. */
   roleLabel?: string;
+  /** True when this call restored a previously deleted user instead of creating a new one — changes "creado" to "restaurado". */
+  restored?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -38,7 +41,11 @@ export function OneTimeCredentialsModal({
   return (
     <Modal open={open} onClose={onClose} title="Credenciales temporales">
       <div className="flex flex-col gap-3">
-        {roleLabel && <p className="text-sm font-medium text-emerald-700">{roleLabel} creado correctamente.</p>}
+        {roleLabel && (
+          <p className="text-sm font-medium text-emerald-700">
+            {roleLabel} {restored ? 'restaurado' : 'creado'} correctamente.
+          </p>
+        )}
         <h3 className="text-sm font-semibold text-slate-900">Credenciales temporales</h3>
         <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
           Esta contraseña solo se mostrará una vez. El usuario deberá cambiarla al iniciar sesión.

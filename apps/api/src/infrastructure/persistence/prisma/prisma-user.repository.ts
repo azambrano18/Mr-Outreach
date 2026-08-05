@@ -26,6 +26,12 @@ export class PrismaUserRepository implements UserRepository {
     });
   }
 
+  async findByEmailIncludingDeleted(organizationId: string, email: string): Promise<User | null> {
+    return this.prisma.user.findFirst({
+      where: { organizationId, email: { equals: email, mode: 'insensitive' } },
+    });
+  }
+
   async findAll(organizationId: string): Promise<User[]> {
     return this.prisma.user.findMany({ where: { organizationId, deletedAt: null } });
   }

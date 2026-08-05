@@ -172,6 +172,7 @@ export function CreateUserForm({
           email={createdUser.email}
           temporaryPassword={createdUser.temporaryPassword}
           roleLabel={ROLE_FRIENDLY_LABEL[createdUser.roleName] ?? createdUser.roleName}
+          restored={createdUser.restored}
         />
       )}
     </>

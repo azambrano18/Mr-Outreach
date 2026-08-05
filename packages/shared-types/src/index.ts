@@ -43,6 +43,8 @@ export interface UserSummary {
 /** Returned once, only in the response of the call that generated the password — never persisted client-side beyond component state. */
 export interface CreateUserResult extends UserSummary {
   temporaryPassword: string;
+  /** True when this call restored a previously soft-deleted user (same email, same organization) instead of creating a new one. */
+  restored: boolean;
 }
 
 export interface ResetPasswordResult {

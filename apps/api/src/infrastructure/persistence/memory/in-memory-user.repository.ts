@@ -37,6 +37,16 @@ export class InMemoryUserRepository implements UserRepository {
     return null;
   }
 
+  async findByEmailIncludingDeleted(organizationId: string, email: string): Promise<User | null> {
+    const normalized = email.toLowerCase();
+    for (const user of this.store.users.values()) {
+      if (user.organizationId === organizationId && user.email.toLowerCase() === normalized) {
+        return user;
+      }
+    }
+    return null;
+  }
+
   async findAll(organizationId: string): Promise<User[]> {
     return Array.from(this.store.users.values()).filter(
       (user) => !user.deletedAt && user.organizationId === organizationId,
@@ -71,7 +81,12 @@ export class InMemoryUserRepository implements UserRepository {
 
   async update(id: string, input: UpdateUserInput): Promise<User> {
     const existing = this.store.users.get(id);
-    if (!existing || existing.deletedAt) {
+    // A soft-deleted user can only ever be updated to explicitly clear
+    // `deletedAt` (the restore flow) — any other update attempt against a
+    // deleted row is still refused, matching PrismaUserRepository (which
+    // has no such guard at all, since a real UPDATE by primary key doesn't
+    // care about deletedAt) while keeping this driver's stricter default.
+    if (!existing || (existing.deletedAt && input.deletedAt !== null)) {
       throw new ConflictException('User not found.');
     }
 

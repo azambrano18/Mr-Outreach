@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+﻿import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
@@ -35,6 +35,7 @@ describe('AuthService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findByEmailAnyOrganization: jest.fn(),
+      findByEmailIncludingDeleted: jest.fn(),
       findAll: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),

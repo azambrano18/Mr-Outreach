@@ -1,9 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { ClientExecutiveAssignmentRepository } from '../../domain/client/client-executive-assignment.repository';
 import { MailboxAssignment } from '../../domain/mailbox-assignment/mailbox-assignment.entity';
 import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mailbox-assignment.repository';
 import { isProtectedSystemAccount } from '../../domain/user/protected-system-account';
+import { Role } from '../../domain/role/role.entity';
 import { RoleRepository } from '../../domain/role/role.repository';
 import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import { SequenceExecutionStatus } from '../../domain/sequence-execution/sequence-execution.entity';
@@ -12,6 +14,7 @@ import { UserRepository } from '../../domain/user/user.repository';
 import { UserRoleRepository } from '../../domain/user-role/user-role.repository';
 import {
   AUDIT_LOG_REPOSITORY,
+  CLIENT_EXECUTIVE_ASSIGNMENT_REPOSITORY,
   MAILBOX_ASSIGNMENT_REPOSITORY,
   ROLE_REPOSITORY,
   SEQUENCE_EXECUTION_REPOSITORY,
@@ -49,6 +52,7 @@ export class UsersService {
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     @Inject(MAILBOX_ASSIGNMENT_REPOSITORY) private readonly mailboxAssignments: MailboxAssignmentRepository,
     @Inject(SEQUENCE_EXECUTION_REPOSITORY) private readonly sequenceExecutions: SequenceExecutionRepository,
+    @Inject(CLIENT_EXECUTIVE_ASSIGNMENT_REPOSITORY) private readonly clientExecutiveAssignments: ClientExecutiveAssignmentRepository,
   ) {}
 
   async list(organizationId: string): Promise<UserSummary[]> {
@@ -76,6 +80,16 @@ export class UsersService {
    * unintended role through this form. Only a caller holding
    * `users.create` (ADMIN only, per the permission catalog) can reach
    * this method at all, so an EXECUTIVE can never create any user.
+   *
+   * Restore-on-create: `(organizationId, email)` is a hard database unique
+   * constraint that does NOT account for `deletedAt` (a soft-deleted row
+   * still occupies that slot), so attempting to INSERT a new user reusing
+   * a deleted user's email would hit that constraint and crash as an
+   * unhandled 500 — this is checked explicitly, up front, precisely to
+   * avoid ever reaching that INSERT. `findByEmailIncludingDeleted` (unlike
+   * every other lookup in this service) is the one place allowed to see a
+   * soft-deleted row, exactly so this branch can tell "no user ever had
+   * this email" apart from "one did, and was deleted."
    */
   async create(
     organizationId: string,
@@ -85,6 +99,28 @@ export class UsersService {
     const role = await this.requireOwnedRole(organizationId, input.roleId);
     if (!CREATABLE_ROLE_NAMES.includes(role.name)) {
       throw new BadRequestException(`Only the ${CREATABLE_ROLE_NAMES.join(' or ')} role can be assigned through this endpoint.`);
+    }
+
+    const existingByEmail = await this.users.findByEmailIncludingDeleted(organizationId, input.email);
+    if (existingByEmail) {
+      if (existingByEmail.deletedAt !== null) {
+        // Structurally unreachable in practice today — remove() already
+        // unconditionally refuses to delete the protected system account,
+        // so it can never actually end up soft-deleted — but kept as an
+        // explicit, defense-in-depth guard on the restore path itself
+        // ("mantener todas sus protecciones") rather than relying solely
+        // on that other method never having a bug.
+        if (isProtectedSystemAccount(existingByEmail.email)) {
+          throw new ForbiddenException('No es posible restaurar la cuenta protegida del sistema.');
+        }
+        return this.restore(organizationId, existingByEmail, role, actorId);
+      }
+      if (existingByEmail.status === 'ACTIVE') {
+        throw new ConflictException('Ya existe un usuario activo con este correo en esta organización.');
+      }
+      throw new ConflictException(
+        'Ya existe un usuario inactivo con este correo. Actívalo desde su perfil en lugar de crear uno nuevo.',
+      );
     }
 
     const temporaryPassword = generateTemporaryPassword();
@@ -109,7 +145,72 @@ export class UsersService {
     });
 
     const summary = await this.toSummary(user);
-    return { ...summary, temporaryPassword };
+    return { ...summary, temporaryPassword, restored: false };
+  }
+
+  /**
+   * DELETED -> ACTIVE, reusing the same userId. Deliberately narrow: only
+   * identity/access fields are touched (name, role, credentials, status).
+   * No operational data is restored — mailbox assignments and client
+   * grants are structurally impossible to have survived deletion for
+   * mailboxes (remove() blocks deletion while still PRIMARY anywhere, and
+   * strips SECONDARY as part of deleting), but ClientExecutiveAssignment
+   * rows are NOT cleaned up by remove() today, so they're cleared here
+   * explicitly — the one piece of "old operational data" that could
+   * otherwise silently reappear as soon as this account is ACTIVE again.
+   * Conversations/Plantillas/Gestiones/notifications were never owned by
+   * the user row itself and need no cleanup here.
+   */
+  private async restore(
+    organizationId: string,
+    existing: User,
+    role: Role,
+    actorId: string,
+  ): Promise<CreateUserResult> {
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await bcrypt.hash(temporaryPassword, PASSWORD_HASH_ROUNDS);
+
+    const restored = await this.users.update(existing.id, {
+      // Name/email are deliberately left untouched — restore only ever
+      // reinstates the identity/access fields listed above; it never
+      // overwrites the historical record with whatever was just typed
+      // into the "Crear usuario" form.
+      passwordHash,
+      status: 'ACTIVE',
+      mustChangePassword: true,
+      // Same convention resetPassword() already uses for "must personally
+      // set a real password" — never trust the caller's stale value.
+      passwordChangedAt: null,
+      deletedAt: null,
+    });
+
+    const previousRoles = await this.userRoles.getRolesForUser(existing.id);
+    await Promise.all(previousRoles.map((previousRole) => this.userRoles.unassign(existing.id, previousRole.id)));
+    await this.userRoles.assign(existing.id, role.id);
+
+    const staleClientAssignments = await this.clientExecutiveAssignments.findByUser(existing.id);
+    await Promise.all(
+      staleClientAssignments.map((assignment) =>
+        this.clientExecutiveAssignments.remove(assignment.clientId, existing.id),
+      ),
+    );
+
+    await this.auditLogs.record({
+      organizationId,
+      actorId,
+      action: 'user.restored',
+      entityType: 'User',
+      entityId: existing.id,
+      metadata: {
+        email: existing.email,
+        roleName: role.name,
+        previouslyDeletedAt: existing.deletedAt,
+        clientAssignmentsCleared: staleClientAssignments.length,
+      },
+    });
+
+    const summary = await this.toSummary(restored);
+    return { ...summary, temporaryPassword, restored: true };
   }
 
   /**

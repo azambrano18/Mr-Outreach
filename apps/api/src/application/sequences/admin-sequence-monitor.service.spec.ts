@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+﻿import { NotFoundException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
 import { ManagedClient } from '../../domain/client/managed-client.entity';
 import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
@@ -145,6 +145,7 @@ describe('AdminSequenceMonitorService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findByEmailAnyOrganization: jest.fn(),
+      findByEmailIncludingDeleted: jest.fn(),
       findAll: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),

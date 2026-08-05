@@ -36,8 +36,13 @@ export interface UpdateUserInput {
   mustChangePassword?: boolean;
   lastLoginAt?: Date;
   passwordChangedAt?: Date | null;
-  /** Set once, on deletion — see UsersService.remove. Every read path already filters `deletedAt: null`. */
-  deletedAt?: Date;
+  /**
+   * Set on deletion (see UsersService.remove) — every read path already
+   * filters `deletedAt: null`. Also explicitly cleared (`null`) to restore
+   * a soft-deleted user back to an active row — see UsersService.create's
+   * restore-on-create-by-email flow.
+   */
+  deletedAt?: Date | null;
 }
 
 /** Display-only, derived — never persisted as its own column. */

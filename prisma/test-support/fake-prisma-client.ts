@@ -29,6 +29,30 @@ export interface FakeUser {
   status: string;
   mustChangePassword: boolean;
   deletedAt: Date | null;
+  lastLoginAt?: Date | null;
+  passwordChangedAt?: Date | null;
+}
+
+export interface FakeMailboxAssignment {
+  id: string;
+  organizationId: string;
+  mailboxId: string;
+  userId: string;
+  role: string;
+}
+
+export interface FakeClientExecutiveAssignment {
+  id: string;
+  organizationId: string;
+  clientId: string;
+  userId: string;
+}
+
+export interface FakeSequenceExecution {
+  id: string;
+  organizationId: string;
+  executiveId: string;
+  status: string;
 }
 
 export interface FakeRole {
@@ -81,6 +105,9 @@ export interface FakeStore {
   userRoles: FakeUserRole[];
   auditLogs: FakeAuditLog[];
   mailboxes: FakeMailbox[];
+  mailboxAssignments: FakeMailboxAssignment[];
+  clientExecutiveAssignments: FakeClientExecutiveAssignment[];
+  sequenceExecutions: FakeSequenceExecution[];
 }
 
 export function createEmptyStore(): FakeStore {
@@ -93,6 +120,9 @@ export function createEmptyStore(): FakeStore {
     userRoles: [],
     auditLogs: [],
     mailboxes: [],
+    mailboxAssignments: [],
+    clientExecutiveAssignments: [],
+    sequenceExecutions: [],
   };
 }
 
@@ -187,9 +217,20 @@ export class FakePrismaClient {
           status: data.status ?? 'ACTIVE',
           mustChangePassword: data.mustChangePassword ?? false,
           deletedAt: null,
+          lastLoginAt: null,
+          passwordChangedAt: null,
         };
         this.store.users.push(row);
         return row;
+      },
+      update: async ({ where, data }: { where: { id: string }; data: Partial<FakeUser> }) => {
+        this.track('user.update');
+        const existing = this.store.users.find((u) => u.id === where.id);
+        if (!existing) {
+          throw new Error(`Fake user ${where.id} not found.`);
+        }
+        Object.assign(existing, data);
+        return existing;
       },
     };
   }
@@ -212,6 +253,16 @@ export class FakePrismaClient {
         const row: FakeRole = { id: randomUUID(), organizationId: data.organizationId, name: data.name };
         this.store.roles.push(row);
         return row;
+      },
+      findMany: async ({
+        where,
+        select,
+      }: {
+        where: { id: { in: string[] } };
+        select?: Record<string, boolean>;
+      }) => {
+        this.track('role.findMany');
+        return this.store.roles.filter((r) => where.id.in.includes(r.id)).map((r) => pick(r, select));
       },
     };
   }
@@ -310,6 +361,59 @@ export class FakePrismaClient {
         const row: FakeUserRole = { userId: create.userId, roleId: create.roleId };
         this.store.userRoles.push(row);
         return row;
+      },
+      findMany: async ({ where, select }: { where: { userId: string }; select?: Record<string, boolean> }) => {
+        this.track('userRole.findMany');
+        return this.store.userRoles.filter((ur) => ur.userId === where.userId).map((ur) => pick(ur, select));
+      },
+      deleteMany: async ({ where }: { where: { userId: string } }) => {
+        this.track('userRole.deleteMany');
+        const before = this.store.userRoles.length;
+        this.store.userRoles = this.store.userRoles.filter((ur) => ur.userId !== where.userId);
+        return { count: before - this.store.userRoles.length };
+      },
+      create: async ({ data }: { data: { userId: string; roleId: string } }) => {
+        this.track('userRole.create');
+        const row: FakeUserRole = { userId: data.userId, roleId: data.roleId };
+        this.store.userRoles.push(row);
+        return row;
+      },
+    };
+  }
+
+  get mailboxAssignment() {
+    return {
+      count: async ({ where }: { where: { userId: string; role: string } }) => {
+        this.track('mailboxAssignment.count');
+        return this.store.mailboxAssignments.filter((a) => a.userId === where.userId && a.role === where.role).length;
+      },
+    };
+  }
+
+  get clientExecutiveAssignment() {
+    return {
+      findMany: async ({ where, select }: { where: { userId: string }; select?: Record<string, boolean> }) => {
+        this.track('clientExecutiveAssignment.findMany');
+        return this.store.clientExecutiveAssignments.filter((a) => a.userId === where.userId).map((a) => pick(a, select));
+      },
+      count: async ({ where }: { where: { userId: string } }) => {
+        this.track('clientExecutiveAssignment.count');
+        return this.store.clientExecutiveAssignments.filter((a) => a.userId === where.userId).length;
+      },
+      deleteMany: async ({ where }: { where: { userId: string } }) => {
+        this.track('clientExecutiveAssignment.deleteMany');
+        const before = this.store.clientExecutiveAssignments.length;
+        this.store.clientExecutiveAssignments = this.store.clientExecutiveAssignments.filter((a) => a.userId !== where.userId);
+        return { count: before - this.store.clientExecutiveAssignments.length };
+      },
+    };
+  }
+
+  get sequenceExecution() {
+    return {
+      findMany: async ({ where, select }: { where: { executiveId: string }; select?: Record<string, boolean> }) => {
+        this.track('sequenceExecution.findMany');
+        return this.store.sequenceExecutions.filter((e) => e.executiveId === where.executiveId).map((e) => pick(e, select));
       },
     };
   }
