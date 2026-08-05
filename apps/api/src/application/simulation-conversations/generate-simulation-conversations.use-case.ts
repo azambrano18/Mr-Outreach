@@ -131,15 +131,9 @@ export class GenerateSimulationConversationsUseCase {
     // (only path that needs a publishable step) can succeed for "Deriva".
     await this.sequenceSteps.update(step.id, { status: 'PUBLISHED', updatedBy: input.actorId });
     // enrollAcceptedContacts requires BOTH sequence.mailboxId and
-    // sequence.clientId to be set (see SchedulingService.enrollAcceptedContacts)
-    // — mailboxId is a real, persisted column everywhere. clientId is NOT: the
-    // Postgres-backed PrismaSequenceRepository has always hardcoded it to null
-    // and silently dropped any value passed to update() (a pre-existing,
-    // unrelated architectural gap this call does not attempt to work around —
-    // see PrismaSequenceRepository's own comments). Under the in-memory driver
-    // (dev/test) this update DOES take effect and "Deriva" fully succeeds;
-    // under real Postgres it will not, exactly as it would not for any other
-    // legacy Sequence today — disclosed, not silently patched over.
+    // sequence.clientId to be set (see SchedulingService.enrollAcceptedContacts).
+    // Both are now real, persisted columns under every driver — see the
+    // sequence-client-id migration and PrismaSequenceRepository.
     await this.sequences.update(sequence.id, { mailboxId: mailbox.id, clientId: client.id });
 
     for (const config of SCENARIOS) {

@@ -62,11 +62,20 @@ export class DeleteSimulationConversationsUseCase {
     const summary = await this.simulationConversationsService.toBatchSummary(batch);
     const uniqueCompanyIds = new Set(rows.map((r) => r.companyId).filter((id): id is string => Boolean(id)));
     const uniqueSequenceIds = new Set(rows.map((r) => r.sequenceId).filter((id): id is string => Boolean(id)));
+
+    // Includes any "Deriva"-created Contact/SequenceContact — see execute()'s
+    // own comment — so the preview count matches what deletion will actually remove.
+    const contactIds = new Set(rows.map((r) => r.contactId).filter((id): id is string => Boolean(id)));
+    for (const sequenceId of uniqueSequenceIds) {
+      const allSequenceContacts = await this.sequenceContacts.findBySequence(organizationId, sequenceId);
+      for (const sc of allSequenceContacts) contactIds.add(sc.contactId);
+    }
+
     return {
       batch: summary,
       conversationCount: rows.length,
       messageCount: rows.length * 2,
-      contactCount: rows.filter((r) => r.contactId).length,
+      contactCount: contactIds.size,
       companyCount: uniqueCompanyIds.size,
       sequenceCount: uniqueSequenceIds.size,
     };
@@ -90,6 +99,20 @@ export class DeleteSimulationConversationsUseCase {
       if (row.sequenceId) sequenceIds.add(row.sequenceId);
       if (row.sequenceStepId) stepIds.add(row.sequenceStepId);
       await this.conversations.delete(row.id);
+    }
+
+    // "Deriva" (ResponseOutcomeService.refer) enrolls a brand-new
+    // Contact+SequenceContact on this same QA sequence, but never attaches
+    // them to any Conversation — so they'd never appear above and would be
+    // left as an orphaned residue outside the batch. The QA sequence exists
+    // solely for this batch, so every SequenceContact still on it (original
+    // or derived) is safe to sweep up here.
+    for (const sequenceId of sequenceIds) {
+      const allSequenceContacts = await this.sequenceContacts.findBySequence(organizationId, sequenceId);
+      for (const sc of allSequenceContacts) {
+        sequenceContactIds.add(sc.id);
+        contactIds.add(sc.contactId);
+      }
     }
 
     for (const id of sequenceContactIds) await this.sequenceContacts.delete(id);

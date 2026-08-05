@@ -207,6 +207,35 @@ export async function seedSequenceContactForScheduledEmails(prisma: PrismaServic
   });
 }
 
+/**
+ * Dedicated namespace for sequence-repository.contract.ts (Sequence.clientId
+ * regression coverage) — isolated from the "fx_" namespace's fx_sequence_1/
+ * fx_sequence_org2, which other contract specs rely on as pre-existing FK
+ * targets. Keeping this separate means that spec's own `sequence.deleteMany()`
+ * cleanup between tests never has to touch (or worry about restoring) rows
+ * other files depend on.
+ */
+export async function seedSequenceClientIdFixtures(prisma: PrismaService): Promise<void> {
+  await prisma.organization.createMany({
+    data: [
+      { id: 'sq_org_1', name: 'Sequence ClientId Org 1' },
+      { id: 'sq_org_2', name: 'Sequence ClientId Org 2' },
+    ],
+    skipDuplicates: true,
+  });
+  await prisma.managedClient.createMany({
+    data: [
+      { id: 'sq_client_1', organizationId: 'sq_org_1', serverClientId: 'srv_sq_101', name: 'Sequence ClientId Client 1', createdBy: 'seed', updatedBy: 'seed' },
+      { id: 'sq_client_2', organizationId: 'sq_org_2', serverClientId: 'srv_sq_102', name: 'Sequence ClientId Client 2', createdBy: 'seed', updatedBy: 'seed' },
+    ],
+    skipDuplicates: true,
+  });
+  await prisma.user.createMany({
+    data: [{ id: 'sq_user_1', organizationId: 'sq_org_1', firstName: 'Sequence', lastName: 'ClientId Exec', email: 'sq-exec1@example.com', passwordHash: 'x' }],
+    skipDuplicates: true,
+  });
+}
+
 /** Full fixture chain (organizations -> managed clients -> users -> mailboxes -> sequences -> steps). */
 export async function seedFullChain(prisma: PrismaService): Promise<void> {
   await seedFixtureOrganizations(prisma);

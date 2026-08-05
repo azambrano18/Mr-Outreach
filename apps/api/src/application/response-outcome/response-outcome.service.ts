@@ -196,6 +196,14 @@ export class ResponseOutcomeService {
     if (!sequence) {
       throw new NotFoundException('Sequence not found.');
     }
+    // Distinguishes the specific missing-precondition from
+    // enrollAcceptedContacts' generic "no se pudo matricular" below — never
+    // works around the requirement itself (SchedulingService.enrollAcceptedContacts
+    // still requires clientId, unchanged), just names the real cause instead
+    // of letting it surface as a misleading "sin step publicado" conflict.
+    if (!sequence.clientId) {
+      throw new ConflictException('No se puede registrar la derivación porque la secuencia no tiene un cliente asociado.');
+    }
     const { enrolled } = await this.scheduling.enrollAcceptedContacts(organizationId, sequence, [
       { contactId: newContact.id, companyId: contact.companyId },
     ]);

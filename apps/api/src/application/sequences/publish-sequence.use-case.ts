@@ -84,12 +84,12 @@ export interface PublishSequenceResult {
  * contract: a FAILED-scenario publish must leave `sequenceVersion`
  * unbumped — see sequence-wizard.e2e-spec.ts).
  *
- * CRM eligibility is resolved via the sender mailbox's `clientId` — under
- * the Postgres driver `Sequence.clientId` itself is not modeled (see
- * PrismaSequenceRepository's toDomain comment) and was silently always
- * null, meaning the old code's CRM check never actually ran there. Using
- * `mailbox.clientId` (a real, Postgres-backed column) fixes that dormant
- * gap. Scope note: this intentionally checks CRM-active-client only (the
+ * CRM eligibility is resolved via the sender mailbox's `clientId` rather
+ * than `sequence.clientId` — historically because the Postgres driver never
+ * persisted the latter (see the sequence-client-id migration; both are now
+ * real, kept-in-sync columns), and kept this way since `mailbox.clientId`
+ * is the actual source of truth `sequence.clientId` is denormalized from.
+ * Scope note: this intentionally checks CRM-active-client only (the
  * same narrow check the old code made), not the fuller
  * SequenceEligibilityService (executive-assigned-to-client/domain-active/
  * mailbox-connected) — routing publish through the fuller check would be a

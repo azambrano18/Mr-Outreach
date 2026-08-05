@@ -20,7 +20,7 @@ describe('DeleteSimulationConversationsUseCase — "Eliminar conversaciones de p
   let messages: jest.Mocked<Pick<ConversationMessageRepository, 'deleteByConversation'>>;
   let notes: jest.Mocked<Pick<ConversationNoteRepository, 'deleteByConversation'>>;
   let readStates: jest.Mocked<Pick<ConversationReadStateRepository, 'deleteByConversation'>>;
-  let sequenceContacts: jest.Mocked<Pick<SequenceContactRepository, 'delete'>>;
+  let sequenceContacts: jest.Mocked<Pick<SequenceContactRepository, 'delete' | 'findBySequence'>>;
   let contacts: jest.Mocked<Pick<ContactRepository, 'delete'>>;
   let companies: jest.Mocked<Pick<CompanyRepository, 'delete'>>;
   let sequences: jest.Mocked<Pick<SequenceRepository, 'delete'>>;
@@ -74,7 +74,17 @@ describe('DeleteSimulationConversationsUseCase — "Eliminar conversaciones de p
     messages = { deleteByConversation: jest.fn().mockResolvedValue(undefined) };
     notes = { deleteByConversation: jest.fn().mockResolvedValue(undefined) };
     readStates = { deleteByConversation: jest.fn().mockResolvedValue(undefined) };
-    sequenceContacts = { delete: jest.fn().mockResolvedValue(undefined) };
+    sequenceContacts = {
+      delete: jest.fn().mockResolvedValue(undefined),
+      // Mirrors the 4 SequenceContacts already referenced by conversations — the
+      // "no extra residue" test below overrides this to add a 5th, unreferenced one.
+      findBySequence: jest.fn().mockResolvedValue([
+        { id: 'sc_1', contactId: 'contact_1' },
+        { id: 'sc_2', contactId: 'contact_2' },
+        { id: 'sc_3', contactId: 'contact_3' },
+        { id: 'sc_4', contactId: 'contact_4' },
+      ]),
+    };
     contacts = { delete: jest.fn().mockResolvedValue(undefined) };
     companies = { delete: jest.fn().mockResolvedValue(undefined) };
     sequences = { delete: jest.fn().mockResolvedValue(undefined) };
@@ -114,6 +124,19 @@ describe('DeleteSimulationConversationsUseCase — "Eliminar conversaciones de p
       batches.findById.mockResolvedValue({ ...batch, organizationId: otherOrgId });
       await expect(useCase.preview(orgId, batchId)).rejects.toThrow(NotFoundException);
     });
+
+    it('counts a "Deriva"-created Contact not referenced by any conversation', async () => {
+      sequenceContacts.findBySequence.mockResolvedValueOnce([
+        { id: 'sc_1', contactId: 'contact_1' },
+        { id: 'sc_2', contactId: 'contact_2' },
+        { id: 'sc_3', contactId: 'contact_3' },
+        { id: 'sc_4', contactId: 'contact_4' },
+        { id: 'sc_derived', contactId: 'contact_derived' },
+      ] as never);
+
+      const preview = await useCase.preview(orgId, batchId);
+      expect(preview.contactCount).toBe(5);
+    });
   });
 
   describe('execute', () => {
@@ -129,6 +152,24 @@ describe('DeleteSimulationConversationsUseCase — "Eliminar conversaciones de p
       await useCase.execute(orgId, actorId, batchId);
       expect(sequenceContacts.delete).toHaveBeenCalledTimes(4);
       expect(contacts.delete).toHaveBeenCalledTimes(4);
+    });
+
+    it('also deletes a "Deriva"-created SequenceContact/Contact that is on the QA sequence but not referenced by any conversation — no residue left outside the batch', async () => {
+      sequenceContacts.findBySequence.mockResolvedValueOnce([
+        { id: 'sc_1', contactId: 'contact_1' },
+        { id: 'sc_2', contactId: 'contact_2' },
+        { id: 'sc_3', contactId: 'contact_3' },
+        { id: 'sc_4', contactId: 'contact_4' },
+        { id: 'sc_derived', contactId: 'contact_derived' },
+      ] as never);
+
+      await useCase.execute(orgId, actorId, batchId);
+
+      expect(sequenceContacts.findBySequence).toHaveBeenCalledWith(orgId, 'sequence_1');
+      expect(sequenceContacts.delete).toHaveBeenCalledTimes(5);
+      expect(sequenceContacts.delete).toHaveBeenCalledWith('sc_derived');
+      expect(contacts.delete).toHaveBeenCalledTimes(5);
+      expect(contacts.delete).toHaveBeenCalledWith('contact_derived');
     });
 
     it('deletes exactly the 1 shared Company and 1 shared Sequence (and its Step) — never once per conversation', async () => {

@@ -207,6 +207,27 @@ describe('Simulation conversations (e2e) — "Conversaciones de prueba" (QA), me
     expect(classifyReferred.status).toBe(201);
     expect(classifyReferred.body.newContact.email).toBe(`derivado.${stamp}@conversation-test.invalid`);
     expect(classifyReferred.body.conversation.responseOutcome).toBe('REFERRED');
+    // Proves the fix end-to-end through the real enrollment path: refer()
+    // requires sequence.clientId to be non-null (see ResponseOutcomeService's
+    // requireContext → SchedulingService.enrollAcceptedContacts) — this 201
+    // would be a 409 ("no se pudo matricular") if the QA sequence's clientId
+    // hadn't actually been persisted.
+    expect(classifyReferred.body.newSequenceContact.id).toBeTruthy();
+
+    // The derived Contact/SequenceContact lands on the SAME QA sequence
+    // (never a separate one) — confirmed via the real admin monitor endpoint,
+    // which also confirms the sequence's clientId resolved to a real client.
+    const referredDetail = await request(app.getHttpServer())
+      .get(`/me/conversations/${referred.id}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    const qaSequenceId = referredDetail.body.sequenceId as string;
+    const monitorBeforeDelete = await request(app.getHttpServer())
+      .get(`/sequences/${qaSequenceId}/monitor`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(monitorBeforeDelete.status).toBe(200);
+    expect(monitorBeforeDelete.body.clientId).toBeTruthy();
+    // 4 original SequenceContacts + the 1 created by "Deriva".
+    expect(monitorBeforeDelete.body.results.prospectCount).toBe(5);
 
     // 14. Even a conversation SUGGESTED as "Interesado" can be reclassified as "No interesado" — proves no automatic intelligence gate.
     // (Already demonstrated above: `interested` conversation was manually confirmed as INTERESTED — this asserts the reverse case is equally possible on a fresh one.)
@@ -244,6 +265,16 @@ describe('Simulation conversations (e2e) — "Conversaciones de prueba" (QA), me
       .get(`/me/conversations?mailboxId=${mailboxId}&isSimulation=true`)
       .set('Authorization', `Bearer ${adminToken}`);
     expect(afterDelete.body).toHaveLength(0);
+
+    // The "Deriva"-created Contact/SequenceContact are gone too — not just
+    // the 4 original conversations — because deletion sweeps every
+    // SequenceContact still on the QA sequence, not only the ones directly
+    // referenced by a Conversation row (see DeleteSimulationConversationsUseCase's
+    // own comment). The whole QA sequence disappears, so its monitor 404s.
+    const monitorAfterDelete = await request(app.getHttpServer())
+      .get(`/sequences/${qaSequenceId}/monitor`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(monitorAfterDelete.status).toBe(404);
 
     // A repeated delete is a controlled 404, never a crash or a silent re-run.
     const secondDelete = await request(app.getHttpServer())
