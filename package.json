@@ -22,6 +22,7 @@
     "prisma:bootstrap-admin": "ts-node --project prisma/tsconfig.json prisma/bootstrap-admin.ts",
     "prisma:sync-system-roles": "ts-node --project prisma/tsconfig.json prisma/sync-system-roles.ts",
     "prisma:cleanup-staging-test-data": "ts-node --project prisma/tsconfig.json prisma/cleanup-staging-test-data.ts",
+    "prisma:cleanup-single-mailbox": "ts-node --project prisma/tsconfig.json prisma/cleanup-single-mailbox.ts",
     "prisma:repair-mailbox-deleted-at": "ts-node --project prisma/tsconfig.json prisma/repair-mailbox-deleted-at.ts",
     "prisma:restore-staging-user": "ts-node --project prisma/tsconfig.json prisma/restore-staging-user.ts",
     "test:prisma-scripts": "jest --config jest.config.prisma.js",
