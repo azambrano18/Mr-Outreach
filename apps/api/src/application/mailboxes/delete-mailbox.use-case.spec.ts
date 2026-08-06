@@ -194,6 +194,31 @@ describe('DeleteMailboxUseCase', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('blocks deletion when the mailbox owns a Gestión ACCEPTED by the server but not yet started (real staging case)', async () => {
+    sequenceExecutions.findAllByOrganization.mockResolvedValue([buildExecution({ status: 'ACCEPTED' })]);
+
+    await expect(
+      useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
+    ).rejects.toThrow(ConflictException);
+    expect(mailboxes.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks deletion when the mailbox owns a Gestión mid-RESTART_REQUESTED', async () => {
+    sequenceExecutions.findAllByOrganization.mockResolvedValue([buildExecution({ status: 'RESTART_REQUESTED' })]);
+
+    await expect(
+      useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows deletion once the previously-blocking Gestión has been stopped (STOPPED is terminal)', async () => {
+    sequenceExecutions.findAllByOrganization.mockResolvedValue([buildExecution({ status: 'STOPPED' })]);
+
+    await expect(
+      useCase.execute({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
+    ).resolves.toBeUndefined();
+  });
+
   it('removes every remaining assignment as part of the deletion', async () => {
     assignments.findByMailbox.mockResolvedValue([
       buildAssignment({ userId: 'user_1', role: 'PRIMARY' }),

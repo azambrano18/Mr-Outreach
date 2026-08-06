@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './create-test-app';
 import { createReadyExecutive, linkClientMailbox } from './fixtures';
+import { SimulatedMailboxMotorAdapter } from '../src/infrastructure/mailbox-motor/simulated/simulated-mailbox-motor-adapter';
 
 /**
  * Fase "Control operativo de Gestiones" (e2e) — pause/resume/stop/restart
@@ -143,6 +144,58 @@ describe('Sequence Execution operational control (e2e) — memory + simulated mo
     return request(app.getHttpServer())
       .get(`/admin/sequence-executions/${executionId}`)
       .set('Authorization', `Bearer ${adminToken}`);
+  }
+
+  /**
+   * §4/§7 — real staging case: the motor accepted the Gestión (status
+   * ACCEPTED, serverStatus QUEUED after a refresh) but it never advanced
+   * to RUNNING. Deliberately never emits EXECUTION_PROCESSING, unlike
+   * buildRunningExecution above.
+   */
+  async function buildAcceptedExecution(
+    suffix: string,
+    prospectCount = 13,
+  ): Promise<{ executionId: string; serverExecutionId: string; mailboxId: string; serverMailboxId: string }> {
+    const { mailboxId, serverMailboxId } = await linkClientMailbox(app, adminToken, adminUserId, {
+      email: `ventas.accepted.${suffix}@example.test`,
+      domainName: `accepted-${suffix}.test`,
+    });
+    const templateId = await createTemplate(mailboxId, `Plantilla Aceptada ${suffix}`);
+    await fillValidTemplate(templateId);
+    await publishTemplate(templateId, `e2e-accepted-publish-${suffix}`);
+
+    const createExec = await request(app.getHttpServer())
+      .post('/me/sequence-executions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ mailboxId, templateId });
+    expect(createExec.status).toBe(201);
+    const executionId = createExec.body.id as string;
+
+    const rows = Array.from({ length: prospectCount }, (_, i) => `persona${i}.${suffix}@empresa.test,Persona ${i},Empresa Aceptada`);
+    const csv = 'Correo,Nombre,Empresa\n' + rows.join('\n') + '\n';
+    const upload = await request(app.getHttpServer())
+      .post(`/me/sequence-executions/${executionId}/import`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('file', Buffer.from(csv, 'utf-8'), 'contactos.csv');
+    expect(upload.status).toBe(201);
+
+    const mapping = await request(app.getHttpServer())
+      .post(`/me/sequence-executions/${executionId}/mapping`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'Correo', contactName: 'Nombre', companyName: 'Empresa', customVariables: {} });
+    expect(mapping.status).toBe(201);
+
+    const start = await request(app.getHttpServer())
+      .post(`/me/sequence-executions/${executionId}/start`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', `e2e-accepted-start-${suffix}`)
+      .send({});
+    expect(start.status).toBe(201);
+    expect(start.body.status).toBe('ACCEPTED');
+    const serverExecutionId = start.body.serverExecutionId as string;
+    expect(serverExecutionId).toBeTruthy();
+
+    return { executionId, serverExecutionId, mailboxId, serverMailboxId };
   }
 
   // ---------------------------------------------------------------------
@@ -349,6 +402,137 @@ describe('Sequence Execution operational control (e2e) — memory + simulated mo
         .set('Idempotency-Key', `e2e-completed-stop-${stamp}`)
         .send({ reason: 'Motivo válido.' });
       expect(stop.status).toBe(409);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Detener antes de iniciar (ACCEPTED/QUEUED — caso real de staging)
+  // ---------------------------------------------------------------------
+
+  describe('Detener una Gestión ACCEPTED (aceptada por el motor, aún no iniciada)', () => {
+    it('a plain EXECUTIVE gets 403 on stop even while ACCEPTED', async () => {
+      const { executionId } = await buildAcceptedExecution(`${stamp}-accepted-authz`);
+      const stop = await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executionId}/stop`)
+        .set('Authorization', `Bearer ${executiveToken}`)
+        .set('Idempotency-Key', `e2e-accepted-authz-${stamp}`)
+        .send({ reason: 'Motivo válido.' });
+      expect(stop.status).toBe(403);
+
+      const detail = await getAdminDetail(executionId);
+      expect(detail.body.status).toBe('ACCEPTED');
+    });
+
+    it('ADMIN stops it: STOPPED, sentCount/pendingCount zeroed, no email sent, and sequence_execution.stopped is audited with stoppedBeforeStart', async () => {
+      const { executionId } = await buildAcceptedExecution(`${stamp}-accepted-ok`, 13);
+
+      // Matches the real staging report: an admin refreshed status once, seeing serverStatus QUEUED, before the fix let anyone stop it.
+      const refresh = await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executionId}/refresh-status`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(refresh.status).toBe(201);
+      expect(refresh.body.status).toBe('ACCEPTED');
+      expect(refresh.body.serverStatus).toBe('QUEUED');
+
+      const stop = await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executionId}/stop`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-accepted-ok-${stamp}`)
+        .send({ reason: 'Detenida antes de iniciar — prueba e2e.' });
+      expect(stop.status).toBe(201);
+      expect(stop.body.status).toBe('STOPPED');
+      expect(stop.body.sentCount).toBe(0);
+      expect(stop.body.pendingCount).toBe(0);
+
+      const detail = await getAdminDetail(executionId);
+      expect(detail.body.status).toBe('STOPPED');
+      // The 13 accepted prospects are conserved — never rewritten by the stop.
+      expect(detail.body.acceptedProspects).toBe(13);
+
+      const auditResponse = await request(app.getHttpServer())
+        .get(`/users/${adminUserId}/audit-log`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      const entry = auditResponse.body.find(
+        (e: { action: string; entityId: string }) => e.action === 'sequence_execution.stopped' && e.entityId === executionId,
+      );
+      expect(entry).toBeTruthy();
+      expect(entry.metadata).toEqual(
+        expect.objectContaining({
+          stoppedBeforeStart: true,
+          sentCount: 0,
+          cancelledPendingContacts: 13,
+          cancelledJobs: 13,
+          previousServerStatus: 'QUEUED',
+        }),
+      );
+    });
+
+    it('a double-click with the SAME Idempotency-Key never duplicates the stop command', async () => {
+      const { executionId } = await buildAcceptedExecution(`${stamp}-accepted-dup`);
+      const key = `e2e-accepted-dup-${stamp}`;
+
+      const [first, second] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/admin/sequence-executions/${executionId}/stop`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .set('Idempotency-Key', key)
+          .send({ reason: 'Motivo válido.' }),
+        request(app.getHttpServer())
+          .post(`/admin/sequence-executions/${executionId}/stop`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .set('Idempotency-Key', key)
+          .send({ reason: 'Motivo válido.' }),
+      ]);
+      expect([first.status, second.status]).toEqual([201, 201]);
+      expect(first.body.status).toBe('STOPPED');
+      expect(second.body.status).toBe('STOPPED');
+
+      const auditResponse = await request(app.getHttpServer())
+        .get(`/users/${adminUserId}/audit-log`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      const stopEntries = auditResponse.body.filter(
+        (e: { action: string; entityId: string }) => e.action === 'sequence_execution.stopped' && e.entityId === executionId,
+      );
+      expect(stopEntries).toHaveLength(1);
+    });
+
+    it('an ACCEPTED Gestión blocks deleting its mailbox; stopping it unblocks deletion', async () => {
+      const { executionId, mailboxId, serverMailboxId } = await buildAcceptedExecution(`${stamp}-accepted-delete`);
+
+      // Unlinking is allowed while merely ACCEPTED (narrower rule than delete's) — reach REVOKED so only the Gestión check remains.
+      const mailboxMotor = app.get(SimulatedMailboxMotorAdapter);
+      mailboxMotor.setUnlinkOutcome(serverMailboxId, 'SUCCESS');
+      const unlink = await request(app.getHttpServer())
+        .post(`/mailboxes/${mailboxId}/unlink`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-accepted-delete-unlink-${stamp}`)
+        .send({ reason: 'Cuenta dada de baja — prueba e2e', removeAssignmentsAfterUnlink: true });
+      expect(unlink.status).toBe(201);
+      expect(unlink.body.linkStatus).toBe('REVOKED');
+
+      const blockedDelete = await request(app.getHttpServer())
+        .delete(`/mailboxes/${mailboxId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(blockedDelete.status).toBe(409);
+      expect(blockedDelete.body.message).toMatch(/gesti[oó]n/i);
+
+      const stop = await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executionId}/stop`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-accepted-delete-stop-${stamp}`)
+        .send({ reason: 'Detenida para permitir eliminar la cuenta.' });
+      expect(stop.status).toBe(201);
+      expect(stop.body.status).toBe('STOPPED');
+
+      const allowedDelete = await request(app.getHttpServer())
+        .delete(`/mailboxes/${mailboxId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(allowedDelete.status).toBe(204);
+
+      // The stopped Gestión itself is never deleted — it remains as history in the Monitor.
+      const detail = await getAdminDetail(executionId);
+      expect(detail.status).toBe(200);
+      expect(detail.body.status).toBe('STOPPED');
     });
   });
 

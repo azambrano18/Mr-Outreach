@@ -226,10 +226,13 @@ export function SequenceExecutionDetail({
 
   const [controlPending, setControlPending] = useState<'pause' | 'resume' | 'stop' | 'restart' | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
+  const [controlSuccess, setControlSuccess] = useState<string | null>(null);
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [showResumeModal, setShowResumeModal] = useState(false);
   const [showStopModal, setShowStopModal] = useState(false);
   const [stopReason, setStopReason] = useState('');
+  /** §4/§6 — a Gestión the motor accepted but has not yet started dispatching (ACCEPTED/serverStatus QUEUED) can also be stopped; the modal copy and info block differ from stopping a RUNNING/PAUSED one. */
+  const stoppingBeforeStart = execution.status === 'ACCEPTED';
   const [showRestartModal, setShowRestartModal] = useState(false);
   const [restartPreview, setRestartPreview] = useState<RestartEligibility | null>(null);
   const [restartPreviewError, setRestartPreviewError] = useState<string | null>(null);
@@ -245,6 +248,7 @@ export function SequenceExecutionDetail({
 
   async function runControlAction(action: 'pause' | 'resume' | 'stop', body: Record<string, string> = {}): Promise<void> {
     setControlError(null);
+    setControlSuccess(null);
     setControlPending(action);
     try {
       const idempotencyKey =
@@ -266,6 +270,7 @@ export function SequenceExecutionDetail({
       setShowResumeModal(false);
       setShowStopModal(false);
       setStopReason('');
+      if (action === 'stop') setControlSuccess('Gestión detenida correctamente.');
       router.refresh();
     } catch {
       setControlError('No se pudo contactar la API.');
@@ -437,6 +442,7 @@ export function SequenceExecutionDetail({
           <h2 className="text-sm font-medium text-slate-700">Control operativo de la gestión</h2>
 
           {controlError && <p className="text-sm text-red-600">{controlError}</p>}
+          {controlSuccess && <p className="text-sm text-emerald-700">{controlSuccess}</p>}
 
           {isTransitionalControlState && (
             <p className="flex items-center gap-2 text-sm text-amber-700">
@@ -466,14 +472,14 @@ export function SequenceExecutionDetail({
                 {controlPending === 'resume' ? 'Reanudando…' : 'Reanudar'}
               </button>
             )}
-            {(execution.status === 'RUNNING' || execution.status === 'PAUSED') && canStop && (
+            {(execution.status === 'RUNNING' || execution.status === 'PAUSED' || execution.status === 'ACCEPTED') && canStop && (
               <button
                 type="button"
                 onClick={() => setShowStopModal(true)}
                 disabled={controlPending !== null}
                 className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
-                {controlPending === 'stop' ? 'Deteniendo…' : 'Detener'}
+                {controlPending === 'stop' ? 'Deteniendo…' : 'Detener gestión'}
               </button>
             )}
             {execution.status === 'STOPPED' && canRestart && (
@@ -488,6 +494,7 @@ export function SequenceExecutionDetail({
             )}
             {execution.status !== 'RUNNING' &&
               execution.status !== 'PAUSED' &&
+              execution.status !== 'ACCEPTED' &&
               execution.status !== 'STOPPED' &&
               !isTransitionalControlState && <p className="text-sm text-slate-500">No hay acciones disponibles para el estado actual.</p>}
           </div>
@@ -562,10 +569,44 @@ export function SequenceExecutionDetail({
         <div className="flex flex-col gap-3">
           <h3 className="text-sm font-semibold text-slate-900">Detener gestión</h3>
           <p className="rounded-md bg-red-50 p-2 text-xs text-red-800">
-            Esta acción cancela permanentemente los envíos futuros de esta gestión. Todo lo ya enviado, el historial y
-            la auditoría se conservan. No es reversible con &quot;Reanudar&quot; — solo se podrá reiniciar como una
-            gestión nueva, que excluirá a los contactos que ya recibieron algún envío.
+            {stoppingBeforeStart
+              ? 'Esta Gestión fue aceptada por el servidor y se encuentra en cola, pero todavía no ha comenzado. Al detenerla se cancelarán todos los envíos pendientes. No se ha enviado ningún correo.'
+              : 'Esta acción cancela permanentemente los envíos futuros de esta gestión. Todo lo ya enviado, el historial y la auditoría se conservan. No es reversible con "Reanudar" — solo se podrá reiniciar como una gestión nueva, que excluirá a los contactos que ya recibieron algún envío.'}
           </p>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md bg-slate-50 p-3 text-xs">
+            <div>
+              <dt className="text-slate-500">Gestión</dt>
+              <dd className="font-medium text-slate-800">{execution.name ?? '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Cuenta</dt>
+              <dd className="font-medium text-slate-800">{execution.mailboxEmail}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Estado local</dt>
+              <dd className="font-medium text-slate-800">{STATUS_LABELS[execution.status] ?? execution.status}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Estado del servidor</dt>
+              <dd className="font-medium text-slate-800">{execution.serverStatus ?? '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Prospectos aceptados</dt>
+              <dd className="font-medium text-slate-800">{execution.acceptedProspects ?? '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Correos enviados</dt>
+              <dd className="font-medium text-slate-800">{execution.sentCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Prospectos pendientes</dt>
+              <dd className="font-medium text-slate-800">{execution.pendingCount ?? execution.acceptedProspects ?? '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Enviada al servidor</dt>
+              <dd className="font-medium text-slate-800">{formatDateTime(execution.requestedAt)}</dd>
+            </div>
+          </dl>
           <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
             Motivo (obligatorio, 3-300 caracteres)
             <textarea
@@ -595,7 +636,7 @@ export function SequenceExecutionDetail({
               disabled={controlPending !== null || stopReason.trim().length < 3 || stopReason.trim().length > 300}
               className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
             >
-              {controlPending === 'stop' ? 'Deteniendo…' : 'Confirmar detención'}
+              {controlPending === 'stop' ? 'Deteniendo…' : 'Detener Gestión'}
             </button>
           </div>
         </div>

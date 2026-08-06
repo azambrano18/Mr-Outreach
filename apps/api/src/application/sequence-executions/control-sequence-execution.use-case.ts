@@ -46,12 +46,21 @@ interface ControlTransition {
 
 /**
  * Fase "Control operativo de Gestiones" — RUNNING -> PAUSE_REQUESTED ->
- * PAUSED; PAUSED -> RESUME_REQUESTED -> RUNNING; {RUNNING,PAUSED} ->
- * STOP_REQUESTED -> STOPPED. Every other current status (including every
+ * PAUSED; PAUSED -> RESUME_REQUESTED -> RUNNING; {RUNNING,PAUSED,ACCEPTED}
+ * -> STOP_REQUESTED -> STOPPED. Every other current status (including every
  * *_REQUESTED transitional value for a DIFFERENT action, DRAFT, and every
  * terminal value) is rejected with 409 — this table is the single source
  * of truth other than the equally-authoritative
  * `conditionalUpdateStatusFromAllowed` claim in the DB itself.
+ *
+ * ACCEPTED (server-side QUEUED — see LOCAL_STATUS_FOR_SERVER_STATUS in
+ * refresh-execution-status.use-case.ts) was added to STOP.allowedFrom to
+ * close a real gap: a Gestión the motor already accepted but has not yet
+ * started dispatching had no way to be stopped, which also permanently
+ * blocked deleting its mailbox (ACCEPTED is non-terminal per
+ * NON_TERMINAL_EXECUTION_STATUSES in delete-mailbox.use-case.ts). There is
+ * deliberately no separate REQUESTED/QUEUED/STARTING local status — the
+ * project already represents "sent but not started" as ACCEPTED.
  */
 const CONTROL_TRANSITIONS: Record<ControlAction, ControlTransition> = {
   PAUSE: {
@@ -69,7 +78,7 @@ const CONTROL_TRANSITIONS: Record<ControlAction, ControlTransition> = {
     terminalEventType: 'EXECUTION_RESUMED',
   },
   STOP: {
-    allowedFrom: ['RUNNING', 'PAUSED'],
+    allowedFrom: ['RUNNING', 'PAUSED', 'ACCEPTED'],
     transitional: 'STOP_REQUESTED',
     terminal: 'STOPPED',
     acceptedEventType: 'EXECUTION_STOP_ACCEPTED',
@@ -139,14 +148,24 @@ export class ControlSequenceExecutionUseCase {
 
     // Only meaningful if the motor definitively rejects the command — see
     // the class-level note on this being a disclosed simplification for
-    // STOP specifically (allowedFrom has two members there), since once a
+    // STOP specifically (allowedFrom now has three members), since once a
     // retry is in flight the original pre-transitional status is no
-    // longer recoverable from the row alone.
-    const revertStatus: SequenceExecutionStatus = !isRetry
+    // longer recoverable from the row alone. `serverStatus` survives the
+    // transitional write untouched (only /refresh-status ever changes it),
+    // so 'QUEUED' reliably means the origin was ACCEPTED even on a retry;
+    // any other value falls back to the pre-existing RUNNING guess.
+    const originStatus: SequenceExecutionStatus = !isRetry
       ? (execution.status as SequenceExecutionStatus)
       : config.allowedFrom.length === 1
         ? config.allowedFrom[0]
-        : 'RUNNING';
+        : execution.serverStatus === 'QUEUED' && config.allowedFrom.includes('ACCEPTED')
+          ? 'ACCEPTED'
+          : 'RUNNING';
+    const revertStatus = originStatus;
+    // §4 — a Gestión stopped while still ACCEPTED never began dispatching:
+    // nothing was sent, so the terminal audit/metadata must say so plainly
+    // rather than leaving sentCount/pendingCount at their pre-start nulls.
+    const stoppedBeforeStart = input.action === 'STOP' && originStatus === 'ACCEPTED';
 
     const idempotencyKey =
       isRetry && execution.lastControlIdempotencyKey ? execution.lastControlIdempotencyKey : input.idempotencyKey;
@@ -240,6 +259,12 @@ export class ControlSequenceExecutionUseCase {
             ctx,
           );
           if (claimed === 0) return false;
+          // §4/§5 — cancelledPendingContacts/cancelledJobs are the same
+          // count in this architecture: a Gestión has no separate per-job
+          // queue table, only the aggregate acceptedProspects counter (see
+          // sequence-execution.entity.ts) — the server-side queue entry is
+          // what the STOP command itself cancels, above.
+          const cancelledCount = stoppedBeforeStart ? (execution.acceptedProspects ?? 0) : null;
           await this.executions.update(
             execution.id,
             {
@@ -247,6 +272,7 @@ export class ControlSequenceExecutionUseCase {
               ...(input.action === 'PAUSE' ? { pausedAt: new Date() } : {}),
               ...(input.action === 'RESUME' ? { resumedAt: new Date() } : {}),
               ...(input.action === 'STOP' ? { stoppedAt: new Date() } : {}),
+              ...(stoppedBeforeStart ? { sentCount: 0, pendingCount: 0 } : {}),
             },
             ctx,
           );
@@ -264,6 +290,17 @@ export class ControlSequenceExecutionUseCase {
                 correlationId,
                 commandId,
                 ...(reason !== null ? { reason } : {}),
+                ...(input.action === 'STOP'
+                  ? {
+                      mailboxId: execution.mailboxId,
+                      previousServerStatus: execution.serverStatus,
+                      acceptedProspects: execution.acceptedProspects,
+                      stoppedBeforeStart,
+                      ...(stoppedBeforeStart
+                        ? { sentCount: 0, cancelledPendingContacts: cancelledCount, cancelledJobs: cancelledCount }
+                        : {}),
+                    }
+                  : {}),
               },
             },
             ctx,
@@ -278,7 +315,23 @@ export class ControlSequenceExecutionUseCase {
           // rows, visible in Monitor de integración, and re-projectable —
           // never a shortcut that skips MotorEventProjector. A failure
           // here never undoes the already-committed status transition.
-          await this.emitControlEvents(input.organizationId, execution.id, commandId, correlationId, config, reason);
+          await this.emitControlEvents(
+            input.organizationId,
+            execution.id,
+            commandId,
+            correlationId,
+            config,
+            reason,
+            stoppedBeforeStart
+              ? {
+                  stoppedBeforeStart: true,
+                  sentCount: 0,
+                  cancelledPendingContacts: execution.acceptedProspects ?? 0,
+                  cancelledJobs: execution.acceptedProspects ?? 0,
+                  previousServerStatus: execution.serverStatus,
+                }
+              : {},
+          );
         }
 
         return this.executionsService.getAny(input.organizationId, execution.id);
@@ -345,6 +398,7 @@ export class ControlSequenceExecutionUseCase {
     correlationId: string,
     config: ControlTransition,
     reason: string | null,
+    terminalExtraPayload: Record<string, unknown> = {},
   ): Promise<void> {
     try {
       await this.processEvent.execute({
@@ -358,7 +412,9 @@ export class ControlSequenceExecutionUseCase {
           commandId,
           correlationId,
           config.terminalEventType,
-          config.terminalEventType === 'EXECUTION_STOPPED' ? { reason: reason ?? '' } : {},
+          config.terminalEventType === 'EXECUTION_STOPPED'
+            ? { reason: reason ?? '', ...terminalExtraPayload }
+            : {},
         ),
         origin: 'SIMULATED',
       });

@@ -231,7 +231,7 @@ export const PERMISSION_CATALOG: Permission[] = [
   { key: 'sequence_executions.refresh_status_all', description: "Admin: query the motor for any executive's Gestión status." },
   { key: 'sequence_executions.pause_all', description: 'Admin: pause any RUNNING Gestión in the organization — blocks new dispatch, in-flight sends still complete.' },
   { key: 'sequence_executions.resume_all', description: 'Admin: resume any PAUSED Gestión in the organization.' },
-  { key: 'sequence_executions.stop_all', description: 'Admin: permanently stop any RUNNING/PAUSED Gestión — cancels future jobs, not reversible via resume.' },
+  { key: 'sequence_executions.stop_all', description: 'Admin: permanently stop any RUNNING/PAUSED/ACCEPTED (accepted-but-not-started) Gestión — cancels future jobs, not reversible via resume.' },
   { key: 'sequence_executions.restart_all', description: 'Admin: create a new execution attempt from a STOPPED Gestión, including only contacts never previously emailed.' },
 
   // Dev-only tool — never reachable when SEQUENCE_MOTOR_MODE=http or in production (see DevSimulatedExecutionsController).

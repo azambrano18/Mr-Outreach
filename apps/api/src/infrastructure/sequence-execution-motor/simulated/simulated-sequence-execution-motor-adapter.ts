@@ -228,6 +228,26 @@ export class SimulatedSequenceExecutionMotorAdapter implements SequenceExecution
   }
 
   async stopExecution(input: ExecutionControlCommandInput): Promise<ExecutionControlCommandResult> {
+    // §7 reconciliation — this in-memory registry can lose a record across
+    // a process restart even though the local SequenceExecution row still
+    // (correctly) shows ACCEPTED/serverStatus QUEUED. The caller only ever
+    // passes a `serverExecutionId` that was genuinely returned by a prior
+    // startExecution() (Mr Outreach never invents one), so an unknown id
+    // here means "the simulator forgot", not "this was never accepted" —
+    // safe to reconstruct the minimal QUEUED/ACTIVE record needed to
+    // accept the STOP. Only STOP self-heals this way: pause/resume still
+    // correctly reject an unknown execution, since assuming a live
+    // active/paused state to satisfy them would not be safe.
+    if (!this.registry.has(input.serverExecutionId) && !this.controlByIdempotencyKey.has(input.idempotencyKey)) {
+      this.registry.set(input.serverExecutionId, {
+        serverExecutionId: input.serverExecutionId,
+        status: 'QUEUED',
+        receivedProspects: 0,
+        estimatedStartAt: null,
+        startedAt: null,
+        controlState: 'ACTIVE',
+      });
+    }
     return this.runControlCommand(input, (record) => {
       record.controlState = 'STOPPED';
     });

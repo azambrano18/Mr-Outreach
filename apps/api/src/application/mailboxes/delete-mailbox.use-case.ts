@@ -35,6 +35,7 @@ const NON_TERMINAL_EXECUTION_STATUSES: SequenceExecutionStatus[] = [
   'PAUSED',
   'RESUME_REQUESTED',
   'STOP_REQUESTED',
+  'RESTART_REQUESTED',
 ];
 
 /**

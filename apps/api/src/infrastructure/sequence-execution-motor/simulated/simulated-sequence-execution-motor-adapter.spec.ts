@@ -184,6 +184,23 @@ describe('SimulatedSequenceExecutionMotorAdapter — §13 contrato simplificado'
       expect(result.rejectionReason).toBe('Cuenta de ejecución desconocida para el motor.');
     });
 
+    it('resume against an unknown serverExecutionId is rejected, never self-heals (unlike stop)', async () => {
+      const result = await adapter.resumeExecution({ idempotencyKey: 'unknown_resume', correlationId: 'c1', localExecutionId: 'run_1', serverExecutionId: 'exec_missing_2' });
+      expect(result.accepted).toBe(false);
+      expect(result.rejectionReason).toBe('Cuenta de ejecución desconocida para el motor.');
+    });
+
+    it('§7 reconciliation: stop against a serverExecutionId the in-memory registry lost (e.g. process restart) self-heals instead of rejecting', async () => {
+      const result = await adapter.stopExecution({
+        idempotencyKey: 'reconcile_1',
+        correlationId: 'c1',
+        localExecutionId: 'run_1',
+        serverExecutionId: 'exec_lost_after_restart',
+      });
+      expect(result.accepted).toBe(true);
+      expect(adapter.canDispatchNewEmail('exec_lost_after_restart')).toBe(false);
+    });
+
     it('scenario: motor unavailable (timeout) on a control command — throws instead of returning a business result', async () => {
       const serverExecutionId = await startedExecution();
       adapter.setMotorUnavailable(true);

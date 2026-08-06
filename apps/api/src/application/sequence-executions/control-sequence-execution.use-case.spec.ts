@@ -255,6 +255,91 @@ describe('ControlSequenceExecutionUseCase — Fase "Control operativo de Gestion
       executions.findById.mockResolvedValue(buildExecution({ status: 'DRAFT' }));
       await expect(useCase.execute(baseInput({ action: 'STOP', reason: 'motivo válido' }))).rejects.toThrow(ConflictException);
     });
+
+    describe('stopping an ACCEPTED Gestión (accepted by the server, not yet started — real staging case)', () => {
+      function buildAcceptedExecution(overrides: Partial<SequenceExecution> = {}): SequenceExecution {
+        return buildExecution({
+          status: 'ACCEPTED',
+          serverStatus: 'QUEUED',
+          sentCount: null,
+          pendingCount: null,
+          failedCount: null,
+          startedAt: null,
+          acceptedProspects: 13,
+          ...overrides,
+        });
+      }
+
+      it('claims ACCEPTED -> STOP_REQUESTED -> STOPPED and calls the motor', async () => {
+        executions.findById.mockResolvedValue(buildAcceptedExecution());
+        await useCase.execute(baseInput({ action: 'STOP', reason: 'Detenida antes de iniciar.' }));
+        expect(executions.conditionalUpdateStatusFromAllowed).toHaveBeenNthCalledWith(1, executionId, ['RUNNING', 'PAUSED', 'ACCEPTED'], 'STOP_REQUESTED', expect.anything());
+        expect(motor.stopExecution).toHaveBeenCalledWith(expect.objectContaining({ serverExecutionId: 'srv_exec_1' }));
+        expect(executions.conditionalUpdateStatusFromAllowed).toHaveBeenNthCalledWith(2, executionId, ['STOP_REQUESTED'], 'STOPPED', expect.anything());
+      });
+
+      it('marks stoppedBeforeStart, zeroes sentCount/pendingCount, and records the cancelled-prospect count in the audit', async () => {
+        executions.findById.mockResolvedValue(buildAcceptedExecution());
+        await useCase.execute(baseInput({ action: 'STOP', reason: 'Detenida antes de iniciar.' }));
+
+        expect(executions.update).toHaveBeenCalledWith(
+          executionId,
+          expect.objectContaining({ sentCount: 0, pendingCount: 0 }),
+          expect.anything(),
+        );
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'sequence_execution.stopped',
+            metadata: expect.objectContaining({
+              stoppedBeforeStart: true,
+              sentCount: 0,
+              cancelledPendingContacts: 13,
+              cancelledJobs: 13,
+              previousServerStatus: 'QUEUED',
+              mailboxId: 'mailbox_1',
+            }),
+          }),
+          expect.anything(),
+        );
+      });
+
+      it('never marks stoppedBeforeStart when stopping a RUNNING execution', async () => {
+        await useCase.execute(baseInput({ action: 'STOP', reason: 'El cliente pidió detener la campaña.' }));
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'sequence_execution.stopped', metadata: expect.objectContaining({ stoppedBeforeStart: false }) }),
+          expect.anything(),
+        );
+        expect(executions.update).not.toHaveBeenCalledWith(executionId, expect.objectContaining({ sentCount: 0 }), expect.anything());
+      });
+
+      it('sends no email and never advances currentStepNumber when stopped before start', async () => {
+        executions.findById.mockResolvedValue(buildAcceptedExecution());
+        await useCase.execute(baseInput({ action: 'STOP', reason: 'Detenida antes de iniciar.' }));
+        for (const call of executions.update.mock.calls) {
+          expect(call[1]).not.toHaveProperty('currentStepNumber');
+        }
+      });
+
+      it('when the motor rejects the stop, reverts to ACCEPTED (not RUNNING) using serverStatus QUEUED as the signal', async () => {
+        executions.findById.mockResolvedValue(buildAcceptedExecution());
+        motor.stopExecution.mockResolvedValue({ accepted: false, status: 'REJECTED', rejectionReason: 'Cuenta de ejecución desconocida para el motor.', acknowledgedAt: null });
+        await expect(useCase.execute(baseInput({ action: 'STOP', reason: 'Detenida antes de iniciar.' }))).rejects.toThrow(ConflictException);
+        expect(executions.update).toHaveBeenCalledWith(executionId, expect.objectContaining({ status: 'ACCEPTED' }), expect.anything());
+      });
+
+      it('emits EXECUTION_STOPPED with stoppedBeforeStart in the event payload', async () => {
+        executions.findById.mockResolvedValue(buildAcceptedExecution());
+        await useCase.execute(baseInput({ action: 'STOP', reason: 'Detenida antes de iniciar.' }));
+        expect(processEvent.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            envelope: expect.objectContaining({
+              eventType: 'EXECUTION_STOPPED',
+              payload: expect.objectContaining({ stoppedBeforeStart: true, cancelledPendingContacts: 13 }),
+            }),
+          }),
+        );
+      });
+    });
   });
 
   describe('cross-cutting', () => {
@@ -270,6 +355,19 @@ describe('ControlSequenceExecutionUseCase — Fase "Control operativo de Gestion
         await expect(useCase.execute(baseInput({ action: 'RESUME' }))).rejects.toThrow(ConflictException);
         await expect(useCase.execute(baseInput({ action: 'STOP', reason: 'motivo válido' }))).rejects.toThrow(ConflictException);
       }
+    });
+
+    it('STOPPED rejects a fresh STOP (different idempotencyKey) with a 409 instead of silently re-running it', async () => {
+      executions.findById.mockResolvedValue(buildExecution({ status: 'STOPPED', lastControlIdempotencyKey: 'some_other_key' }));
+      await expect(useCase.execute(baseInput({ action: 'STOP', reason: 'motivo válido', idempotencyKey: 'idem_1' }))).rejects.toThrow(ConflictException);
+      expect(motor.stopExecution).not.toHaveBeenCalled();
+    });
+
+    it('a double-click race on the STOP terminal claim only lets the winner write the audit entry and emit events', async () => {
+      executions.conditionalUpdateStatusFromAllowed.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+      await useCase.execute(baseInput({ action: 'STOP', reason: 'motivo válido' }));
+      expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'sequence_execution.stopped' }), expect.anything());
+      expect(processEvent.execute).not.toHaveBeenCalled();
     });
   });
 });
