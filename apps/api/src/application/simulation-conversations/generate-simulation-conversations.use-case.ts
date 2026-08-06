@@ -27,11 +27,15 @@ import {
 } from '../../infrastructure/persistence/tokens';
 import { SimulationConversationsService } from './simulation-conversations.service';
 import { GenerateSimulationConversationsInput, SimulationBatchSummary } from './simulation-conversations.types';
-import { OUTBOUND_BODY, OUTBOUND_SUBJECT, QA_CLIENT_NAME, QA_COMPANY_NAME, SCENARIOS } from './simulation-scenarios';
+import { OUTBOUND_BODY, OUTBOUND_SUBJECT, QA_COMPANY_NAME, SCENARIOS } from './simulation-scenarios';
 
 const NOT_ELIGIBLE_MESSAGE = 'Debes vincular una cuenta de correo de prueba antes de generar las conversaciones.';
 const ALREADY_ACTIVE_MESSAGE =
   'Ya existe un lote de conversaciones de prueba activo para esta organización. Elimínalo antes de generar uno nuevo.';
+const INCOMPLETE_HIERARCHY_MESSAGE =
+  'La cuenta de correo seleccionada no tiene un cliente y un dominio asociados — no es posible generar conversaciones de prueba con una jerarquía incompleta.';
+const INVALID_CLIENT_MESSAGE =
+  'El cliente asociado a la cuenta de correo seleccionada no es válido o no está activo.';
 
 /**
  * "Conversaciones de prueba" (QA) — creates the 4 fixed scenario
@@ -88,6 +92,21 @@ export class GenerateSimulationConversationsUseCase {
       throw new BadRequestException(NOT_ELIGIBLE_MESSAGE);
     }
 
+    // §1 — every synthetic row created below must hang off the SAME real
+    // client/domain/mailbox chain as the Mailbox itself. A Mailbox with no
+    // clientId/domainId has no coherent hierarchy to attach a Conversation
+    // to, and generating one anyway is exactly what previously produced a
+    // Conversation.clientId that pointed at a different ManagedClient than
+    // Mailbox.clientId (the reserved QA client) — invisible to any query
+    // that filters by clientId/domainId/mailboxId together.
+    if (!mailbox.clientId || !mailbox.domainId) {
+      throw new BadRequestException(INCOMPLETE_HIERARCHY_MESSAGE);
+    }
+    const client = await this.managedClients.findById(mailbox.clientId);
+    if (!client || client.organizationId !== input.organizationId || client.status !== 'ACTIVE') {
+      throw new BadRequestException(INVALID_CLIENT_MESSAGE);
+    }
+
     // The batch row is created FIRST — its mere existence is both the
     // idempotency ledger and the "is a batch already active" guard, so a
     // process crash mid-generation never leaves a second batch silently
@@ -99,7 +118,6 @@ export class GenerateSimulationConversationsUseCase {
       idempotencyKey: input.idempotencyKey,
     });
 
-    const client = await this.findOrCreateQaManagedClient(input.organizationId, input.actorId);
     const company = await this.companies.create({
       organizationId: input.organizationId,
       clientId: client.id,
@@ -227,18 +245,5 @@ export class GenerateSimulationConversationsUseCase {
     });
 
     return this.simulationConversationsService.toBatchSummary(batch);
-  }
-
-  /** Reused across generations (never appears in DeleteSimulationConversationsUseCase's deletion list — see task §14) so the org never accumulates one orphaned ManagedClient per batch cycle. */
-  private async findOrCreateQaManagedClient(organizationId: string, actorId: string) {
-    const existing = (await this.managedClients.findAll(organizationId)).find((c) => c.name === QA_CLIENT_NAME);
-    if (existing) return existing;
-    return this.managedClients.create({
-      organizationId,
-      source: 'MANUAL',
-      name: QA_CLIENT_NAME,
-      notes: 'Cliente sintético reservado para "Conversaciones de prueba" (simulación) — nunca representa un cliente real.',
-      createdBy: actorId,
-    });
   }
 }

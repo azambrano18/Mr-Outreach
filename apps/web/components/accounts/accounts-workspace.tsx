@@ -146,6 +146,7 @@ export function AccountsWorkspace({
   const [treeState, setTreeState] = useState<ConversationTreeClientNode[]>(tree);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection.conversationId);
   const [detail, setDetail] = useState<ConversationDetail | null>(initialDetail);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -209,9 +210,11 @@ export function AccountsWorkspace({
   async function refreshList(nextSelection: TreeSelection | null): Promise<void> {
     if (nextSelection?.level !== 'mailbox') {
       setConversations([]);
+      setListError(null);
       return;
     }
     setLoadingList(true);
+    setListError(null);
     try {
       const filter = selectionToFilter(nextSelection);
       const params = new URLSearchParams();
@@ -229,9 +232,15 @@ export function AccountsWorkspace({
         if (dateToFilter) params.set('dateTo', new Date(dateToFilter).toISOString());
       }
       const response = await fetch(`${basePath}?${params.toString()}`);
-      if (response.ok) {
-        setConversations(await response.json());
+      if (!response.ok) {
+        setConversations([]);
+        setListError('No se pudieron cargar las conversaciones.');
+        return;
       }
+      setConversations(await response.json());
+    } catch {
+      setConversations([]);
+      setListError('No se pudieron cargar las conversaciones.');
     } finally {
       setLoadingList(false);
     }
@@ -517,7 +526,10 @@ export function AccountsWorkspace({
             </select>
           </label>
         </div>
-        {conversations.length === 0 && !loadingList && (
+        {listError && !loadingList && (
+          <p className="px-4 py-6 text-center text-sm text-red-600">{listError}</p>
+        )}
+        {!listError && conversations.length === 0 && !loadingList && (
           <p className="px-4 py-6 text-center text-sm text-slate-500">
             {!selection
               ? 'Selecciona un cliente, dominio o cuenta de correo.'

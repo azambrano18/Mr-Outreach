@@ -264,10 +264,15 @@ export class ConversationsService {
   ): Promise<ConversationSummary[]> {
     const assignedClientIds = await this.assignedClientIdSet(userId);
     const assignedMailboxIds = await this.assignedMailboxIdSet(userId);
-    if (filter.clientId && !assignedClientIds.has(filter.clientId)) {
-      return [];
-    }
-
+    // Deliberately no early "filter.clientId not in assignedClientIds -> []"
+    // rejection here: a ClientExecutiveAssignment is only ONE of the three
+    // authorized visibility mechanisms (see this method's own doc comment
+    // above) — a user with only a MailboxAssignment on a mailbox never has
+    // the mailbox's clientId in assignedClientIds, so that check used to
+    // wrongly reject every request that legitimately passed clientId (e.g.
+    // the account-tree UI, which always sends clientId/domainId/mailboxId
+    // together for a selected mailbox). The row-level `visible` filter below
+    // is the real, final security boundary and already covers this case.
     const allMailboxes = await this.mailboxes.findAll(organizationId);
     const mailboxIdsInScope = allMailboxes
       .filter(

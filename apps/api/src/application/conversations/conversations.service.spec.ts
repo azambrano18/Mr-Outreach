@@ -174,6 +174,71 @@ describe('ConversationsService — §2 mailbox-assignment-based visibility (admi
       // The underlying rows were never touched — findAll (the repository read) still returns them.
       expect(conversations.findAll).toHaveBeenCalled();
     });
+
+    /**
+     * Regression for the "Conversaciones de prueba" bug: a user with ONLY a
+     * MailboxAssignment (no ClientExecutiveAssignment) has an empty
+     * assignedClientIds set. AccountsWorkspace (the account-tree UI) always
+     * sends clientId+domainId+mailboxId together for a selected mailbox — a
+     * removed early "filter.clientId not in assignedClientIds -> []" check
+     * used to reject this exact, legitimate request before it ever reached
+     * the row-level visibility filter below.
+     */
+    it('a user with only a MailboxAssignment sees the conversation when the request carries clientId+domainId+mailboxId together', async () => {
+      conversations.findAll.mockResolvedValue([conversationOn('mailbox_1')]);
+      const result = await service.listForExecutive(
+        orgId,
+        userId,
+        { clientId: 'client_1', domainId: 'domain_1', mailboxId: 'mailbox_1' },
+        userId,
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0].mailboxId).toBe('mailbox_1');
+    });
+
+    it('a sibling account under the same client, not individually assigned, stays invisible even with an explicit clientId+domainId+mailboxId filter', async () => {
+      conversations.findAll.mockResolvedValue([conversationOn('mailbox_2')]);
+      const result = await service.listForExecutive(
+        orgId,
+        userId,
+        { clientId: 'client_1', domainId: 'domain_1', mailboxId: 'mailbox_2' },
+        userId,
+      );
+      expect(result).toHaveLength(0);
+    });
+
+    it('a manually manipulated clientId for a client the user has no access to never leaks that client\'s conversations, even with a matching mailboxId', async () => {
+      conversations.findAll.mockResolvedValue([
+        conversationOn('mailbox_stranger', { clientId: 'client_stranger', domainId: 'domain_stranger' }),
+      ]);
+      const result = await service.listForExecutive(
+        orgId,
+        userId,
+        { clientId: 'client_stranger', domainId: 'domain_stranger', mailboxId: 'mailbox_stranger' },
+        userId,
+      );
+      expect(result).toHaveLength(0);
+    });
+
+    it('isSimulation=true forwards the filter to the repository and returns only what it reports back as simulated', async () => {
+      conversations.findAll.mockImplementation(async (_orgId, filter) =>
+        filter?.isSimulation === true ? [conversationOn('mailbox_1', { isSimulation: true })] : [],
+      );
+      const result = await service.listForExecutive(orgId, userId, { isSimulation: true }, userId);
+      expect(conversations.findAll).toHaveBeenCalledWith(orgId, expect.objectContaining({ isSimulation: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].isSimulation).toBe(true);
+    });
+
+    it('isSimulation=false forwards the filter to the repository and returns only what it reports back as real', async () => {
+      conversations.findAll.mockImplementation(async (_orgId, filter) =>
+        filter?.isSimulation === false ? [conversationOn('mailbox_1', { isSimulation: false })] : [],
+      );
+      const result = await service.listForExecutive(orgId, userId, { isSimulation: false }, userId);
+      expect(conversations.findAll).toHaveBeenCalledWith(orgId, expect.objectContaining({ isSimulation: false }));
+      expect(result).toHaveLength(1);
+      expect(result[0].isSimulation).toBe(false);
+    });
   });
 
   describe('requireAccessibleConversation', () => {

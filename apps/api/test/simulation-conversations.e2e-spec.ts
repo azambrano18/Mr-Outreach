@@ -4,6 +4,11 @@ import { createTestApp } from './create-test-app';
 import { createReadyExecutive, linkClientMailbox } from './fixtures';
 import { AppConfigService } from '../src/infrastructure/config/app-config.service';
 
+interface ConversationSummaryLike {
+  id: string;
+  isUnread: boolean;
+}
+
 /**
  * "Conversaciones de prueba" (QA) — end-to-end proof that the 4 fixed
  * scenario conversations are real, persisted rows reachable through the
@@ -294,5 +299,83 @@ describe('Simulation conversations (e2e) — "Conversaciones de prueba" (QA), me
     const actionsAfterDelete = auditAfterDelete.body.map((entry: { action: string }) => entry.action);
     expect(actionsAfterDelete).toContain('simulation_conversations.create');
     expect(actionsAfterDelete).toContain('simulation_conversations.delete');
+  });
+
+  /**
+   * Regression for the "Conversaciones de prueba" bug: the notification bell
+   * (`?unread=true`, no clientId/domainId/mailboxId) and the account-tree
+   * listing (`clientId`+`domainId`+`mailboxId` together, the exact shape
+   * AccountsWorkspace sends) both resolve through the SAME
+   * `listForExecutive` method — proves they can never again disagree the way
+   * they did when Conversation.clientId pointed at a different ManagedClient
+   * than Mailbox.clientId (badges/bell found the rows by mailboxId alone;
+   * the account listing's combined filter found nothing).
+   */
+  it('the bell (?unread=true) and the account listing (clientId+domainId+mailboxId) agree on the same 4 conversations for a freshly generated batch, and stay consistent after one is read', async () => {
+    const { clientId, domainId, mailboxId } = await linkClientMailbox(app, adminToken, adminUserId, {
+      email: `ventas.qa.consistency.${stamp}@example.test`,
+      domainName: `qa-consistency-${stamp}.test`,
+    });
+
+    const generate = await request(app.getHttpServer())
+      .post('/admin/simulation-conversations/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', `e2e-qa-consistency-${stamp}`)
+      .send({ mailboxId });
+    expect(generate.status).toBe(201);
+    const batchId = generate.body.id as string;
+    const batchConversationIds = (generate.body.conversations as { id: string }[]).map((c) => c.id).sort();
+    expect(batchConversationIds).toHaveLength(4);
+
+    const accountList = await request(app.getHttpServer())
+      .get(`/me/conversations?clientId=${clientId}&domainId=${domainId}&mailboxId=${mailboxId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(accountList.status).toBe(200);
+    const accountIds = (accountList.body as ConversationSummaryLike[]).map((c) => c.id).sort();
+    expect(accountIds).toEqual(batchConversationIds);
+
+    const unreadBell = await request(app.getHttpServer())
+      .get('/me/conversations?unread=true')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(unreadBell.status).toBe(200);
+    const unreadIdsForThisBatch = (unreadBell.body as ConversationSummaryLike[])
+      .filter((c) => batchConversationIds.includes(c.id))
+      .map((c) => c.id)
+      .sort();
+    expect(unreadIdsForThisBatch).toEqual(batchConversationIds);
+
+    // Opening one conversation marks it read for this same admin.
+    const [firstId] = accountIds;
+    const opened = await request(app.getHttpServer())
+      .get(`/me/conversations/${firstId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(opened.status).toBe(200);
+
+    // The bell's unread filter drops to 3 for this batch...
+    const unreadAfterRead = await request(app.getHttpServer())
+      .get('/me/conversations?unread=true')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const unreadIdsAfterRead = (unreadAfterRead.body as ConversationSummaryLike[])
+      .filter((c) => batchConversationIds.includes(c.id))
+      .map((c) => c.id);
+    expect(unreadIdsAfterRead).not.toContain(firstId);
+    expect(unreadIdsAfterRead).toHaveLength(3);
+
+    // ...but the account listing still shows all 4 — the read one never
+    // disappears from the list, it only flips isUnread.
+    const accountListAfterRead = await request(app.getHttpServer())
+      .get(`/me/conversations?clientId=${clientId}&domainId=${domainId}&mailboxId=${mailboxId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect((accountListAfterRead.body as ConversationSummaryLike[]).map((c) => c.id).sort()).toEqual(
+      batchConversationIds,
+    );
+    const readOne = (accountListAfterRead.body as ConversationSummaryLike[]).find((c) => c.id === firstId);
+    expect(readOne?.isUnread).toBe(false);
+
+    // Cleanup — frees the org's "one active batch" slot.
+    const del = await request(app.getHttpServer())
+      .delete(`/admin/simulation-conversations/${batchId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(del.status).toBe(200);
   });
 });

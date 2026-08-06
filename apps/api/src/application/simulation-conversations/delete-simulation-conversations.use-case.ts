@@ -36,8 +36,11 @@ import { DeleteSimulationConversationsPreview, DeleteSimulationConversationsResu
  * Mailbox that was only ever referenced (never modified), every real
  * client/domain/user/organization/role/permission, and every real
  * Conversation (this use case never touches a row without
- * simulationBatchId === batch.id). The QA ManagedClient survives on
- * purpose — see GenerateSimulationConversationsUseCase's own comment.
+ * simulationBatchId === batch.id). The synthetic Company belongs to the
+ * REAL ManagedClient of the mailbox the batch was generated against (see
+ * GenerateSimulationConversationsUseCase) — this use case only ever deletes
+ * the Company row itself, identified via the batch's own Conversation rows,
+ * and never the ManagedClient it points to.
  */
 @Injectable()
 export class DeleteSimulationConversationsUseCase {

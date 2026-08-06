@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AuditLogRepository } from '../../domain/audit/audit-log.repository';
+import { ManagedClient } from '../../domain/client/managed-client.entity';
 import { ManagedClientRepository } from '../../domain/client/managed-client.repository';
 import { Company } from '../../domain/company/company.entity';
 import { CompanyRepository } from '../../domain/company/company.repository';
@@ -23,7 +24,7 @@ import { SimulationConversationsService } from './simulation-conversations.servi
 describe('GenerateSimulationConversationsUseCase — "Conversaciones de prueba" (QA)', () => {
   let mailboxes: jest.Mocked<Pick<MailboxRepository, 'findById'>>;
   let mailboxAssignments: jest.Mocked<Pick<MailboxAssignmentRepository, 'findByMailbox'>>;
-  let managedClients: jest.Mocked<Pick<ManagedClientRepository, 'findAll' | 'create'>>;
+  let managedClients: jest.Mocked<Pick<ManagedClientRepository, 'findById'>>;
   let companies: jest.Mocked<Pick<CompanyRepository, 'create'>>;
   let contacts: jest.Mocked<Pick<ContactRepository, 'create'>>;
   let sequences: jest.Mocked<Pick<SequenceRepository, 'create' | 'update'>>;
@@ -52,6 +53,8 @@ describe('GenerateSimulationConversationsUseCase — "Conversaciones de prueba" 
     timezone: 'America/Santiago',
   } as Mailbox;
 
+  const realClient = { id: 'client_1', organizationId: orgId, name: 'Empresa Real', status: 'ACTIVE' } as ManagedClient;
+
   function baseInput(overrides: Partial<Parameters<GenerateSimulationConversationsUseCase['execute']>[0]> = {}) {
     return { organizationId: orgId, actorId, mailboxId, idempotencyKey: 'idem_1', ...overrides };
   }
@@ -66,11 +69,10 @@ describe('GenerateSimulationConversationsUseCase — "Conversaciones de prueba" 
       findByMailbox: jest.fn().mockResolvedValue([{ id: 'assign_1', organizationId: orgId, mailboxId, userId: actorId, role: 'PRIMARY', assignedBy: actorId, assignedAt: new Date() }]),
     };
     managedClients = {
-      findAll: jest.fn().mockResolvedValue([]),
-      create: jest.fn().mockResolvedValue({ id: 'client_qa_1', organizationId: orgId, name: 'Mr Outreach — Pruebas de conversación' }),
+      findById: jest.fn().mockResolvedValue(realClient),
     };
     companies = {
-      create: jest.fn().mockResolvedValue({ id: 'company_qa_1', organizationId: orgId, clientId: 'client_qa_1' } as Company),
+      create: jest.fn().mockResolvedValue({ id: 'company_qa_1', organizationId: orgId, clientId: 'client_1' } as Company),
     };
     contacts = {
       create: jest.fn().mockImplementation(async (input) => {
@@ -139,10 +141,42 @@ describe('GenerateSimulationConversationsUseCase — "Conversaciones de prueba" 
     }
   });
 
-  it('generates exactly four SequenceContact rows and four Contact rows', async () => {
+  it('creates every Conversation under the SAME real client/domain/mailbox as the Mailbox itself — never a different ManagedClient', async () => {
+    await useCase.execute(baseInput());
+    expect(conversations.create).toHaveBeenCalledTimes(4);
+    for (const call of conversations.create.mock.calls) {
+      const input = call[0];
+      expect(input.clientId).toBe(mailbox.clientId);
+      expect(input.domainId).toBe(mailbox.domainId);
+      expect(input.mailboxId).toBe(mailbox.id);
+    }
+  });
+
+  it('creates the synthetic Company under the real Mailbox client, never a separate reserved client', async () => {
+    await useCase.execute(baseInput());
+    expect(companies.create).toHaveBeenCalledWith(expect.objectContaining({ clientId: mailbox.clientId }));
+  });
+
+  it('generates exactly four SequenceContact rows and four Contact rows, all under the real Mailbox client', async () => {
     await useCase.execute(baseInput());
     expect(sequenceContacts.create).toHaveBeenCalledTimes(4);
     expect(contacts.create).toHaveBeenCalledTimes(4);
+    for (const call of contacts.create.mock.calls) {
+      expect(call[0].clientId).toBe(mailbox.clientId);
+    }
+    for (const call of sequenceContacts.create.mock.calls) {
+      expect(call[0].clientId).toBe(mailbox.clientId);
+      expect(call[0].assignedMailboxId).toBe(mailbox.id);
+    }
+  });
+
+  it('creates the Sequence and then updates it with the real Mailbox client and mailbox id', async () => {
+    await useCase.execute(baseInput());
+    expect(sequences.create).toHaveBeenCalledTimes(1);
+    expect(sequences.update).toHaveBeenCalledWith(
+      'sequence_qa_1',
+      expect.objectContaining({ mailboxId: mailbox.id, clientId: mailbox.clientId }),
+    );
   });
 
   it('generates exactly two ConversationMessage rows per conversation (outbound + inbound) — 8 total', async () => {
@@ -164,13 +198,41 @@ describe('GenerateSimulationConversationsUseCase — "Conversaciones de prueba" 
     expect(injectedTokens.join(' ')).not.toMatch(/motor/i);
   });
 
-  it('reuses an existing QA ManagedClient instead of creating a duplicate one on a second generation', async () => {
-    managedClients.findAll.mockResolvedValue([
-      { id: 'client_qa_existing', organizationId: orgId, name: 'Mr Outreach — Pruebas de conversación' } as any,
-    ]);
+  it('never creates or reuses a separate reserved QA ManagedClient — only reads the real Mailbox client by id', async () => {
     await useCase.execute(baseInput());
-    expect(managedClients.create).not.toHaveBeenCalled();
-    expect(companies.create).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'client_qa_existing' }));
+    expect(managedClients.findById).toHaveBeenCalledWith(mailbox.clientId);
+    expect((managedClients as unknown as { create?: unknown }).create).toBeUndefined();
+    expect((managedClients as unknown as { findAll?: unknown }).findAll).toBeUndefined();
+  });
+
+  it('rejects with a 400 when the Mailbox has no clientId', async () => {
+    mailboxes.findById.mockResolvedValue({ ...mailbox, clientId: null });
+    await expect(useCase.execute(baseInput())).rejects.toThrow(BadRequestException);
+    expect(companies.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects with a 400 when the Mailbox has no domainId', async () => {
+    mailboxes.findById.mockResolvedValue({ ...mailbox, domainId: null });
+    await expect(useCase.execute(baseInput())).rejects.toThrow(BadRequestException);
+    expect(companies.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects with a 400 when the ManagedClient for mailbox.clientId does not exist', async () => {
+    managedClients.findById.mockResolvedValue(null);
+    await expect(useCase.execute(baseInput())).rejects.toThrow(BadRequestException);
+    expect(companies.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects with a 400 when the ManagedClient for mailbox.clientId belongs to another organization', async () => {
+    managedClients.findById.mockResolvedValue({ ...realClient, organizationId: 'org_other' });
+    await expect(useCase.execute(baseInput())).rejects.toThrow(BadRequestException);
+    expect(companies.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects with a 400 when the ManagedClient for mailbox.clientId is not ACTIVE', async () => {
+    managedClients.findById.mockResolvedValue({ ...realClient, status: 'INACTIVE' });
+    await expect(useCase.execute(baseInput())).rejects.toThrow(BadRequestException);
+    expect(companies.create).not.toHaveBeenCalled();
   });
 
   it('rejects with a 400 and the exact required message when no mailboxId is eligible (mailbox not found)', async () => {
