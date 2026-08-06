@@ -27,18 +27,18 @@ export class AdminSequenceExecutionsController {
   @Get()
   @RequirePermissions('sequence_executions.monitor_all')
   list(@CurrentUser() user: AuthenticatedUser) {
-    return this.executions.listAllForOrganization(user.organizationId);
+    return this.executions.listAllForOrganization(user.organizationId, user.permissions);
   }
 
   @Get(':id')
   @RequirePermissions('sequence_executions.monitor_all')
   getById(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.executions.getAny(user.organizationId, id);
+    return this.executions.getAny(user.organizationId, id, user.permissions);
   }
 
   @Post(':id/refresh-status')
   @RequirePermissions('sequence_executions.refresh_status_all')
   refreshStatus(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.refreshUseCase.execute(user.organizationId, user.id, id);
+    return this.refreshUseCase.execute(user.organizationId, user.id, id, user.permissions);
   }
 }

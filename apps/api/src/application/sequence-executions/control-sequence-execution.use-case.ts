@@ -20,10 +20,11 @@ import {
 import { buildIdempotencyStorageKey } from '../idempotency/idempotent-operation.service';
 import { MotorEventEnvelopeDto, MOTOR_EVENT_SCHEMA_VERSION, MotorEventType } from '../../modules/integration/dto/motor-event-envelope.dto';
 import { ProcessMotorEventUseCase } from '../motor-event/process-motor-event.use-case';
+import { CONTROL_TRANSITIONS, ControlAction, ControlTransition } from './control-transitions';
 import { SequenceExecutionsService } from './sequence-executions.service';
 import { SequenceExecutionSummary } from './sequence-executions.types';
 
-export type ControlAction = 'PAUSE' | 'RESUME' | 'STOP';
+export { CONTROL_TRANSITIONS, ControlAction } from './control-transitions';
 
 export interface ControlSequenceExecutionInput {
   organizationId: string;
@@ -34,57 +35,9 @@ export interface ControlSequenceExecutionInput {
   correlationId?: string;
   /** Required, 3-300 chars, for STOP only — never sent/used for PAUSE/RESUME. */
   reason?: string;
+  /** The acting admin's permission keys — forwarded into the returned summary's controlCapabilities so a POST response is never stale relative to the GET detail. */
+  actorPermissionKeys?: string[];
 }
-
-interface ControlTransition {
-  allowedFrom: SequenceExecutionStatus[];
-  transitional: SequenceExecutionStatus;
-  terminal: SequenceExecutionStatus;
-  acceptedEventType: MotorEventType;
-  terminalEventType: MotorEventType;
-}
-
-/**
- * Fase "Control operativo de Gestiones" — RUNNING -> PAUSE_REQUESTED ->
- * PAUSED; PAUSED -> RESUME_REQUESTED -> RUNNING; {RUNNING,PAUSED,ACCEPTED}
- * -> STOP_REQUESTED -> STOPPED. Every other current status (including every
- * *_REQUESTED transitional value for a DIFFERENT action, DRAFT, and every
- * terminal value) is rejected with 409 — this table is the single source
- * of truth other than the equally-authoritative
- * `conditionalUpdateStatusFromAllowed` claim in the DB itself.
- *
- * ACCEPTED (server-side QUEUED — see LOCAL_STATUS_FOR_SERVER_STATUS in
- * refresh-execution-status.use-case.ts) was added to STOP.allowedFrom to
- * close a real gap: a Gestión the motor already accepted but has not yet
- * started dispatching had no way to be stopped, which also permanently
- * blocked deleting its mailbox (ACCEPTED is non-terminal per
- * NON_TERMINAL_EXECUTION_STATUSES in delete-mailbox.use-case.ts). There is
- * deliberately no separate REQUESTED/QUEUED/STARTING local status — the
- * project already represents "sent but not started" as ACCEPTED.
- */
-const CONTROL_TRANSITIONS: Record<ControlAction, ControlTransition> = {
-  PAUSE: {
-    allowedFrom: ['RUNNING'],
-    transitional: 'PAUSE_REQUESTED',
-    terminal: 'PAUSED',
-    acceptedEventType: 'EXECUTION_PAUSE_ACCEPTED',
-    terminalEventType: 'EXECUTION_PAUSED',
-  },
-  RESUME: {
-    allowedFrom: ['PAUSED'],
-    transitional: 'RESUME_REQUESTED',
-    terminal: 'RUNNING',
-    acceptedEventType: 'EXECUTION_RESUME_ACCEPTED',
-    terminalEventType: 'EXECUTION_RESUMED',
-  },
-  STOP: {
-    allowedFrom: ['RUNNING', 'PAUSED', 'ACCEPTED'],
-    transitional: 'STOP_REQUESTED',
-    terminal: 'STOPPED',
-    acceptedEventType: 'EXECUTION_STOP_ACCEPTED',
-    terminalEventType: 'EXECUTION_STOPPED',
-  },
-};
 
 const VERB_PAST: Record<ControlAction, string> = { PAUSE: 'paused', RESUME: 'resumed', STOP: 'stopped' };
 const VERB_ES: Record<ControlAction, string> = { PAUSE: 'pausar', RESUME: 'reanudar', STOP: 'detener' };
@@ -136,7 +89,7 @@ export class ControlSequenceExecutionUseCase {
     // action, so this narrower check changes nothing for those — it only
     // closes the RESUME gap.
     if (execution.status === config.terminal && execution.lastControlIdempotencyKey === input.idempotencyKey) {
-      return this.executionsService.getAny(input.organizationId, execution.id);
+      return this.executionsService.getAny(input.organizationId, execution.id, input.actorPermissionKeys);
     }
 
     const isRetry = execution.status === config.transitional;
@@ -334,7 +287,7 @@ export class ControlSequenceExecutionUseCase {
           );
         }
 
-        return this.executionsService.getAny(input.organizationId, execution.id);
+        return this.executionsService.getAny(input.organizationId, execution.id, input.actorPermissionKeys);
       }
 
       await this.tx.run(async (ctx) => {

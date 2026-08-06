@@ -81,6 +81,15 @@ export interface SequenceExecutionSummary {
   previousExecutionId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Backend-authoritative — computed from CONTROL_TRANSITIONS + the requesting user's permission keys. Always `false` for every field on the executive's own (non-admin) read paths, which never render these buttons. */
+  controlCapabilities: SequenceExecutionControlCapabilities;
+}
+
+export interface SequenceExecutionControlCapabilities {
+  canPause: boolean;
+  canResume: boolean;
+  canStop: boolean;
+  canRestart: boolean;
 }
 
 /** Populated by GET /admin/sequence-executions/:id/restart-preview — feeds the restart confirmation modal. */

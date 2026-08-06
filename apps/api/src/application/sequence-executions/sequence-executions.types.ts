@@ -1,5 +1,6 @@
 import { ProspectExecutionState } from '../../domain/prospect-import/prospect-import-row.entity';
 import { SequenceExecutionServerStatus, SequenceExecutionStatus } from '../../domain/sequence-execution/sequence-execution.entity';
+import { SequenceExecutionControlCapabilities } from './execution-control-capabilities';
 
 export interface SequenceExecutionSummary {
   id: string;
@@ -50,4 +51,13 @@ export interface SequenceExecutionSummary {
   previousExecutionId: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Backend-authoritative — computed from CONTROL_TRANSITIONS + the
+   * requesting user's permission keys, never re-derived from status alone
+   * on the frontend. Callers that don't pass the actor's permissions (the
+   * executive's own read paths, which never render these buttons) get
+   * every capability as `false` — harmless, since nothing reads this field
+   * there.
+   */
+  controlCapabilities: SequenceExecutionControlCapabilities;
 }

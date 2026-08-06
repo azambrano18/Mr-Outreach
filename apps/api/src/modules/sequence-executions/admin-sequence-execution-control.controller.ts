@@ -48,6 +48,7 @@ export class AdminSequenceExecutionControlController {
       action: 'PAUSE',
       idempotencyKey,
       correlationId: dto.correlationId,
+      actorPermissionKeys: user.permissions,
     });
   }
 
@@ -68,6 +69,7 @@ export class AdminSequenceExecutionControlController {
       action: 'RESUME',
       idempotencyKey,
       correlationId: dto.correlationId,
+      actorPermissionKeys: user.permissions,
     });
   }
 
@@ -89,6 +91,7 @@ export class AdminSequenceExecutionControlController {
       idempotencyKey,
       correlationId: dto.correlationId,
       reason: dto.reason,
+      actorPermissionKeys: user.permissions,
     });
   }
 

@@ -30,7 +30,12 @@ export class RefreshExecutionStatusUseCase {
     private readonly executionsService: SequenceExecutionsService,
   ) {}
 
-  async execute(organizationId: string, actorId: string, executionId: string): Promise<SequenceExecutionSummary> {
+  async execute(
+    organizationId: string,
+    actorId: string,
+    executionId: string,
+    actorPermissionKeys: readonly string[] = [],
+  ): Promise<SequenceExecutionSummary> {
     const execution = await this.executions.findById(executionId);
     if (!execution || execution.organizationId !== organizationId) {
       throw new NotFoundException('Gestión no encontrada.');
@@ -88,6 +93,6 @@ export class RefreshExecutionStatusUseCase {
       throw error;
     }
 
-    return this.executionsService.getAny(organizationId, execution.id);
+    return this.executionsService.getAny(organizationId, execution.id, actorPermissionKeys);
   }
 }

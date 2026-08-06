@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AssignedMailboxSummary } from '@outreach/shared-types';
 import type { RestartEligibility, SequenceExecutionSummary } from '../../../../lib/sequence-execution-types';
 import type { SequenceTemplateSummary } from '../../../../lib/sequence-template-types';
+import { getSequenceExecutionActionVisibility } from '../../../../lib/sequence-execution-action-visibility';
 import { Modal } from '../../../../components/ui/modal';
 
 type SimulatableState = 'QUEUED' | 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'REJECTED';
@@ -64,10 +65,6 @@ export function SequenceExecutionDetail({
   mailboxes = [],
   templates = [],
   canSimulate = false,
-  canPause = false,
-  canResume = false,
-  canStop = false,
-  canRestart = false,
 }: {
   initialExecution: SequenceExecutionSummary;
   canRefresh: boolean;
@@ -79,11 +76,6 @@ export function SequenceExecutionDetail({
   templates?: SequenceTemplateSummary[];
   /** Dev-only — true only for admins, and only actually rendered once /api/dev/simulated/executions/config confirms the tool is enabled (SEQUENCE_MOTOR_MODE=simulated, non-production). */
   canSimulate?: boolean;
-  /** "Control operativo de Gestiones" — ADMIN-only; each gated by its own sequence_executions.{pause,resume,stop,restart}_all permission, never by role. */
-  canPause?: boolean;
-  canResume?: boolean;
-  canStop?: boolean;
-  canRestart?: boolean;
 }) {
   const router = useRouter();
   const [execution, setExecution] = useState(initialExecution);
@@ -245,6 +237,11 @@ export function SequenceExecutionDetail({
     execution.status === 'RESUME_REQUESTED' ||
     execution.status === 'STOP_REQUESTED' ||
     execution.status === 'RESTART_REQUESTED';
+
+  // §2/§3 — backend-authoritative: derived from CONTROL_TRANSITIONS + the
+  // current user's permission keys server-side, never re-derived here from
+  // serverStatus/pendingCount/sentCount/startedAt.
+  const actionVisibility = getSequenceExecutionActionVisibility(execution.controlCapabilities, isTransitionalControlState);
 
   async function runControlAction(action: 'pause' | 'resume' | 'stop', body: Record<string, string> = {}): Promise<void> {
     setControlError(null);
@@ -437,7 +434,7 @@ export function SequenceExecutionDetail({
         </button>
       )}
 
-      {(canPause || canResume || canStop || canRestart) && (
+      {(actionVisibility.showPause || actionVisibility.showResume || actionVisibility.showStop || actionVisibility.showRestart || isTransitionalControlState) && (
         <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
           <h2 className="text-sm font-medium text-slate-700">Control operativo de la gestión</h2>
 
@@ -452,7 +449,7 @@ export function SequenceExecutionDetail({
           )}
 
           <div className="flex flex-wrap gap-2">
-            {execution.status === 'RUNNING' && canPause && (
+            {actionVisibility.showPause && (
               <button
                 type="button"
                 onClick={() => setShowPauseModal(true)}
@@ -462,7 +459,7 @@ export function SequenceExecutionDetail({
                 {controlPending === 'pause' ? 'Pausando…' : 'Pausar'}
               </button>
             )}
-            {execution.status === 'PAUSED' && canResume && (
+            {actionVisibility.showResume && (
               <button
                 type="button"
                 onClick={() => setShowResumeModal(true)}
@@ -472,7 +469,7 @@ export function SequenceExecutionDetail({
                 {controlPending === 'resume' ? 'Reanudando…' : 'Reanudar'}
               </button>
             )}
-            {(execution.status === 'RUNNING' || execution.status === 'PAUSED' || execution.status === 'ACCEPTED') && canStop && (
+            {actionVisibility.showStop && (
               <button
                 type="button"
                 onClick={() => setShowStopModal(true)}
@@ -482,7 +479,7 @@ export function SequenceExecutionDetail({
                 {controlPending === 'stop' ? 'Deteniendo…' : 'Detener gestión'}
               </button>
             )}
-            {execution.status === 'STOPPED' && canRestart && (
+            {actionVisibility.showRestart && (
               <button
                 type="button"
                 onClick={openRestartModal}
@@ -492,11 +489,9 @@ export function SequenceExecutionDetail({
                 Reiniciar
               </button>
             )}
-            {execution.status !== 'RUNNING' &&
-              execution.status !== 'PAUSED' &&
-              execution.status !== 'ACCEPTED' &&
-              execution.status !== 'STOPPED' &&
-              !isTransitionalControlState && <p className="text-sm text-slate-500">No hay acciones disponibles para el estado actual.</p>}
+            {actionVisibility.showNoActionsMessage && (
+              <p className="text-sm text-slate-500">No hay acciones disponibles para el estado actual.</p>
+            )}
           </div>
         </div>
       )}

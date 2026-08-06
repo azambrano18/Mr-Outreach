@@ -496,6 +496,49 @@ describe('Sequence Execution operational control (e2e) — memory + simulated mo
       expect(stopEntries).toHaveLength(1);
     });
 
+    it('§6 — full contract check: GET detail reports canStop=true for ADMIN with the permission, then STOP actually reaches STOPPED; EXECUTIVE gets 403', async () => {
+      // 1-2. Create a Gestión and leave it ACCEPTED + serverStatus QUEUED (the real staging shape).
+      const { executionId } = await buildAcceptedExecution(`${stamp}-contract`);
+      await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executionId}/refresh-status`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      // 3-4. The real detail endpoint, as ADMIN, must report canStop=true — the backend-authoritative capability, not something the frontend re-derives.
+      const detail = await getAdminDetail(executionId);
+      expect(detail.status).toBe(200);
+      expect(detail.body.status).toBe('ACCEPTED');
+      expect(detail.body.serverStatus).toBe('QUEUED');
+      expect(detail.body.controlCapabilities.canStop).toBe(true);
+
+      // 5-6. The user's own permission list genuinely contains sequence_executions.stop_all.
+      const me = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${adminToken}`);
+      expect(me.body.permissions).toContain('sequence_executions.stop_all');
+
+      // 7-8. ADMIN executes STOP and reaches STOPPED.
+      const stop = await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executionId}/stop`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Idempotency-Key', `e2e-contract-stop-${stamp}`)
+        .send({ reason: 'Detenida vía contrato canStop.' });
+      expect(stop.status).toBe(201);
+      expect(stop.body.status).toBe('STOPPED');
+      expect(stop.body.controlCapabilities).toEqual({ canPause: false, canResume: false, canStop: false, canRestart: true });
+
+      // 9. Repeated as EXECUTIVE (no monitor_all/stop_all at all) → 403, both for the detail read and the stop attempt, on a second Gestión.
+      const { executionId: executiveExecutionId } = await buildAcceptedExecution(`${stamp}-contract-exec`);
+      const executiveDetail = await request(app.getHttpServer())
+        .get(`/admin/sequence-executions/${executiveExecutionId}`)
+        .set('Authorization', `Bearer ${executiveToken}`);
+      expect(executiveDetail.status).toBe(403);
+
+      const executiveStop = await request(app.getHttpServer())
+        .post(`/admin/sequence-executions/${executiveExecutionId}/stop`)
+        .set('Authorization', `Bearer ${executiveToken}`)
+        .set('Idempotency-Key', `e2e-contract-exec-stop-${stamp}`)
+        .send({ reason: 'Intento no autorizado.' });
+      expect(executiveStop.status).toBe(403);
+    });
+
     it('an ACCEPTED Gestión blocks deleting its mailbox; stopping it unblocks deletion', async () => {
       const { executionId, mailboxId, serverMailboxId } = await buildAcceptedExecution(`${stamp}-accepted-delete`);
 

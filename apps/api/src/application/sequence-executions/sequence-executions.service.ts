@@ -16,6 +16,7 @@ import {
 import { ExecutiveMailboxEligibilityService } from '../sequence-templates/executive-mailbox-eligibility.service';
 import { MailboxesService } from '../mailboxes/mailboxes.service';
 import { ProspectImportsService } from '../prospect-imports/prospect-imports.service';
+import { computeExecutionControlCapabilities } from './execution-control-capabilities';
 import { SequenceExecutionSummary } from './sequence-executions.types';
 
 export interface CreateSequenceExecutionInput {
@@ -177,9 +178,9 @@ export class SequenceExecutionsService {
     return Promise.all(rows.map((row) => this.toSummary(row)));
   }
 
-  async listAllForOrganization(organizationId: string): Promise<SequenceExecutionSummary[]> {
+  async listAllForOrganization(organizationId: string, actorPermissionKeys: readonly string[] = []): Promise<SequenceExecutionSummary[]> {
     const rows = await this.executions.findAllByOrganization(organizationId);
-    return Promise.all(rows.map((row) => this.toSummary(row)));
+    return Promise.all(rows.map((row) => this.toSummary(row, actorPermissionKeys)));
   }
 
   async getOwned(organizationId: string, executiveId: string, id: string): Promise<SequenceExecutionSummary> {
@@ -187,12 +188,20 @@ export class SequenceExecutionsService {
     return this.toSummary(execution);
   }
 
-  async getAny(organizationId: string, id: string): Promise<SequenceExecutionSummary> {
+  /**
+   * `actorPermissionKeys` drives `controlCapabilities` on the returned
+   * summary (§2 — the Monitor detail's authoritative canPause/canResume/
+   * canStop/canRestart). Only the admin-facing read paths pass it; every
+   * other caller (POST action responses, the executive's own view) omits
+   * it and gets every capability back as `false`, which those callers
+   * never read.
+   */
+  async getAny(organizationId: string, id: string, actorPermissionKeys: readonly string[] = []): Promise<SequenceExecutionSummary> {
     const execution = await this.executions.findById(id);
     if (!execution || execution.organizationId !== organizationId) {
       throw new NotFoundException('Gestión no encontrada.');
     }
-    return this.toSummary(execution);
+    return this.toSummary(execution, actorPermissionKeys);
   }
 
   async requireOwned(organizationId: string, executiveId: string, id: string): Promise<SequenceExecution> {
@@ -203,7 +212,7 @@ export class SequenceExecutionsService {
     return execution;
   }
 
-  private async toSummary(execution: SequenceExecution): Promise<SequenceExecutionSummary> {
+  private async toSummary(execution: SequenceExecution, actorPermissionKeys: readonly string[] = []): Promise<SequenceExecutionSummary> {
     const [mailbox, template, version, executive, prospectImport] = await Promise.all([
       this.mailboxesService.getById(execution.organizationId, execution.mailboxId).catch(() => null),
       this.templates.findById(execution.templateId),
@@ -255,6 +264,7 @@ export class SequenceExecutionsService {
       previousExecutionId: execution.previousExecutionId,
       createdAt: execution.createdAt.toISOString(),
       updatedAt: execution.updatedAt.toISOString(),
+      controlCapabilities: computeExecutionControlCapabilities(execution.status, actorPermissionKeys),
     };
   }
 }
