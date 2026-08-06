@@ -279,6 +279,8 @@ model Mailbox {
   unlinkRequestedAt     DateTime?
   unlinkRequestedBy     String?
   unlinkReason          String?
+  /// Admin's explicit authorization, captured at unlink-request time, to remove this mailbox's MailboxAssignment rows once REVOKED is confirmed. Read back by UnlinkMailboxUseCase.retryConfirmation (which has no request body of its own) so the authorization survives across a motor-confirmation retry. Never cleared back to false after use — a durable record of what was requested, same convention as unlinkReason.
+  unlinkRemoveAssignments Boolean                     @default(false)
   revokedAt             DateTime?
   revocationId          String?
   lastLinkCommandId     String?

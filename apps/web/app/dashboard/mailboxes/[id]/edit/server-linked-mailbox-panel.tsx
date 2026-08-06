@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { AssigneeSummary, AuditLogEntry, MailboxSummary, UserSummary } from '@outreach/shared-types';
+import type { AssigneeSummary, AuditLogEntry, MailboxSummary, MailboxUnlinkPreview, UserSummary } from '@outreach/shared-types';
 import { SecondaryExecutivesSelect } from '../../../../../components/executives/secondary-executives-select';
 import { Modal } from '../../../../../components/ui/modal';
 
@@ -61,6 +61,15 @@ export function ServerLinkedMailboxPanel({
   const [unlinking, setUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
   const [confirmingUnlink, setConfirmingUnlink] = useState(false);
+  const [unlinkPreview, setUnlinkPreview] = useState<MailboxUnlinkPreview | null>(null);
+  const [unlinkPreviewLoading, setUnlinkPreviewLoading] = useState(false);
+  const [unlinkPreviewError, setUnlinkPreviewError] = useState<string | null>(null);
+  const [removeAssignmentsConfirmed, setRemoveAssignmentsConfirmed] = useState(false);
+  const [unlinkOutcome, setUnlinkOutcome] = useState<{ assignmentsRemoved: boolean } | null>(null);
+
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
+  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
 
   const [retryingUnlink, setRetryingUnlink] = useState(false);
   const [retryUnlinkError, setRetryUnlinkError] = useState<string | null>(null);
@@ -201,27 +210,94 @@ export function ServerLinkedMailboxPanel({
     }
   }
 
+/** Opens the modal immediately and loads the preflight in parallel — same convention as DeleteUserButton's deletion-impact fetch. */
+  async function handleOpenUnlink(): Promise<void> {
+    setConfirmingUnlink(true);
+    setUnlinkReason('');
+    setUnlinkError(null);
+    setUnlinkOutcome(null);
+    setRemoveAssignmentsConfirmed(false);
+    setUnlinkPreview(null);
+    setUnlinkPreviewError(null);
+    setUnlinkPreviewLoading(true);
+    try {
+      const response = await fetch(`/api/mailboxes/${mailbox.id}/unlink-preview`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setUnlinkPreviewError(body.error ?? 'No se pudo cargar la información de esta cuenta.');
+        return;
+      }
+      setUnlinkPreview(body as MailboxUnlinkPreview);
+    } catch {
+      setUnlinkPreviewError('No se pudo contactar la API.');
+    } finally {
+      setUnlinkPreviewLoading(false);
+    }
+  }
+
   async function handleUnlink(): Promise<void> {
     if (!unlinkReason.trim()) return;
     setUnlinkError(null);
     setUnlinking(true);
     try {
+      const hasAssignments = (unlinkPreview?.assignmentsToRemove ?? 0) > 0;
       const response = await fetch(`/api/mailboxes/${mailbox.id}/unlink`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify({ reason: unlinkReason }),
+        body: JSON.stringify({
+          reason: unlinkReason,
+          removeAssignmentsAfterUnlink: hasAssignments && removeAssignmentsConfirmed,
+        }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setUnlinkError(body.error ?? 'No se pudo desvincular la cuenta.');
+        setUnlinkError(body.error ?? 'No fue posible desvincular la cuenta.');
         return;
       }
-      setConfirmingUnlink(false);
+      if (body.linkStatus === 'REVOKED') {
+        setUnlinkOutcome({ assignmentsRemoved: hasAssignments && removeAssignmentsConfirmed });
+      } else {
+        // Local write committed but the motor hasn't confirmed yet — the
+        // "Desvinculación en proceso" section below takes over from here.
+        setConfirmingUnlink(false);
+      }
       router.refresh();
     } catch {
       setUnlinkError('No se pudo contactar la API.');
     } finally {
       setUnlinking(false);
+    }
+  }
+
+  function handleCloseUnlinkModal(): void {
+    if (unlinking) return;
+    setConfirmingUnlink(false);
+    setUnlinkOutcome(null);
+  }
+
+  /** §9 — "Limpiar asignaciones residuales": reuses the same removal use case as a confirmed unlink, for a mailbox already REVOKED that still shows assignees. */
+  async function handleReconcileAssignments(): Promise<void> {
+    setReconcileError(null);
+    setReconcileMessage(null);
+    setReconciling(true);
+    try {
+      const response = await fetch(`/api/mailboxes/${mailbox.id}/reconcile-assignments`, { method: 'POST' });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setReconcileError(body.error ?? 'No se pudieron limpiar las asignaciones residuales.');
+        return;
+      }
+      setReconcileMessage(
+        body.assignmentsRemoved > 0
+          ? 'Asignaciones retiradas correctamente.'
+          : 'Esta cuenta ya no tenía asignaciones pendientes.',
+      );
+      await loadAssignees();
+      router.refresh();
+    } catch {
+      setReconcileError('No se pudo contactar la API.');
+    } finally {
+      setReconciling(false);
     }
   }
 
@@ -481,49 +557,142 @@ export function ServerLinkedMailboxPanel({
           </p>
           <button
             type="button"
-            onClick={() => setConfirmingUnlink(true)}
+            onClick={() => void handleOpenUnlink()}
             className="self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
           >
             Desvincular cuenta
           </button>
 
-          <Modal open={confirmingUnlink} onClose={() => (unlinking ? undefined : setConfirmingUnlink(false))} title="Desvincular cuenta">
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-slate-900">Desvincular {mailbox.email}</h3>
-              <p className="text-sm text-slate-600">
-                Esta acción revocará el uso de la cuenta dentro de Mr Outreach. No elimina la cuenta ni
-                su historial; puede volver a vincularse más adelante con un nuevo token.
-              </p>
-              <label className="flex flex-col gap-1 text-sm text-slate-700" htmlFor="unlink-reason">
-                Motivo (obligatorio)
-                <input
-                  id="unlink-reason"
-                  required
-                  value={unlinkReason}
-                  onChange={(event) => setUnlinkReason(event.target.value)}
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                />
-              </label>
-              {unlinkError && <p className="text-sm text-red-600">{unlinkError}</p>}
-              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setConfirmingUnlink(false)}
-                  disabled={unlinking}
-                  className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleUnlink()}
-                  disabled={unlinking || !unlinkReason.trim()}
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                >
-                  {unlinking ? 'Desvinculando…' : 'Confirmar desvinculación'}
-                </button>
+          <Modal open={confirmingUnlink} onClose={handleCloseUnlinkModal} title="Desvincular cuenta de correo">
+            {unlinkOutcome ? (
+              // Después de REVOKED — breve confirmación antes de cerrar (§10).
+              <div className="flex flex-col gap-3">
+                <h3 className="text-sm font-semibold text-slate-900">Desvincular cuenta de correo</h3>
+                <p className="text-sm font-medium text-emerald-700">Cuenta desvinculada correctamente.</p>
+                {unlinkOutcome.assignmentsRemoved && (
+                  <p className="text-sm font-medium text-emerald-700">Asignaciones retiradas correctamente.</p>
+                )}
+                <div className="flex justify-end border-t border-slate-100 pt-3">
+                  <button
+                    type="button"
+                    onClick={handleCloseUnlinkModal}
+                    className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                  >
+                    Cerrar
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <h3 className="text-sm font-semibold text-slate-900">Desvincular {mailbox.email}</h3>
+
+                {unlinkPreviewLoading && <p className="text-sm text-slate-500">Cargando información de esta cuenta…</p>}
+                {unlinkPreviewError && <p className="text-sm text-red-600">{unlinkPreviewError}</p>}
+
+                {unlinkPreview && !unlinkPreview.canUnlink && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    {unlinkPreview.blockingReasons.map((reason) => (
+                      <p key={reason}>{reason}</p>
+                    ))}
+                  </div>
+                )}
+
+                {unlinkPreview && unlinkPreview.canUnlink && (
+                  <>
+                    <p className="text-sm text-slate-600">
+                      Esta acción revocará el uso de la cuenta dentro de Mr Outreach. No elimina la cuenta ni
+                      su historial; puede volver a vincularse más adelante con un nuevo token.
+                    </p>
+
+                    {unlinkPreview.assignmentsToRemove > 0 && (
+                      <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-3">
+                        <p className="text-sm text-amber-900">
+                          Esta cuenta tiene ejecutivos asignados. Al completarse la desvinculación, se
+                          retirarán únicamente las asignaciones de esta cuenta. Los usuarios ejecutivos no
+                          serán eliminados ni desactivados.
+                        </p>
+                        <dl className="text-sm text-amber-900">
+                          {unlinkPreview.primaryExecutive && (
+                            <div>
+                              <dt className="font-medium">Ejecutivo principal</dt>
+                              <dd>
+                                {unlinkPreview.primaryExecutive.name} — {unlinkPreview.primaryExecutive.email}
+                              </dd>
+                            </div>
+                          )}
+                          {unlinkPreview.secondaryExecutives.length > 0 && (
+                            <div className="mt-1">
+                              <dt className="font-medium">Ejecutivos secundarios</dt>
+                              {unlinkPreview.secondaryExecutives.map((executive) => (
+                                <dd key={executive.id}>
+                                  {executive.name} — {executive.email}
+                                </dd>
+                              ))}
+                            </div>
+                          )}
+                        </dl>
+                        <label className="flex items-start gap-2 text-sm text-amber-900">
+                          <input
+                            type="checkbox"
+                            checked={removeAssignmentsConfirmed}
+                            onChange={(event) => setRemoveAssignmentsConfirmed(event.target.checked)}
+                            className="mt-0.5"
+                          />
+                          Confirmo que deseo desvincular la cuenta y retirar sus asignaciones activas.
+                        </label>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-500">
+                      Las conversaciones y el historial se conservarán. La cuenta dejará de estar disponible
+                      para nuevas Plantillas y Gestiones.
+                    </p>
+
+                    <label className="flex flex-col gap-1 text-sm text-slate-700" htmlFor="unlink-reason">
+                      Motivo (obligatorio)
+                      <input
+                        id="unlink-reason"
+                        required
+                        value={unlinkReason}
+                        onChange={(event) => setUnlinkReason(event.target.value)}
+                        className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </>
+                )}
+
+                {unlinkError && <p className="text-sm text-red-600">{unlinkError}</p>}
+
+                <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                  <button
+                    type="button"
+                    onClick={handleCloseUnlinkModal}
+                    disabled={unlinking}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  {unlinkPreview?.canUnlink && (
+                    <button
+                      type="button"
+                      onClick={() => void handleUnlink()}
+                      disabled={
+                        unlinking ||
+                        !unlinkReason.trim() ||
+                        (unlinkPreview.assignmentsToRemove > 0 && !removeAssignmentsConfirmed)
+                      }
+                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {unlinking
+                        ? 'Desvinculación en proceso…'
+                        : unlinkPreview.assignmentsToRemove > 0
+                          ? 'Desvincular y quitar asignaciones'
+                          : 'Confirmar desvinculación'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </Modal>
         </fieldset>
       )}
@@ -537,9 +706,10 @@ export function ServerLinkedMailboxPanel({
         <fieldset className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-4">
           <legend className="px-1 text-sm font-medium text-amber-800">Desvinculación en proceso</legend>
           <p className="text-sm text-amber-800">
-            La desvinculación se registró, pero todavía no se pudo confirmar con el proveedor externo.
-            La cuenta ya no admite actividad nueva. Puedes reintentar la confirmación; “Eliminar cuenta”
-            estará disponible una vez que quede confirmada.
+            No fue posible desvincular la cuenta todavía: se registró la solicitud, pero el proveedor
+            externo no confirmó la revocación. La cuenta ya no admite actividad nueva. Las asignaciones
+            de ejecutivos se mantienen intactas hasta que la desvinculación quede confirmada —
+            &ldquo;Eliminar cuenta&rdquo; estará disponible recién entonces.
           </p>
           {retryUnlinkError && <p className="text-sm text-red-600">{retryUnlinkError}</p>}
           <button
@@ -549,6 +719,31 @@ export function ServerLinkedMailboxPanel({
             className="self-start rounded-md border border-amber-400 px-3 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
           >
             {retryingUnlink ? 'Reintentando…' : 'Reintentar confirmación'}
+          </button>
+        </fieldset>
+      )}
+
+      {/* F3. §9 — reconciliación de asignaciones residuales: una cuenta ya
+          REVOKED (por ejemplo, desvinculada antes de que existiera este
+          flujo, o sin autorizar el retiro en su momento) que todavía
+          muestra ejecutivos asignados. Reutiliza el mismo caso de uso que
+          el retiro automático tras una desvinculación confirmada. */}
+      {canUnlink && mailbox.linkStatus === 'REVOKED' && assignees !== null && assignees.length > 0 && (
+        <fieldset className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-4">
+          <legend className="px-1 text-sm font-medium text-amber-800">Asignaciones residuales</legend>
+          <p className="text-sm text-amber-800">
+            Esta cuenta ya está desvinculada, pero todavía muestra ejecutivos asignados. Puedes
+            limpiar esas asignaciones ahora — los usuarios ejecutivos no se verán afectados.
+          </p>
+          {reconcileError && <p className="text-sm text-red-600">{reconcileError}</p>}
+          {reconcileMessage && <p className="text-sm font-medium text-emerald-700">{reconcileMessage}</p>}
+          <button
+            type="button"
+            onClick={() => void handleReconcileAssignments()}
+            disabled={reconciling}
+            className="self-start rounded-md border border-amber-400 px-3 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
+          >
+            {reconciling ? 'Limpiando…' : 'Limpiar asignaciones residuales'}
           </button>
         </fieldset>
       )}

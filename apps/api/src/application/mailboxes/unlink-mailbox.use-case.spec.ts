@@ -4,9 +4,11 @@ import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mai
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { MailboxMotorPort } from '../../domain/mailbox-motor/mailbox-motor-port';
 import { ScheduledEmailRepository } from '../../domain/scheduled-email/scheduled-email.repository';
+import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
 import { TransactionContext, TransactionManager } from '../../domain/persistence/transaction';
 import { IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { ClientMailboxVisibilityService } from './client-mailbox-visibility.service';
+import { RemoveMailboxAssignmentsAfterUnlinkUseCase } from './remove-mailbox-assignments-after-unlink.use-case';
 import { UnlinkMailboxInput, UnlinkMailboxUseCase } from './unlink-mailbox.use-case';
 
 class FakeTransactionManager implements TransactionManager {
@@ -21,8 +23,10 @@ describe('UnlinkMailboxUseCase', () => {
   let auditLogs: jest.Mocked<AuditLogRepository>;
   let motor: jest.Mocked<MailboxMotorPort>;
   let assignments: jest.Mocked<Pick<MailboxAssignmentRepository, 'findByMailbox'>>;
+  let sequenceExecutions: jest.Mocked<Pick<SequenceExecutionRepository, 'findAllByOrganization'>>;
   let idempotency: jest.Mocked<Pick<IdempotentOperationService, 'checkExisting' | 'claim' | 'markCompleted'>>;
   let clientVisibility: jest.Mocked<Pick<ClientMailboxVisibilityService, 'grantForExecutives' | 'revokeIfNoRemainingMailbox'>>;
+  let removeAssignmentsAfterUnlink: jest.Mocked<Pick<RemoveMailboxAssignmentsAfterUnlinkUseCase, 'execute'>>;
   let useCase: UnlinkMailboxUseCase;
 
   const orgId = 'org_1';
@@ -36,6 +40,7 @@ describe('UnlinkMailboxUseCase', () => {
     serverMailboxId: 'mbx_1',
     revocationId: null,
     unlinkReason: null,
+    unlinkRemoveAssignments: false,
   };
 
   function baseInput(overrides: Partial<UnlinkMailboxInput> = {}): UnlinkMailboxInput {
@@ -74,7 +79,11 @@ describe('UnlinkMailboxUseCase', () => {
       }),
     };
     assignments = { findByMailbox: jest.fn().mockResolvedValue([]) };
+    sequenceExecutions = { findAllByOrganization: jest.fn().mockResolvedValue([]) };
     clientVisibility = { grantForExecutives: jest.fn().mockResolvedValue(undefined), revokeIfNoRemainingMailbox: jest.fn().mockResolvedValue(undefined) };
+    removeAssignmentsAfterUnlink = {
+      execute: jest.fn().mockResolvedValue({ mailboxId: 'mailbox_1', assignmentsRemoved: 0, primaryRemoved: null, secondaryRemoved: [] }),
+    };
     idempotency = {
       checkExisting: jest.fn().mockResolvedValue(null),
       claim: jest.fn(),
@@ -115,8 +124,10 @@ describe('UnlinkMailboxUseCase', () => {
       auditLogs,
       motor,
       assignments as never,
+      sequenceExecutions as never,
       idempotency as never,
       clientVisibility as never,
+      removeAssignmentsAfterUnlink as never,
     );
   });
 
@@ -280,6 +291,123 @@ describe('UnlinkMailboxUseCase', () => {
 
       await expect(useCase.retryConfirmation(orgId, 'mailbox_1', 'admin_1')).rejects.toThrow(NotFoundException);
       expect(motor.unlinkMailbox).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('§4 — Gestiones activas block unlinking', () => {
+    it.each(['RUNNING', 'PAUSE_REQUESTED', 'PAUSED', 'RESUME_REQUESTED', 'STOP_REQUESTED', 'RESTART_REQUESTED'])(
+      'rejects unlinking while a Gestión on this mailbox is %s',
+      async (status) => {
+        sequenceExecutions.findAllByOrganization.mockResolvedValue([
+          { id: 'exec_1', mailboxId: 'mailbox_1', status } as never,
+        ]);
+
+        await expect(useCase.execute(baseInput())).rejects.toThrow(ConflictException);
+        expect(mailboxes.update).not.toHaveBeenCalled();
+        expect(motor.unlinkMailbox).not.toHaveBeenCalled();
+      },
+    );
+
+    it('a Gestión on a DIFFERENT mailbox never blocks this one', async () => {
+      sequenceExecutions.findAllByOrganization.mockResolvedValue([
+        { id: 'exec_1', mailboxId: 'some-other-mailbox', status: 'RUNNING' } as never,
+      ]);
+
+      await expect(useCase.execute(baseInput())).resolves.toBeTruthy();
+    });
+
+    it.each(['STOPPED', 'COMPLETED', 'FAILED', 'REJECTED', 'DRAFT'])(
+      'a %s Gestión never blocks unlinking',
+      async (status) => {
+        sequenceExecutions.findAllByOrganization.mockResolvedValue([
+          { id: 'exec_1', mailboxId: 'mailbox_1', status } as never,
+        ]);
+
+        await expect(useCase.execute(baseInput())).resolves.toBeTruthy();
+      },
+    );
+  });
+
+  describe('§1/§3/§6 — removing assignments after a confirmed unlink', () => {
+    it('never removes assignments before REVOKED is confirmed, even when authorized', async () => {
+      motor.unlinkMailbox.mockRejectedValue(new ServiceUnavailableException('motor caído'));
+
+      const { result } = await useCase.execute(baseInput({ removeAssignmentsAfterUnlink: true }));
+
+      expect(result.linkStatus).toBe('UNLINK_REQUESTED');
+      expect(removeAssignmentsAfterUnlink.execute).not.toHaveBeenCalled();
+    });
+
+    it('removes assignments once REVOKED is confirmed, only when the admin authorized it', async () => {
+      await useCase.execute(baseInput({ removeAssignmentsAfterUnlink: true }));
+
+      expect(removeAssignmentsAfterUnlink.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: orgId, mailboxId: 'mailbox_1', actorId: 'admin_1' }),
+      );
+    });
+
+    it('never removes assignments on a successful unlink when the admin did NOT authorize it', async () => {
+      await useCase.execute(baseInput({ removeAssignmentsAfterUnlink: false }));
+
+      expect(removeAssignmentsAfterUnlink.execute).not.toHaveBeenCalled();
+    });
+
+    it('persists the authorization flag on the UNLINK_REQUESTED transition, so a later retry can read it back', async () => {
+      await useCase.execute(baseInput({ removeAssignmentsAfterUnlink: true }));
+
+      expect(mailboxes.update).toHaveBeenCalledWith(
+        'mailbox_1',
+        expect.objectContaining({ linkStatus: 'UNLINK_REQUESTED', unlinkRemoveAssignments: true }),
+        { kind: 'fake' },
+      );
+    });
+
+    it('retryConfirmation reads the persisted authorization and removes assignments on success', async () => {
+      mailboxes.findById.mockResolvedValue({
+        ...activeMailbox,
+        linkStatus: 'UNLINK_REQUESTED',
+        unlinkReason: 'motivo previo',
+        unlinkRemoveAssignments: true,
+      } as never);
+
+      await useCase.retryConfirmation(orgId, 'mailbox_1', 'admin_1');
+
+      expect(removeAssignmentsAfterUnlink.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: orgId, mailboxId: 'mailbox_1' }),
+      );
+    });
+
+    it('retryConfirmation never removes assignments when the original request never authorized it', async () => {
+      mailboxes.findById.mockResolvedValue({
+        ...activeMailbox,
+        linkStatus: 'UNLINK_REQUESTED',
+        unlinkReason: 'motivo previo',
+        unlinkRemoveAssignments: false,
+      } as never);
+
+      await useCase.retryConfirmation(orgId, 'mailbox_1', 'admin_1');
+
+      expect(removeAssignmentsAfterUnlink.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('§9 — reconciling residual assignments on an already-REVOKED mailbox', () => {
+    it('a repeat unlink request against an already-REVOKED mailbox reconciles residual assignments when authorized', async () => {
+      mailboxes.findById.mockResolvedValue({ ...activeMailbox, linkStatus: 'REVOKED', revocationId: 'rev_old' } as never);
+
+      await useCase.execute(baseInput({ idempotencyKey: 'a-new-different-key', removeAssignmentsAfterUnlink: true }));
+
+      expect(removeAssignmentsAfterUnlink.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: orgId, mailboxId: 'mailbox_1' }),
+      );
+    });
+
+    it('an already-REVOKED mailbox with no authorization stays untouched (no reconciliation attempted)', async () => {
+      mailboxes.findById.mockResolvedValue({ ...activeMailbox, linkStatus: 'REVOKED', revocationId: 'rev_old' } as never);
+
+      await useCase.execute(baseInput({ idempotencyKey: 'a-new-different-key' }));
+
+      expect(removeAssignmentsAfterUnlink.execute).not.toHaveBeenCalled();
     });
   });
 });

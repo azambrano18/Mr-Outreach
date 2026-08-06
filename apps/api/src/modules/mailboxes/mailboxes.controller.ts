@@ -17,6 +17,11 @@ import {
   ReassignMailboxPrimaryExecutiveUseCase,
 } from '../../application/mailboxes/reassign-mailbox-primary-executive.use-case';
 import { UnlinkMailboxResult, UnlinkMailboxUseCase } from '../../application/mailboxes/unlink-mailbox.use-case';
+import { MailboxUnlinkPreview, PreviewMailboxUnlinkUseCase } from '../../application/mailboxes/preview-mailbox-unlink.use-case';
+import {
+  RemoveMailboxAssignmentsAfterUnlinkResult,
+  RemoveMailboxAssignmentsAfterUnlinkUseCase,
+} from '../../application/mailboxes/remove-mailbox-assignments-after-unlink.use-case';
 import { MailboxProvisioningService } from '../../application/mailboxes/mailbox-provisioning.service';
 import { MailboxesService } from '../../application/mailboxes/mailboxes.service';
 import {
@@ -64,6 +69,8 @@ export class MailboxesController {
     private readonly linkMailbox: LinkMailboxUseCase,
     private readonly reassignPrimaryExecutive: ReassignMailboxPrimaryExecutiveUseCase,
     private readonly unlinkMailboxUseCase: UnlinkMailboxUseCase,
+    private readonly previewMailboxUnlinkUseCase: PreviewMailboxUnlinkUseCase,
+    private readonly removeMailboxAssignmentsAfterUnlinkUseCase: RemoveMailboxAssignmentsAfterUnlinkUseCase,
     private readonly deleteMailboxUseCase: DeleteMailboxUseCase,
     private readonly retryAssetCleanupUseCase: RetryMailboxAssetCleanupUseCase,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
@@ -92,6 +99,7 @@ export class MailboxesController {
       actorId: user.id,
       idempotencyKey,
       correlationId: dto.correlationId,
+      removeAssignmentsAfterUnlink: dto.removeAssignmentsAfterUnlink,
     });
     return result;
   }
@@ -104,6 +112,43 @@ export class MailboxesController {
     @Param('id') id: string,
   ): Promise<UnlinkMailboxResult> {
     return this.unlinkMailboxUseCase.retryConfirmation(user.organizationId, id, user.id);
+  }
+
+  /**
+   * §1/§11 — read-only preflight for "Desvincular cuenta": account/client/
+   * domain, link status, assigned executives, conversation/template/active-
+   * Gestión/pending-job counts, and whether the unlink is currently allowed.
+   * Same permission as the unlink action itself — never a separate,
+   * broader-audience read permission for a preview of a destructive action.
+   */
+  @Get(':id/unlink-preview')
+  @RequirePermissions('mailboxes.unlink')
+  getUnlinkPreview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<MailboxUnlinkPreview> {
+    return this.previewMailboxUnlinkUseCase.execute(user.organizationId, id);
+  }
+
+  /**
+   * §9 — "Limpiar asignaciones residuales": explicit admin action to
+   * reconcile a mailbox that is already REVOKED but still shows assignees
+   * (e.g. unlinked before this feature existed, or unlinked without
+   * authorizing removal at the time). Reuses the exact same use case the
+   * unlink flow itself calls after a confirmed REVOKED — never a parallel
+   * removal path. A mailbox with no assignments left is a safe no-op.
+   */
+  @Post(':id/reconcile-assignments')
+  @RequirePermissions('mailboxes.unlink')
+  reconcileAssignments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<RemoveMailboxAssignmentsAfterUnlinkResult> {
+    return this.removeMailboxAssignmentsAfterUnlinkUseCase.execute({
+      organizationId: user.organizationId,
+      mailboxId: id,
+      actorId: user.id,
+    });
   }
 
   /**

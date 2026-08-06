@@ -5,17 +5,38 @@ import { MailboxAssignmentRepository } from '../../domain/mailbox-assignment/mai
 import { MailboxRepository } from '../../domain/mailbox/mailbox.repository';
 import { MAILBOX_MOTOR_PORT, MailboxMotorPort } from '../../domain/mailbox-motor/mailbox-motor-port';
 import { ScheduledEmailRepository } from '../../domain/scheduled-email/scheduled-email.repository';
+import { SequenceExecutionRepository } from '../../domain/sequence-execution/sequence-execution.repository';
+import { SequenceExecutionStatus } from '../../domain/sequence-execution/sequence-execution.entity';
 import { TransactionManager } from '../../domain/persistence/transaction';
 import {
   AUDIT_LOG_REPOSITORY,
   MAILBOX_ASSIGNMENT_REPOSITORY,
   MAILBOX_REPOSITORY,
   SCHEDULED_EMAIL_REPOSITORY,
+  SEQUENCE_EXECUTION_REPOSITORY,
   TRANSACTION_MANAGER,
 } from '../../infrastructure/persistence/tokens';
 import { IDEMPOTENCY_SCOPE, IdempotentOperationService } from '../idempotency/idempotent-operation.service';
 import { hashLogicalPayload } from '../idempotency/payload-canonicalizer';
 import { ClientMailboxVisibilityService } from './client-mailbox-visibility.service';
+import { RemoveMailboxAssignmentsAfterUnlinkUseCase } from './remove-mailbox-assignments-after-unlink.use-case';
+
+/**
+ * §4 — a Gestión in any of these statuses is "activa o transicional" and
+ * blocks a mailbox unlink. STOPPED/COMPLETED/FAILED/REJECTED/DRAFT and the
+ * pre-submission statuses are deliberately excluded — only a Gestión the
+ * motor is actively running or transitioning blocks unlinking; matches the
+ * exact list the task enumerates, distinct from (broader than nothing, but
+ * narrower than) DeleteMailboxUseCase's own NON_TERMINAL_EXECUTION_STATUSES.
+ */
+export const ACTIVE_EXECUTION_STATUSES_BLOCKING_UNLINK: SequenceExecutionStatus[] = [
+  'RUNNING',
+  'PAUSE_REQUESTED',
+  'PAUSED',
+  'RESUME_REQUESTED',
+  'STOP_REQUESTED',
+  'RESTART_REQUESTED',
+];
 
 export interface UnlinkMailboxInput {
   organizationId: string;
@@ -24,6 +45,8 @@ export interface UnlinkMailboxInput {
   actorId: string;
   idempotencyKey: string;
   correlationId?: string;
+  /** §1/§3 — explicit admin authorization to remove this mailbox's assignments once REVOKED is confirmed. Never assumed true from the frontend alone; re-validated by the backend at confirmation time via the persisted `unlinkRemoveAssignments` column. */
+  removeAssignmentsAfterUnlink?: boolean;
 }
 
 export interface UnlinkMailboxResult {
@@ -49,8 +72,10 @@ export class UnlinkMailboxUseCase {
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLogs: AuditLogRepository,
     @Inject(MAILBOX_MOTOR_PORT) private readonly motor: MailboxMotorPort,
     @Inject(MAILBOX_ASSIGNMENT_REPOSITORY) private readonly assignments: MailboxAssignmentRepository,
+    @Inject(SEQUENCE_EXECUTION_REPOSITORY) private readonly sequenceExecutions: SequenceExecutionRepository,
     private readonly idempotency: IdempotentOperationService,
     private readonly clientVisibility: ClientMailboxVisibilityService,
+    private readonly removeAssignmentsAfterUnlink: RemoveMailboxAssignmentsAfterUnlinkUseCase,
   ) {}
 
   async execute(input: UnlinkMailboxInput): Promise<{ result: UnlinkMailboxResult; httpStatus: number }> {
@@ -94,6 +119,19 @@ export class UnlinkMailboxUseCase {
         return { result, mailbox, commandRowId: null, alreadyTerminal: true };
       }
 
+      // §4 — never cancel Gestiones silently from this flow; the admin must
+      // pause/stop them first, through their own dedicated flow.
+      const allExecutions = await this.sequenceExecutions.findAllByOrganization(input.organizationId);
+      const activeExecutions = allExecutions.filter(
+        (execution) =>
+          execution.mailboxId === mailbox.id && ACTIVE_EXECUTION_STATUSES_BLOCKING_UNLINK.includes(execution.status),
+      );
+      if (activeExecutions.length > 0) {
+        throw new ConflictException(
+          'No puedes desvincular esta cuenta porque tiene Gestiones activas. Pausa o detén las Gestiones antes de continuar.',
+        );
+      }
+
       const cancelledJobsCount = await this.scheduledEmails.cancelFutureForMailbox(mailbox.id, input.reason, ctx);
 
       const updated = await this.mailboxes.update(
@@ -103,6 +141,7 @@ export class UnlinkMailboxUseCase {
           unlinkRequestedAt: new Date(),
           unlinkRequestedBy: input.actorId,
           unlinkReason: input.reason,
+          unlinkRemoveAssignments: input.removeAssignmentsAfterUnlink ?? false,
         },
         ctx,
       );
@@ -159,10 +198,34 @@ export class UnlinkMailboxUseCase {
     });
 
     if (alreadyTerminal) {
+      // §9 — reconciliation: a repeat unlink request (necessarily a
+      // different idempotency key, since the first one already resolved)
+      // against an already-REVOKED mailbox can still authorize cleaning up
+      // assignments that a previous unlink never had permission to touch.
+      // Runs in its own transaction, after the no-op read above — never
+      // nested inside it. Idempotent: a mailbox with no assignments left
+      // is a silent no-op (see RemoveMailboxAssignmentsAfterUnlinkUseCase).
+      if (input.removeAssignmentsAfterUnlink) {
+        await this.removeAssignmentsAfterUnlink.execute({
+          organizationId: input.organizationId,
+          mailboxId: mailbox.id,
+          actorId: input.actorId,
+          correlationId: input.correlationId,
+          unlinkRevocationId: mailbox.revocationId,
+        });
+      }
       return { result, httpStatus: 200 };
     }
 
-    return this.confirmWithMotor(input, mailbox.id, mailbox.serverMailboxId!, mailbox.clientId, result, commandRowId!);
+    return this.confirmWithMotor(
+      input,
+      mailbox.id,
+      mailbox.serverMailboxId!,
+      mailbox.clientId,
+      result,
+      commandRowId!,
+      input.removeAssignmentsAfterUnlink ?? false,
+    );
   }
 
   /**
@@ -203,6 +266,10 @@ export class UnlinkMailboxUseCase {
       mailbox.clientId,
       pendingResult,
       null,
+      // Read back from the persisted column — this retry's request body
+      // carries no authorization of its own; the original POST /unlink's
+      // authorization must survive across this later, separate call.
+      mailbox.unlinkRemoveAssignments,
     );
     return result;
   }
@@ -214,6 +281,7 @@ export class UnlinkMailboxUseCase {
     clientId: string | null,
     result: UnlinkMailboxResult,
     commandRowId: string | null,
+    removeAssignmentsAfterUnlink: boolean,
   ): Promise<{ result: UnlinkMailboxResult; httpStatus: number }> {
     const correlationId = input.correlationId ?? `corr_${mailboxId}`;
 
@@ -274,12 +342,28 @@ export class UnlinkMailboxUseCase {
 
       // §10 — a revoked account no longer counts as "a mailbox for this
       // client"; any executive whose visibility was purely derived from
-      // it (never MANUAL) loses that visibility.
+      // it (never MANUAL) loses that visibility. Must run BEFORE the
+      // assignment removal below, which reads the same assignments and
+      // would otherwise find none left to check.
       if (clientId) {
         const assignees = await this.assignments.findByMailbox(mailboxId);
         for (const assignee of assignees) {
           await this.clientVisibility.revokeIfNoRemainingMailbox(input.organizationId, clientId, assignee.userId);
         }
+      }
+
+      // §1/§3/§6 — only now, after the motor has genuinely confirmed
+      // REVOKED, and only when the admin explicitly authorized it upfront.
+      // Never removes anything on a FAILED confirmation (this line is only
+      // reached on the success path).
+      if (removeAssignmentsAfterUnlink) {
+        await this.removeAssignmentsAfterUnlink.execute({
+          organizationId: input.organizationId,
+          mailboxId,
+          actorId: input.actorId,
+          correlationId,
+          unlinkRevocationId: revocation.revocationId,
+        });
       }
 
       return {

@@ -272,6 +272,37 @@ export interface SetMailboxAssigneesPayload {
   secondaryUserIds: string[];
 }
 
+export interface MailboxUnlinkExecutiveSummary {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** Read-only preflight for "Desvincular cuenta" — GET /mailboxes/:id/unlink-preview. */
+export interface MailboxUnlinkPreview {
+  mailboxId: string;
+  email: string;
+  clientName: string | null;
+  domainName: string | null;
+  linkStatus: MailboxLinkStatus;
+  canUnlink: boolean;
+  blockingReasons: string[];
+  primaryExecutive: MailboxUnlinkExecutiveSummary | null;
+  secondaryExecutives: MailboxUnlinkExecutiveSummary[];
+  conversationCount: number;
+  templateCount: number;
+  activeManagements: number;
+  pendingJobs: number;
+  assignmentsToRemove: number;
+}
+
+export interface RemoveMailboxAssignmentsAfterUnlinkResult {
+  mailboxId: string;
+  assignmentsRemoved: number;
+  primaryRemoved: MailboxUnlinkExecutiveSummary | null;
+  secondaryRemoved: MailboxUnlinkExecutiveSummary[];
+}
+
 export interface AssignedMailboxSummary {
   id: string;
   name: string;

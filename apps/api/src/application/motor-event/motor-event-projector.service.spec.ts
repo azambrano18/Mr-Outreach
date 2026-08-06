@@ -142,6 +142,7 @@ describe('MotorEventProjector', () => {
     unlinkRequestedAt: null,
     unlinkRequestedBy: null,
     unlinkReason: null,
+    unlinkRemoveAssignments: false,
     revokedAt: null,
     revocationId: null,
     lastLinkCommandId: null,

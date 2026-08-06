@@ -123,6 +123,8 @@ export interface Mailbox {
   unlinkRequestedAt: Date | null;
   unlinkRequestedBy: string | null;
   unlinkReason: string | null;
+  /** Admin's explicit authorization, captured at unlink-request time, to remove this mailbox's MailboxAssignment rows once REVOKED is confirmed — see RemoveMailboxAssignmentsAfterUnlinkUseCase. */
+  unlinkRemoveAssignments: boolean;
   revokedAt: Date | null;
   revocationId: string | null;
   lastLinkCommandId: string | null;
@@ -198,6 +200,7 @@ export interface UpdateMailboxInput {
   unlinkRequestedAt?: Date | null;
   unlinkRequestedBy?: string | null;
   unlinkReason?: string | null;
+  unlinkRemoveAssignments?: boolean;
   revokedAt?: Date | null;
   revocationId?: string | null;
   lastLinkCommandId?: string | null;

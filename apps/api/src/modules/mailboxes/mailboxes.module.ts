@@ -7,7 +7,9 @@ import { MailboxExecutiveAssignmentValidator } from '../../application/mailboxes
 import { MailboxProvisioningEventApplier } from '../../application/mailboxes/mailbox-provisioning-event-applier';
 import { MailboxProvisioningService } from '../../application/mailboxes/mailbox-provisioning.service';
 import { MailboxesService } from '../../application/mailboxes/mailboxes.service';
+import { PreviewMailboxUnlinkUseCase } from '../../application/mailboxes/preview-mailbox-unlink.use-case';
 import { ReassignMailboxPrimaryExecutiveUseCase } from '../../application/mailboxes/reassign-mailbox-primary-executive.use-case';
+import { RemoveMailboxAssignmentsAfterUnlinkUseCase } from '../../application/mailboxes/remove-mailbox-assignments-after-unlink.use-case';
 import { RetryMailboxAssetCleanupUseCase } from '../../application/mailboxes/retry-mailbox-asset-cleanup.use-case';
 import { UnlinkMailboxUseCase } from '../../application/mailboxes/unlink-mailbox.use-case';
 import { UpdateMailboxConfigurationUseCase } from '../../application/mailboxes/update-mailbox-configuration.use-case';
@@ -53,6 +55,8 @@ import { MeController } from './me.controller';
     LinkMailboxUseCase,
     ReassignMailboxPrimaryExecutiveUseCase,
     UnlinkMailboxUseCase,
+    PreviewMailboxUnlinkUseCase,
+    RemoveMailboxAssignmentsAfterUnlinkUseCase,
     DeleteMailboxUseCase,
     RetryMailboxAssetCleanupUseCase,
   ],
@@ -66,6 +70,8 @@ import { MeController } from './me.controller';
     LinkMailboxUseCase,
     ReassignMailboxPrimaryExecutiveUseCase,
     UnlinkMailboxUseCase,
+    PreviewMailboxUnlinkUseCase,
+    RemoveMailboxAssignmentsAfterUnlinkUseCase,
     DeleteMailboxUseCase,
     RetryMailboxAssetCleanupUseCase,
   ],
