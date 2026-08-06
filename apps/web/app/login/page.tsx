@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import type { AuthenticatedUser } from '@outreach/shared-types';
 import { BrandMark } from '../brand';
+import { getPostLoginDestination } from '../../lib/post-login-destination';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -25,14 +25,21 @@ export default function LoginPage() {
 
       if (!response.ok) {
         setError('Correo o contraseña incorrectos.');
+        setLoading(false);
         return;
       }
 
-      router.push('/dashboard');
-      router.refresh();
+      const { user } = (await response.json()) as { user: AuthenticatedUser };
+      const destination = getPostLoginDestination(user);
+
+      // A full navigation (not router.push) is intentional: it makes the
+      // browser issue a brand-new request that carries the just-set httpOnly
+      // cookie through middleware and the dashboard's Server Components, so
+      // getCurrentUser() and mustChangePassword are evaluated fresh instead
+      // of reusing an RSC tree computed before login.
+      window.location.replace(destination);
     } catch {
       setError('No se pudo contactar la API. Intenta nuevamente.');
-    } finally {
       setLoading(false);
     }
   }

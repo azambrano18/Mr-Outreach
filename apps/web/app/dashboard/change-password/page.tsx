@@ -1,11 +1,9 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import { BrandMark } from '../../brand';
 
 export default function ChangePasswordPage() {
-  const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -26,14 +24,16 @@ export default function ChangePasswordPage() {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setError(body.error ?? 'No se pudo cambiar la contraseña.');
+        setLoading(false);
         return;
       }
 
-      router.push('/dashboard');
-      router.refresh();
+      // Full navigation, not router.push: forces DashboardLayout to query
+      // /auth/me again from scratch and see mustChangePassword=false,
+      // instead of risking a stale RSC tree from before the change.
+      window.location.replace('/dashboard');
     } catch {
       setError('No se pudo contactar la API. Intenta nuevamente.');
-    } finally {
       setLoading(false);
     }
   }
